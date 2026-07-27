@@ -13,6 +13,39 @@ import java.time.Instant;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(com.nexus.site.application.SiteHasBuildingsException.class)
+    public ResponseEntity<ErrorResponse> handleSiteHasBuildingsException(com.nexus.site.application.SiteHasBuildingsException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                ex.getMessage(),
+                Instant.now()
+        );
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException(org.springframework.dao.DataIntegrityViolationException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                "Database constraint violation. The operation could not be completed.",
+                Instant.now()
+        );
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(com.nexus.building.application.BuildingNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleBuildingNotFoundException(com.nexus.building.application.BuildingNotFoundException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                HttpStatus.NOT_FOUND.getReasonPhrase(),
+                ex.getMessage(),
+                Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleSiteNotFoundException(SiteNotFoundException ex) {
         ErrorResponse error = new ErrorResponse(

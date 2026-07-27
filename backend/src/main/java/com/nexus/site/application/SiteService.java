@@ -1,5 +1,6 @@
 package com.nexus.site.application;
 
+import com.nexus.building.persistence.BuildingRepository;
 import com.nexus.site.domain.Site;
 import com.nexus.site.dto.CreateSiteRequest;
 import com.nexus.site.dto.SiteResponse;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -18,14 +20,16 @@ import java.util.stream.Collectors;
 public class SiteService {
 
     private final SiteRepository siteRepository;
+    private final BuildingRepository buildingRepository;
 
-    public SiteService(SiteRepository siteRepository) {
+    public SiteService(SiteRepository siteRepository, BuildingRepository buildingRepository) {
         this.siteRepository = siteRepository;
+        this.buildingRepository = buildingRepository;
     }
 
     @Transactional
     public SiteResponse createSite(CreateSiteRequest request) {
-        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         Site site = new Site(UUID.randomUUID(), request.name(), request.description(), now, now);
         Site savedSite = siteRepository.save(site);
         return mapToResponse(savedSite);
@@ -50,7 +54,7 @@ public class SiteService {
         
         site.setName(request.name());
         site.setDescription(request.description());
-        site.setUpdatedAt(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        site.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
         
         Site updatedSite = siteRepository.save(site);
         return mapToResponse(updatedSite);
@@ -60,6 +64,9 @@ public class SiteService {
     public void deleteSite(UUID id) {
         if (!siteRepository.existsById(id)) {
             throw new SiteNotFoundException(id);
+        }
+        if (buildingRepository.existsBySiteId(id)) {
+            throw new SiteHasBuildingsException(id);
         }
         siteRepository.deleteById(id);
     }

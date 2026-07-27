@@ -52,8 +52,12 @@ class SiteControllerIntegrationTest {
     @Autowired
     private SiteRepository siteRepository;
 
+    @Autowired
+    private com.nexus.building.persistence.BuildingRepository buildingRepository;
+
     @BeforeEach
     void setUp() {
+        buildingRepository.deleteAll();
         siteRepository.deleteAll();
     }
 
@@ -206,5 +210,57 @@ class SiteControllerIntegrationTest {
 
         mockMvc.perform(delete("/api/v1/sites/{id}", nonexistentId))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void testDeleteSite_WithBuildings_Returns409() throws Exception {
+        // Create Site
+        MvcResult createSiteResult = mockMvc.perform(post("/api/v1/sites")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateSiteRequest("Site With Building", null))))
+                .andReturn();
+        SiteResponse site = objectMapper.readValue(createSiteResult.getResponse().getContentAsString(), SiteResponse.class);
+
+        // Create Building under Site
+        String createBuildingPayload = "{\"name\": \"Building 1\", \"description\": \"Desc\"}";
+        mockMvc.perform(post("/api/v1/sites/{siteId}/buildings", site.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBuildingPayload))
+                .andExpect(status().isCreated());
+
+        // Attempt to delete Site, expect 409
+        mockMvc.perform(delete("/api/v1/sites/{id}", site.id()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message").value("Cannot delete Site because it contains Buildings. Site ID: " + site.id()));
+    }
+
+    @Test
+    void testDeleteSite_WithBuildings_DeletedBuildingFirst_Returns204() throws Exception {
+        // Create Site
+        MvcResult createSiteResult = mockMvc.perform(post("/api/v1/sites")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateSiteRequest("Site With Building To Delete", null))))
+                .andReturn();
+        SiteResponse site = objectMapper.readValue(createSiteResult.getResponse().getContentAsString(), SiteResponse.class);
+
+        // Create Building under Site
+        String createBuildingPayload = "{\"name\": \"Building 1\", \"description\": \"Desc\"}";
+        MvcResult createBuildingResult = mockMvc.perform(post("/api/v1/sites/{siteId}/buildings", site.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBuildingPayload))
+                .andReturn();
+        
+        // Extract Building ID (using string parsing to avoid coupling to BuildingResponse in this class)
+        String buildingResponseStr = createBuildingResult.getResponse().getContentAsString();
+        String buildingIdStr = buildingResponseStr.split("\"id\":\"")[1].split("\"")[0];
+
+        // Delete Building
+        mockMvc.perform(delete("/api/v1/buildings/{id}", buildingIdStr))
+                .andExpect(status().isNoContent());
+
+        // Delete Site, expect 204
+        mockMvc.perform(delete("/api/v1/sites/{id}", site.id()))
+                .andExpect(status().isNoContent());
     }
 }

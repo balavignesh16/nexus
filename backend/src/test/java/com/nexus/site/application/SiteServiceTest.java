@@ -1,5 +1,6 @@
 package com.nexus.site.application;
 
+import com.nexus.building.persistence.BuildingRepository;
 import com.nexus.site.domain.Site;
 import com.nexus.site.dto.CreateSiteRequest;
 import com.nexus.site.dto.SiteResponse;
@@ -28,11 +29,14 @@ class SiteServiceTest {
     @Mock
     private SiteRepository siteRepository;
 
+    @Mock
+    private BuildingRepository buildingRepository;
+
     private SiteService siteService;
 
     @BeforeEach
     void setUp() {
-        siteService = new SiteService(siteRepository);
+        siteService = new SiteService(siteRepository, buildingRepository);
     }
 
     @Test
@@ -111,16 +115,30 @@ class SiteServiceTest {
     }
 
     @Test
-    void deleteSite_shouldCallRepository_whenSiteExists() {
+    void deleteSite_shouldCallRepository_whenSiteExists_andHasNoBuildings() {
         // Arrange
         UUID id = UUID.randomUUID();
         when(siteRepository.existsById(id)).thenReturn(true);
+        when(buildingRepository.existsBySiteId(id)).thenReturn(false);
 
         // Act
         siteService.deleteSite(id);
 
         // Assert
         verify(siteRepository).deleteById(id);
+    }
+
+    @Test
+    void deleteSite_shouldThrowException_whenSiteHasBuildings() {
+        // Arrange
+        UUID id = UUID.randomUUID();
+        when(siteRepository.existsById(id)).thenReturn(true);
+        when(buildingRepository.existsBySiteId(id)).thenReturn(true);
+
+        // Act & Assert
+        assertThatThrownBy(() -> siteService.deleteSite(id))
+                .isInstanceOf(SiteHasBuildingsException.class);
+        verify(siteRepository, never()).deleteById(id);
     }
 
     @Test
