@@ -46,3 +46,12 @@ Prerequisites: Docker and Docker Compose.
 5. **Reset Data:** Run `docker compose -f infrastructure/docker-compose.yml down -v`
 
 > **Security Warning:** The Mosquitto MQTT broker is currently configured with `allow_anonymous true`. This is strictly for trusted local development and simulation purposes. Before any real physical hardware (e.g., ESP32) communicates outside a trusted local environment, MQTT authentication must be enabled.
+
+## Frontend Development
+
+**Prerequisites:** Node.js (v22+)
+
+1. **Install Dependencies:** `npm ci` (inside the `frontend/` directory)
+2. **Start Dev Server:** `npm run dev`
+3. **Build:** `npm run build`
+4. **Lint & Test:** `npm run lint` and `npm run test`
