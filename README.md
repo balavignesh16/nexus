@@ -55,3 +55,14 @@ Prerequisites: Docker and Docker Compose.
 2. **Start Dev Server:** `npm run dev`
 3. **Build:** `npm run build`
 4. **Lint & Test:** `npm run lint` and `npm run test`
+
+## Simulator Development
+
+**Prerequisites:** Python 3.11+
+
+1. **Setup Virtual Environment:** `python -m venv .venv` (inside the `simulator/` directory)
+2. **Activate:** `.venv\Scripts\Activate.ps1` (Windows) or `source .venv/bin/activate` (Mac/Linux)
+3. **Install Dependencies:** `pip install -e .[dev]`
+4. **Run Simulator:** `python -m nexus_simulator`
+5. **Run Tests & Linting:** `pytest`, `ruff format .`, `ruff check .`
+*(Note: MQTT and Sensor simulation are deferred to M3)*

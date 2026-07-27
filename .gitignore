@@ -36,6 +36,7 @@ venv/
 .venv/
 env/
 .pytest_cache/
+*.egg-info/
 
 # Infrastructure
 infrastructure/data/
