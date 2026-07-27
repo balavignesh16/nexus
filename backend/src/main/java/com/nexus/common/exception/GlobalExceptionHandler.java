@@ -35,6 +35,28 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(com.nexus.building.application.BuildingHasSpacesException.class)
+    public ResponseEntity<ErrorResponse> handleBuildingHasSpacesException(com.nexus.building.application.BuildingHasSpacesException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                ex.getMessage(),
+                Instant.now()
+        );
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(com.nexus.space.application.SpaceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleSpaceNotFoundException(com.nexus.space.application.SpaceNotFoundException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                HttpStatus.NOT_FOUND.getReasonPhrase(),
+                ex.getMessage(),
+                Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(com.nexus.building.application.BuildingNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleBuildingNotFoundException(com.nexus.building.application.BuildingNotFoundException ex) {
         ErrorResponse error = new ErrorResponse(

@@ -8,6 +8,7 @@ import com.nexus.building.persistence.BuildingRepository;
 import com.nexus.site.application.SiteNotFoundException;
 import com.nexus.site.domain.Site;
 import com.nexus.site.persistence.SiteRepository;
+import com.nexus.space.persistence.SpaceRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +24,12 @@ public class BuildingService {
 
     private final BuildingRepository buildingRepository;
     private final SiteRepository siteRepository;
+    private final SpaceRepository spaceRepository;
 
-    public BuildingService(BuildingRepository buildingRepository, SiteRepository siteRepository) {
+    public BuildingService(BuildingRepository buildingRepository, SiteRepository siteRepository, SpaceRepository spaceRepository) {
         this.buildingRepository = buildingRepository;
         this.siteRepository = siteRepository;
+        this.spaceRepository = spaceRepository;
     }
 
     @Transactional
@@ -74,6 +77,9 @@ public class BuildingService {
     public void deleteBuilding(UUID id) {
         if (!buildingRepository.existsById(id)) {
             throw new BuildingNotFoundException(id);
+        }
+        if (spaceRepository.existsByBuildingId(id)) {
+            throw new BuildingHasSpacesException(id);
         }
         buildingRepository.deleteById(id);
     }

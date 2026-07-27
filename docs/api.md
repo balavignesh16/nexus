@@ -45,4 +45,28 @@ A `Building` represents a physical structure belonging to exactly one `Site`.
 - `GET /api/v1/sites/{siteId}/buildings` - List all Buildings for a Site
 - `GET /api/v1/buildings/{buildingId}` - Get a Building by ID
 - `PUT /api/v1/buildings/{buildingId}` - Update a Building entirely
-- `DELETE /api/v1/buildings/{buildingId}` - Delete a Building
+- `DELETE /api/v1/buildings/{buildingId}` - Delete a Building (will return 409 Conflict if Spaces exist)
+
+## Spaces API
+
+A `Space` represents a physical area belonging to exactly one `Building`.
+
+### Object Schema
+```json
+{
+  "id": "334f5678-f90c-23e4-b567-537725285000",
+  "buildingId": "223e4567-e89b-12d3-a456-426614174000",
+  "name": "Laboratory 101",
+  "description": "Main physics lab.",
+  "createdAt": "2026-07-27T10:00:00Z",
+  "updatedAt": "2026-07-27T10:00:00Z"
+}
+```
+
+### Endpoints
+
+- `POST /api/v1/buildings/{buildingId}/spaces` - Create a new Space under a Building
+- `GET /api/v1/buildings/{buildingId}/spaces` - List all Spaces for a Building
+- `GET /api/v1/spaces/{spaceId}` - Get a Space by ID
+- `PUT /api/v1/spaces/{spaceId}` - Update a Space entirely
+- `DELETE /api/v1/spaces/{spaceId}` - Delete a Space

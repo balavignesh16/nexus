@@ -50,13 +50,17 @@ class SiteControllerIntegrationTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private SiteRepository siteRepository;
+    private com.nexus.building.persistence.BuildingRepository buildingRepository;
 
     @Autowired
-    private com.nexus.building.persistence.BuildingRepository buildingRepository;
+    private com.nexus.space.persistence.SpaceRepository spaceRepository;
+
+    @Autowired
+    private SiteRepository siteRepository;
 
     @BeforeEach
     void setUp() {
+        spaceRepository.deleteAll();
         buildingRepository.deleteAll();
         siteRepository.deleteAll();
     }

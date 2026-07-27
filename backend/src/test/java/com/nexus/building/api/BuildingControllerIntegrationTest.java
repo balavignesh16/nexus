@@ -57,11 +57,15 @@ class BuildingControllerIntegrationTest {
 
     @Autowired
     private SiteRepository siteRepository;
+    
+    @Autowired
+    private com.nexus.space.persistence.SpaceRepository spaceRepository;
 
     private Site testSite;
 
     @BeforeEach
     void setUp() {
+        spaceRepository.deleteAll();
         buildingRepository.deleteAll();
         siteRepository.deleteAll();
 
@@ -224,5 +228,49 @@ class BuildingControllerIntegrationTest {
     void testDeleteBuilding_NonexistentBuilding_Returns404() throws Exception {
         mockMvc.perform(delete("/api/v1/buildings/{id}", UUID.randomUUID()))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void testDeleteBuilding_WithSpaces_Returns409() throws Exception {
+        MvcResult createBuildingResult = mockMvc.perform(post("/api/v1/sites/{siteId}/buildings", testSite.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateBuildingRequest("Building With Space", null))))
+                .andReturn();
+        BuildingResponse building = objectMapper.readValue(createBuildingResult.getResponse().getContentAsString(), BuildingResponse.class);
+
+        String createSpacePayload = "{\"name\": \"Space 1\", \"description\": \"Desc\"}";
+        mockMvc.perform(post("/api/v1/buildings/{buildingId}/spaces", building.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createSpacePayload))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/api/v1/buildings/{id}", building.id()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message").value("Cannot delete Building because it contains Spaces. Building ID: " + building.id()));
+    }
+
+    @Test
+    void testDeleteBuilding_WithSpaces_DeletedSpaceFirst_Returns204() throws Exception {
+        MvcResult createBuildingResult = mockMvc.perform(post("/api/v1/sites/{siteId}/buildings", testSite.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateBuildingRequest("Building With Space To Delete", null))))
+                .andReturn();
+        BuildingResponse building = objectMapper.readValue(createBuildingResult.getResponse().getContentAsString(), BuildingResponse.class);
+
+        String createSpacePayload = "{\"name\": \"Space 1\", \"description\": \"Desc\"}";
+        MvcResult createSpaceResult = mockMvc.perform(post("/api/v1/buildings/{buildingId}/spaces", building.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createSpacePayload))
+                .andReturn();
+        
+        String spaceResponseStr = createSpaceResult.getResponse().getContentAsString();
+        String spaceIdStr = spaceResponseStr.split("\"id\":\"")[1].split("\"")[0];
+
+        mockMvc.perform(delete("/api/v1/spaces/{id}", spaceIdStr))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(delete("/api/v1/buildings/{id}", building.id()))
+                .andExpect(status().isNoContent());
     }
 }

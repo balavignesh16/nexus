@@ -8,6 +8,7 @@ import com.nexus.building.persistence.BuildingRepository;
 import com.nexus.site.application.SiteNotFoundException;
 import com.nexus.site.domain.Site;
 import com.nexus.site.persistence.SiteRepository;
+import com.nexus.space.persistence.SpaceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,11 +34,14 @@ class BuildingServiceTest {
     @Mock
     private SiteRepository siteRepository;
 
+    @Mock
+    private SpaceRepository spaceRepository;
+
     private BuildingService buildingService;
 
     @BeforeEach
     void setUp() {
-        buildingService = new BuildingService(buildingRepository, siteRepository);
+        buildingService = new BuildingService(buildingRepository, siteRepository, spaceRepository);
     }
 
     @Test
@@ -139,13 +143,25 @@ class BuildingServiceTest {
     }
 
     @Test
-    void deleteBuilding_shouldCallRepository_whenExists() {
+    void deleteBuilding_shouldCallRepository_whenExists_andHasNoSpaces() {
         UUID id = UUID.randomUUID();
         when(buildingRepository.existsById(id)).thenReturn(true);
+        when(spaceRepository.existsByBuildingId(id)).thenReturn(false);
 
         buildingService.deleteBuilding(id);
 
         verify(buildingRepository).deleteById(id);
+    }
+
+    @Test
+    void deleteBuilding_shouldThrowException_whenBuildingHasSpaces() {
+        UUID id = UUID.randomUUID();
+        when(buildingRepository.existsById(id)).thenReturn(true);
+        when(spaceRepository.existsByBuildingId(id)).thenReturn(true);
+
+        assertThatThrownBy(() -> buildingService.deleteBuilding(id))
+                .isInstanceOf(BuildingHasSpacesException.class);
+        verify(buildingRepository, never()).deleteById(id);
     }
 
     @Test
