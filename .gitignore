@@ -1,0 +1,42 @@
+# NEXUS - Monorepo Gitignore
+
+# OS / General
+.DS_Store
+Thumbs.db
+.env
+.env.local
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Java / Spring Boot
+target/
+build/
+*.class
+*.jar
+*.war
+.gradle/
+bin/
+out/
+
+# Frontend / Node.js
+node_modules/
+dist/
+.npm/
+.eslintcache
+
+# Python (Simulator)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# Infrastructure
+infrastructure/data/
+infrastructure/mosquitto/log/
