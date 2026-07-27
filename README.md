@@ -33,3 +33,16 @@ The framework is currently in its initial foundation phase. No functional capabi
 NEXUS follows a strict **trunk-based development** workflow:
 - **Test-Before-Commit:** Code must compile, pass linting, pass all automated tests, and meet acceptance criteria before a Git commit is created.
 - **Conventional Commits:** All commits must follow the conventional commit format (e.g., `feat(module): description`, `fix(module): description`).
+
+## Local Development
+Prerequisites: Docker and Docker Compose.
+
+1. **Configuration:** Copy `.env.example` to `.env` in the root directory.
+2. **Start Infrastructure:** Run `docker compose -f infrastructure/docker-compose.yml --env-file .env up -d`
+3. **Service Ports:** 
+   - PostgreSQL is exposed on port 5432.
+   - MQTT (Mosquitto) is exposed on port 1883.
+4. **Shutdown:** Run `docker compose -f infrastructure/docker-compose.yml stop`
+5. **Reset Data:** Run `docker compose -f infrastructure/docker-compose.yml down -v`
+
+> **Security Warning:** The Mosquitto MQTT broker is currently configured with `allow_anonymous true`. This is strictly for trusted local development and simulation purposes. Before any real physical hardware (e.g., ESP32) communicates outside a trusted local environment, MQTT authentication must be enabled.
