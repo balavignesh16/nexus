@@ -1,4 +1,4 @@
-﻿package com.nexus.common.config;
+package com.nexus.common.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;

@@ -70,3 +70,34 @@ A `Space` represents a physical area belonging to exactly one `Building`.
 - `GET /api/v1/spaces/{spaceId}` - Get a Space by ID
 - `PUT /api/v1/spaces/{spaceId}` - Update a Space entirely
 - `DELETE /api/v1/spaces/{spaceId}` - Delete a Space
+
+## Devices API
+
+A `Device` represents a physical IoT device belonging to exactly one `Space`.
+
+### Object Schema
+```json
+{
+  "id": "445g6789-g01d-34f5-c678-648836396111",
+  "spaceId": "334f5678-f90c-23e4-b567-537725285000",
+  "name": "Temperature Sensor 1",
+  "deviceType": "TEMPERATURE_SENSOR",
+  "manufacturer": "Acme Corp",
+  "model": "T-100",
+  "serialNumber": "SN-12345",
+  "status": "REGISTERED",
+  "description": "Main lab sensor.",
+  "createdAt": "2026-07-27T10:00:00Z",
+  "updatedAt": "2026-07-27T10:00:00Z",
+  "createdBy": "system",
+  "updatedBy": "system"
+}
+```
+
+### Endpoints
+
+- `POST /api/v1/spaces/{spaceId}/devices` - Create a new Device under a Space
+- `GET /api/v1/spaces/{spaceId}/devices` - List all Devices for a Space
+- `GET /api/v1/devices/{deviceId}` - Get a Device by ID
+- `PUT /api/v1/devices/{deviceId}` - Update a Device entirely
+- `DELETE /api/v1/devices/{deviceId}` - Delete a Device

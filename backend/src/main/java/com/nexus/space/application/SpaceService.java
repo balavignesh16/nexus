@@ -8,6 +8,8 @@ import com.nexus.space.dto.CreateSpaceRequest;
 import com.nexus.space.dto.SpaceResponse;
 import com.nexus.space.dto.UpdateSpaceRequest;
 import com.nexus.space.persistence.SpaceRepository;
+import com.nexus.device.domain.DeviceRepository;
+import com.nexus.space.domain.exception.SpaceHasDevicesException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +25,12 @@ public class SpaceService {
 
     private final SpaceRepository spaceRepository;
     private final BuildingRepository buildingRepository;
+    private final DeviceRepository deviceRepository;
 
-    public SpaceService(SpaceRepository spaceRepository, BuildingRepository buildingRepository) {
+    public SpaceService(SpaceRepository spaceRepository, BuildingRepository buildingRepository, DeviceRepository deviceRepository) {
         this.spaceRepository = spaceRepository;
         this.buildingRepository = buildingRepository;
+        this.deviceRepository = deviceRepository;
     }
 
     @Transactional
@@ -74,6 +78,9 @@ public class SpaceService {
     public void deleteSpace(UUID id) {
         if (!spaceRepository.existsById(id)) {
             throw new SpaceNotFoundException(id);
+        }
+        if (deviceRepository.existsBySpaceId(id)) {
+            throw new SpaceHasDevicesException(id);
         }
         spaceRepository.deleteById(id);
     }

@@ -1,6 +1,9 @@
 package com.nexus.common.exception;
 
 import com.nexus.site.application.SiteNotFoundException;
+import com.nexus.device.domain.exception.DeviceNotFoundException;
+import com.nexus.device.domain.exception.DeviceSerialNumberExistsException;
+import com.nexus.space.domain.exception.SpaceHasDevicesException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -104,5 +107,38 @@ public class GlobalExceptionHandler {
             Instant.now()
         );
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(DeviceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceNotFoundException(DeviceNotFoundException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.NOT_FOUND.value(),
+            HttpStatus.NOT_FOUND.getReasonPhrase(),
+            ex.getMessage(),
+            Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(DeviceSerialNumberExistsException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceSerialNumberExistsException(DeviceSerialNumberExistsException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.CONFLICT.value(),
+            HttpStatus.CONFLICT.getReasonPhrase(),
+            ex.getMessage(),
+            Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(SpaceHasDevicesException.class)
+    public ResponseEntity<ErrorResponse> handleSpaceHasDevicesException(SpaceHasDevicesException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.CONFLICT.value(),
+            HttpStatus.CONFLICT.getReasonPhrase(),
+            ex.getMessage(),
+            Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
     }
 }

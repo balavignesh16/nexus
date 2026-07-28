@@ -9,6 +9,8 @@ import com.nexus.space.dto.CreateSpaceRequest;
 import com.nexus.space.dto.SpaceResponse;
 import com.nexus.space.dto.UpdateSpaceRequest;
 import com.nexus.space.persistence.SpaceRepository;
+import com.nexus.device.domain.DeviceRepository;
+import com.nexus.space.domain.exception.SpaceHasDevicesException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,12 +35,15 @@ class SpaceServiceTest {
 
     @Mock
     private BuildingRepository buildingRepository;
+    
+    @Mock
+    private DeviceRepository deviceRepository;
 
     private SpaceService spaceService;
 
     @BeforeEach
     void setUp() {
-        spaceService = new SpaceService(spaceRepository, buildingRepository);
+        spaceService = new SpaceService(spaceRepository, buildingRepository, deviceRepository);
     }
 
     @Test
@@ -144,13 +149,25 @@ class SpaceServiceTest {
     }
 
     @Test
-    void deleteSpace_shouldCallRepository_whenExists() {
+    void deleteSpace_shouldCallRepository_whenExistsAndHasNoDevices() {
         UUID id = UUID.randomUUID();
         when(spaceRepository.existsById(id)).thenReturn(true);
+        when(deviceRepository.existsBySpaceId(id)).thenReturn(false);
 
         spaceService.deleteSpace(id);
 
         verify(spaceRepository).deleteById(id);
+    }
+    
+    @Test
+    void deleteSpace_shouldThrowException_whenHasDevices() {
+        UUID id = UUID.randomUUID();
+        when(spaceRepository.existsById(id)).thenReturn(true);
+        when(deviceRepository.existsBySpaceId(id)).thenReturn(true);
+
+        assertThatThrownBy(() -> spaceService.deleteSpace(id))
+                .isInstanceOf(SpaceHasDevicesException.class);
+        verify(spaceRepository, never()).deleteById(any());
     }
 
     @Test
