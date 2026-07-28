@@ -109,7 +109,7 @@ export const BuildingDetailsPage: React.FC = () => {
           <tbody>
             {spaces.map(s => (
               <tr key={s.id}>
-                <td style={{ borderBottom: '1px solid #eee', padding: '10px' }}>{s.name}</td>
+                <td style={{ borderBottom: '1px solid #eee', padding: '10px' }}><Link to={`/spaces/${s.id}`}>{s.name}</Link></td>
                 <td style={{ borderBottom: '1px solid #eee', padding: '10px' }}>{s.description}</td>
                 <td style={{ borderBottom: '1px solid #eee', padding: '10px' }}>
                   <button onClick={() => openEditModal(s)} style={{ marginRight: '10px', cursor: 'pointer' }}>Edit</button>
