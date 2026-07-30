@@ -39,6 +39,13 @@ public class DeviceService {
     }
 
     @Transactional(readOnly = true)
+    public List<DeviceResponse> getActiveDevices() {
+        return deviceRepository.findByStatus(com.nexus.device.domain.DeviceStatus.ACTIVE).stream()
+                .map(DeviceResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public DeviceResponse getDevice(UUID id) {
         return deviceRepository.findById(id)
                 .map(DeviceResponse::from)

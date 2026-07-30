@@ -15,9 +15,13 @@ def test_config_initialization():
     assert config.is_initialized is True
 
 
+from unittest.mock import patch
+
 def test_main_execution(capsys):
     """Verify that the main entry point executes and outputs correctly."""
-    main()
-    captured = capsys.readouterr()
-    assert "NEXUS Simulator Foundation Initialized" in captured.out
-    assert "Status: Active" in captured.out
+    with patch('nexus_simulator.core.SimulatorScheduler.run') as mock_run:
+        main()
+        captured = capsys.readouterr()
+        assert "NEXUS Simulator Foundation Initialized" in captured.out
+        assert "Status: Active" in captured.out
+        mock_run.assert_called_once()

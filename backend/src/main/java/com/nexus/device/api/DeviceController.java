@@ -26,6 +26,11 @@ public class DeviceController {
         return deviceService.getDevicesBySpaceId(spaceId);
     }
 
+    @GetMapping("/devices/active")
+    public List<DeviceResponse> getActiveDevices() {
+        return deviceService.getActiveDevices();
+    }
+
     @GetMapping("/devices/{id}")
     public DeviceResponse getDevice(@PathVariable UUID id) {
         return deviceService.getDevice(id);
