@@ -6,6 +6,7 @@ import com.nexus.twin.domain.DigitalTwinRegistry;
 import com.nexus.twin.domain.TwinUpdatedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -20,9 +21,11 @@ public class DigitalTwinService {
     private static final Logger log = LoggerFactory.getLogger(DigitalTwinService.class);
 
     private final DigitalTwinRegistry registry;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public DigitalTwinService(DigitalTwinRegistry registry) {
+    public DigitalTwinService(DigitalTwinRegistry registry, ApplicationEventPublisher eventPublisher) {
         this.registry = registry;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -60,14 +63,14 @@ public class DigitalTwinService {
 
         registry.put(newTwin);
         
-        // Placeholder for future M6 event publishing
         TwinUpdatedEvent event = new TwinUpdatedEvent(
                 request.deviceId(),
                 now,
                 currentTwinOpt.orElse(null),
                 newTwin
         );
-        log.debug("Twin updated for device {}. (Event created but not published)", request.deviceId());
+        eventPublisher.publishEvent(event);
+        log.debug("Twin updated for device {}. TwinUpdatedEvent published.", request.deviceId());
     }
 
     public Optional<DigitalTwin> getTwin(UUID deviceId) {
