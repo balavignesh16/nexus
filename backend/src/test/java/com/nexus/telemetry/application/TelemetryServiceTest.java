@@ -8,6 +8,7 @@ import com.nexus.space.domain.Space;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.api.dto.TelemetryResponse;
 import com.nexus.telemetry.domain.TelemetryRepository;
+import com.nexus.twin.application.DigitalTwinService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -24,13 +25,15 @@ class TelemetryServiceTest {
 
     private TelemetryRepository telemetryRepository;
     private DeviceRepository deviceRepository;
+    private DigitalTwinService digitalTwinService;
     private TelemetryService telemetryService;
 
     @BeforeEach
     void setUp() {
         telemetryRepository = mock(TelemetryRepository.class);
         deviceRepository = mock(DeviceRepository.class);
-        telemetryService = new TelemetryService(telemetryRepository, deviceRepository);
+        digitalTwinService = mock(DigitalTwinService.class);
+        telemetryService = new TelemetryService(telemetryRepository, deviceRepository, digitalTwinService);
     }
 
     @Test
@@ -50,6 +53,7 @@ class TelemetryServiceTest {
         assertEquals(deviceId, response.deviceId());
 
         verify(telemetryRepository, times(1)).save(any());
+        verify(digitalTwinService, times(1)).updateTwin(request);
     }
 
     @Test

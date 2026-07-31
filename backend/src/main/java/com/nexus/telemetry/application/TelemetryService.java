@@ -7,6 +7,7 @@ import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.api.dto.TelemetryResponse;
 import com.nexus.telemetry.domain.TelemetryRecord;
 import com.nexus.telemetry.domain.TelemetryRepository;
+import com.nexus.twin.application.DigitalTwinService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,10 +19,12 @@ public class TelemetryService {
 
     private final TelemetryRepository telemetryRepository;
     private final DeviceRepository deviceRepository;
+    private final DigitalTwinService digitalTwinService;
 
-    public TelemetryService(TelemetryRepository telemetryRepository, DeviceRepository deviceRepository) {
+    public TelemetryService(TelemetryRepository telemetryRepository, DeviceRepository deviceRepository, DigitalTwinService digitalTwinService) {
         this.telemetryRepository = telemetryRepository;
         this.deviceRepository = deviceRepository;
+        this.digitalTwinService = digitalTwinService;
     }
 
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
@@ -42,6 +45,9 @@ public class TelemetryService {
         );
 
         telemetryRepository.save(record);
+        
+        // Update Digital Twin
+        digitalTwinService.updateTwin(request);
 
         return TelemetryResponse.from(record);
     }
