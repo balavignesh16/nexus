@@ -84,8 +84,8 @@ class TelemetryQueryServiceTest {
         TelemetryQuery query = new TelemetryQuery(deviceId, null, null, 2, "desc");
 
         assertThatThrownBy(() -> service.queryTelemetry(query))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Device not found");
+                .isInstanceOf(com.nexus.shared.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("Device");
     }
 
     @Test

@@ -45,6 +45,10 @@ public class RuleRegistry {
         return new ArrayList<>(rules.values());
     }
 
+    public void clear() {
+        rules.clear();
+    }
+
     public List<Rule> listEnabledOrderedByPriority() {
         return rules.values().stream()
                 .filter(Rule::enabled)

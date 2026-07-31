@@ -77,7 +77,9 @@ class TelemetryServiceTest {
 
         TelemetryRequest request = new TelemetryRequest(deviceId, Instant.now(), "TEMPERATURE_SENSOR", 22.5, "CELSIUS");
 
-        assertThrows(IllegalArgumentException.class, () -> telemetryService.processTelemetry(request));
+        assertThrows(com.nexus.shared.exception.ResourceNotFoundException.class, () -> {
+            telemetryService.processTelemetry(request);
+        });
         verify(telemetryRepository, never()).save(any());
     }
 }

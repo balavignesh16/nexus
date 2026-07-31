@@ -144,7 +144,7 @@ class SiteControllerIntegrationTest {
         mockMvc.perform(get("/api/v1/sites/{id}", nonexistentId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
-                .andExpect(jsonPath("$.message").value("Site not found with ID: " + nonexistentId));
+                .andExpect(jsonPath("$.message").value("Site not found with identifier: " + nonexistentId));
     }
 
     @Test

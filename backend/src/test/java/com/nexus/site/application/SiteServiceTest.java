@@ -86,7 +86,7 @@ class SiteServiceTest {
         // Act & Assert
         assertThatThrownBy(() -> siteService.getSite(id))
                 .isInstanceOf(SiteNotFoundException.class)
-                .hasMessageContaining("Site not found with ID: " + id);
+                .hasMessageContaining("Site not found with identifier: " + id);
     }
 
     @Test
