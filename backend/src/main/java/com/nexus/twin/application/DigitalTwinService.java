@@ -63,11 +63,14 @@ public class DigitalTwinService {
 
         registry.put(newTwin);
         
+        String correlationId = UUID.randomUUID().toString();
+        
         TwinUpdatedEvent event = new TwinUpdatedEvent(
                 request.deviceId(),
                 now,
                 currentTwinOpt.orElse(null),
-                newTwin
+                newTwin,
+                correlationId
         );
         eventPublisher.publishEvent(event);
         log.debug("Twin updated for device {}. TwinUpdatedEvent published.", request.deviceId());

@@ -6,5 +6,6 @@ import java.util.UUID;
 public record RuleMatchedEvent(
     UUID matchId,
     Instant timestamp,
-    RuleEvaluationResult result
+    RuleEvaluationResult result,
+    String correlationId
 ) {}

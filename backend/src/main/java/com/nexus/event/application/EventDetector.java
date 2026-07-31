@@ -61,7 +61,8 @@ public class EventDetector {
                             "value", current.latestValue(),
                             "unit", current.latestUnit()
                     ),
-                    "INFO"
+                    "INFO",
+                    twinEvent.correlationId()
             ));
         }
 
@@ -77,7 +78,8 @@ public class EventDetector {
                         "value", current.latestValue(),
                         "unit", current.latestUnit()
                 ),
-                "INFO"
+                "INFO",
+                twinEvent.correlationId()
         ));
 
         // 3. SENSOR_VALUE_CHANGED
@@ -96,7 +98,8 @@ public class EventDetector {
                                 "currentValue", current.latestValue(),
                                 "unit", current.latestUnit()
                         ),
-                        "INFO"
+                        "INFO",
+                        twinEvent.correlationId()
                 ));
             }
         }

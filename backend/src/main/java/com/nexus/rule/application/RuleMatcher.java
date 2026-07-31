@@ -12,6 +12,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -27,12 +28,14 @@ public class RuleMatcher implements EventListener {
     private final RuleRegistry ruleRegistry;
     private final RuleEvaluator ruleEvaluator;
     private final BoundedRuleMatchStore matchStore;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
-    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore) {
+    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore, ApplicationEventPublisher applicationEventPublisher) {
         this.eventDispatcher = eventDispatcher;
         this.ruleRegistry = ruleRegistry;
         this.ruleEvaluator = ruleEvaluator;
         this.matchStore = matchStore;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @PostConstruct
@@ -56,10 +59,11 @@ public class RuleMatcher implements EventListener {
                     RuleMatchedEvent matchedEvent = new RuleMatchedEvent(
                             UUID.randomUUID(),
                             Instant.now(),
-                            result
+                            result,
+                            event.correlationId()
                     );
                     matchStore.add(matchedEvent);
-                    // In future milestones (M8, M9), we'll dispatch this event to Action Executors.
+                    applicationEventPublisher.publishEvent(matchedEvent);
                 }
             } catch (Exception e) {
                 log.error("Failed to evaluate rule {} against event {}", rule.ruleId(), event.eventId(), e);

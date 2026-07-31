@@ -7,5 +7,6 @@ public record TwinUpdatedEvent(
     UUID deviceId,
     Instant eventTime,
     DigitalTwin previousState,
-    DigitalTwin currentState
+    DigitalTwin currentState,
+    String correlationId
 ) {}

@@ -11,5 +11,6 @@ public record DomainEvent(
     Instant timestamp,
     String source,
     Map<String, Object> payload,
-    String severity
+    String severity,
+    String correlationId
 ) {}
