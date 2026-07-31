@@ -1,31 +1,33 @@
-from typing import Protocol
-
+from typing import Protocol, Tuple
+import time
 
 class TelemetryPublisher(Protocol):
-    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> None:
+    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> Tuple[bool, float]:
         ...
 
 
 class ConsolePublisher:
     """Logs telemetry to the console."""
 
-    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> None:
+    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> Tuple[bool, float]:
+        start = time.time()
         print(f"[{device_id}] {sensor_type}: {value} {unit}")
+        return True, (time.time() - start) * 1000
 
 
 class HTTPPublisher:
-    """Stub for HTTP Publisher (Deferred to M3.2)."""
+    """HTTP Publisher for Telemetry."""
 
     def __init__(self, backend_url: str):
         self.backend_url = backend_url
 
-    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> None:
+    def publish(self, device_id: str, sensor_type: str, value: any, unit: str) -> Tuple[bool, float]:
         import urllib.request
         import json
-        
-        url = f"{self.backend_url}/telemetry"
-        # The timestamp is generated as ISO8601 string compatible with Java Instant
         import datetime
+        
+        start_time = time.time()
+        url = f"{self.backend_url}/telemetry"
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         payload = {
@@ -41,7 +43,13 @@ class HTTPPublisher:
         
         try:
             with urllib.request.urlopen(req, timeout=5.0) as response:
-                if response.status != 201:
+                latency = (time.time() - start_time) * 1000
+                if response.status == 201:
+                    return True, latency
+                else:
                     print(f"[{device_id}] Failed to ingest telemetry. HTTP {response.status}")
+                    return False, latency
         except Exception as e:
+            latency = (time.time() - start_time) * 1000
             print(f"[{device_id}] HTTPPublisher Error: {e}")
+            return False, latency
