@@ -28,4 +28,25 @@ public class InMemoryTelemetryRepository implements TelemetryRepository {
                 .limit(limit)
                 .collect(Collectors.toList());
     }
+    @Override
+    public List<TelemetryRecord> query(com.nexus.telemetry.domain.TelemetryQuery query) {
+        java.util.stream.Stream<TelemetryRecord> stream = queue.stream()
+                .filter(r -> r.getDeviceId().equals(query.deviceId()));
+
+        if (query.after() != null) {
+            stream = stream.filter(r -> r.getTimestamp().isAfter(query.after()));
+        }
+        if (query.before() != null) {
+            stream = stream.filter(r -> r.getTimestamp().isBefore(query.before()));
+        }
+
+        java.util.Comparator<TelemetryRecord> comparator = java.util.Comparator.comparing(TelemetryRecord::getTimestamp);
+        if ("desc".equalsIgnoreCase(query.sortDirection())) {
+            comparator = comparator.reversed();
+        }
+
+        return stream.sorted(comparator)
+                .limit(query.limit())
+                .collect(Collectors.toList());
+    }
 }

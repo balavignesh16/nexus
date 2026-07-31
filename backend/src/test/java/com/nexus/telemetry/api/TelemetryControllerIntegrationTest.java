@@ -137,4 +137,38 @@ class TelemetryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].value").value(25.0));
     }
+
+    @Test
+    void getDeviceTelemetry_Success() throws Exception {
+        TelemetryRequest req = new TelemetryRequest(
+                activeDevice.getId(), Instant.now(), "TEMPERATURE_SENSOR", 22.5, "CELSIUS"
+        );
+
+        mockMvc.perform(post("/api/v1/telemetry")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/devices/" + activeDevice.getId() + "/telemetry?limit=10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.records[0].value").value(22.5))
+                .andExpect(jsonPath("$.returnedCount").value(1))
+                .andExpect(jsonPath("$.hasMore").value(false));
+    }
+
+    @Test
+    void getLatestDeviceTelemetry_Success() throws Exception {
+        TelemetryRequest req = new TelemetryRequest(
+                activeDevice.getId(), Instant.now(), "TEMPERATURE_SENSOR", 23.5, "CELSIUS"
+        );
+
+        mockMvc.perform(post("/api/v1/telemetry")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/devices/" + activeDevice.getId() + "/telemetry/latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.value").value(23.5));
+    }
 }

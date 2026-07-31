@@ -5,4 +5,5 @@ import java.util.List;
 public interface TelemetryRepository {
     void save(TelemetryRecord record);
     List<TelemetryRecord> findLatest(int limit);
+    List<TelemetryRecord> query(TelemetryQuery query);
 }
