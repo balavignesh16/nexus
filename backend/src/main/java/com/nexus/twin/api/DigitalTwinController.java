@@ -24,7 +24,7 @@ public class DigitalTwinController {
         return twinService.getTwin(deviceId)
                 .map(DigitalTwinResponse::from)
                 .map(ResponseEntity::ok)
-                .orElseThrow(() -> new IllegalArgumentException("No digital twin found for device ID: " + deviceId));
+                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("DigitalTwin", deviceId.toString()));
     }
 
     @GetMapping("/twins")

@@ -29,7 +29,7 @@ public class TelemetryService {
 
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
         Device device = deviceRepository.findById(request.deviceId())
-                .orElseThrow(() -> new IllegalArgumentException("Device not found"));
+                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Device", request.deviceId().toString()));
 
         if (device.getStatus() != DeviceStatus.ACTIVE) {
             throw new IllegalStateException("Cannot ingest telemetry for inactive device");

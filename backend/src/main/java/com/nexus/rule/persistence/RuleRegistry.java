@@ -54,24 +54,24 @@ public class RuleRegistry {
 
     private void validate(Rule rule) {
         if (rule.ruleId() == null) {
-            throw new IllegalArgumentException("Rule ID cannot be null");
+            throw new com.nexus.shared.exception.ValidationException("Rule ID cannot be null");
         }
         if (!StringUtils.hasText(rule.name())) {
-            throw new IllegalArgumentException("Rule name cannot be empty");
+            throw new com.nexus.shared.exception.ValidationException("Rule name cannot be empty");
         }
         if (rule.conditions() == null || rule.conditions().isEmpty()) {
-            throw new IllegalArgumentException("Rule must have at least one condition");
+            throw new com.nexus.shared.exception.ValidationException("Rule must have at least one condition");
         }
         if (rule.actions() == null || rule.actions().isEmpty()) {
-            throw new IllegalArgumentException("Rule must have at least one action");
+            throw new com.nexus.shared.exception.ValidationException("Rule must have at least one action");
         }
         rule.conditions().forEach(c -> {
-            if (c.field() == null) throw new IllegalArgumentException("Condition field cannot be null");
-            if (c.operator() == null) throw new IllegalArgumentException("Condition operator cannot be null");
-            if (c.expectedValue() == null) throw new IllegalArgumentException("Condition expected value cannot be null");
+            if (c.field() == null) throw new com.nexus.shared.exception.ValidationException("Condition field cannot be null");
+            if (c.operator() == null) throw new com.nexus.shared.exception.ValidationException("Condition operator cannot be null");
+            if (c.expectedValue() == null) throw new com.nexus.shared.exception.ValidationException("Condition expected value cannot be null");
         });
         rule.actions().forEach(a -> {
-            if (!StringUtils.hasText(a.actionType())) throw new IllegalArgumentException("Action type cannot be empty");
+            if (!StringUtils.hasText(a.actionType())) throw new com.nexus.shared.exception.ValidationException("Action type cannot be empty");
         });
     }
 }

@@ -2,8 +2,8 @@ package com.nexus.space.application;
 
 import java.util.UUID;
 
-public class SpaceNotFoundException extends RuntimeException {
+public class SpaceNotFoundException extends com.nexus.shared.exception.ResourceNotFoundException {
     public SpaceNotFoundException(UUID id) {
-        super("Space not found with ID: " + id);
+        super("Space", id.toString());
     }
 }

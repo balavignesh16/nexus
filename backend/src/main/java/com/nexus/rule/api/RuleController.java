@@ -63,13 +63,13 @@ public class RuleController {
         return ruleRegistry.get(id)
                 .map(RuleResponse::from)
                 .map(ResponseEntity::ok)
-                .orElseThrow(() -> new IllegalArgumentException("Rule not found with id: " + id));
+                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Rule", id.toString()));
     }
 
     @PutMapping("/rules/{id}")
     public ResponseEntity<RuleResponse> updateRule(@PathVariable UUID id, @Valid @RequestBody RuleRequest request) {
         if (ruleRegistry.get(id).isEmpty()) {
-            throw new IllegalArgumentException("Rule not found with id: " + id);
+            throw new com.nexus.shared.exception.ResourceNotFoundException("Rule", id.toString());
         }
         Rule rule = new Rule(
                 id,
@@ -103,8 +103,11 @@ public class RuleController {
     }
 
     @GetMapping("/rule-matches")
-    public ResponseEntity<List<RuleMatchedEvent>> getRuleMatches(
+    public ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchedResponse>> getRuleMatches(
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
-        return ResponseEntity.ok(matchStore.getRecentMatches(limit));
+        List<com.nexus.rule.api.dto.RuleMatchedResponse> responses = matchStore.getRecentMatches(limit).stream()
+                .map(com.nexus.rule.api.dto.RuleMatchedResponse::from)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(responses);
     }
 }

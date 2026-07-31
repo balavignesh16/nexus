@@ -64,7 +64,7 @@ public class TelemetryQueryService {
 
     private void validateDevice(UUID deviceId) {
         Device device = deviceRepository.findById(deviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Device not found"));
+                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Device", deviceId.toString()));
 
         if (device.getStatus() != DeviceStatus.ACTIVE) {
             throw new IllegalStateException("Cannot query telemetry for inactive device");
