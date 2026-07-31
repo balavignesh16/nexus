@@ -34,7 +34,7 @@ class TelemetryServiceTest {
     }
 
     @Test
-    void ingestTelemetry_WhenDeviceActive_SavesAndReturns() {
+    void processTelemetry_WhenDeviceActive_SavesAndReturns() {
         UUID deviceId = UUID.randomUUID();
         Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc");
         mockDevice.update("Sensor", DeviceStatus.ACTIVE, "Desc"); // Ensure it's active
@@ -43,7 +43,7 @@ class TelemetryServiceTest {
 
         TelemetryRequest request = new TelemetryRequest(deviceId, Instant.now(), "TEMPERATURE_SENSOR", 22.5, "CELSIUS");
 
-        TelemetryResponse response = telemetryService.ingestTelemetry(request);
+        TelemetryResponse response = telemetryService.processTelemetry(request);
 
         assertNotNull(response);
         assertEquals(22.5, response.value());
@@ -53,7 +53,7 @@ class TelemetryServiceTest {
     }
 
     @Test
-    void ingestTelemetry_WhenDeviceInactive_ThrowsException() {
+    void processTelemetry_WhenDeviceInactive_ThrowsException() {
         UUID deviceId = UUID.randomUUID();
         Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc");
         mockDevice.update("Sensor", DeviceStatus.OFFLINE, "Desc"); // Inactive
@@ -62,18 +62,18 @@ class TelemetryServiceTest {
 
         TelemetryRequest request = new TelemetryRequest(deviceId, Instant.now(), "TEMPERATURE_SENSOR", 22.5, "CELSIUS");
 
-        assertThrows(IllegalStateException.class, () -> telemetryService.ingestTelemetry(request));
+        assertThrows(IllegalStateException.class, () -> telemetryService.processTelemetry(request));
         verify(telemetryRepository, never()).save(any());
     }
 
     @Test
-    void ingestTelemetry_WhenDeviceNotFound_ThrowsException() {
+    void processTelemetry_WhenDeviceNotFound_ThrowsException() {
         UUID deviceId = UUID.randomUUID();
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.empty());
 
         TelemetryRequest request = new TelemetryRequest(deviceId, Instant.now(), "TEMPERATURE_SENSOR", 22.5, "CELSIUS");
 
-        assertThrows(IllegalArgumentException.class, () -> telemetryService.ingestTelemetry(request));
+        assertThrows(IllegalArgumentException.class, () -> telemetryService.processTelemetry(request));
         verify(telemetryRepository, never()).save(any());
     }
 }

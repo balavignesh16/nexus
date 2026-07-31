@@ -24,7 +24,7 @@ public class TelemetryService {
         this.deviceRepository = deviceRepository;
     }
 
-    public TelemetryResponse ingestTelemetry(TelemetryRequest request) {
+    public TelemetryResponse processTelemetry(TelemetryRequest request) {
         Device device = deviceRepository.findById(request.deviceId())
                 .orElseThrow(() -> new IllegalArgumentException("Device not found"));
 

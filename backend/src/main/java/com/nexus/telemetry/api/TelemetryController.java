@@ -28,8 +28,8 @@ public class TelemetryController {
 
     @PostMapping("/telemetry")
     @ResponseStatus(HttpStatus.CREATED)
-    public TelemetryResponse ingestTelemetry(@jakarta.validation.Valid @RequestBody TelemetryRequest request) {
-        return telemetryService.ingestTelemetry(request);
+    public TelemetryResponse processTelemetry(@jakarta.validation.Valid @RequestBody TelemetryRequest request) {
+        return telemetryService.processTelemetry(request);
     }
 
     @GetMapping("/telemetry")

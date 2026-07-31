@@ -96,7 +96,7 @@ class TelemetryControllerIntegrationTest {
     }
 
     @Test
-    void ingestTelemetry_Success() throws Exception {
+    void processTelemetry_Success() throws Exception {
         TelemetryRequest req = new TelemetryRequest(
             activeDevice.getId(), Instant.now(), "TEMPERATURE_SENSOR", 25.0, "CELSIUS"
         );
@@ -110,7 +110,7 @@ class TelemetryControllerIntegrationTest {
     }
     
     @Test
-    void ingestTelemetry_InactiveDevice_Throws400() throws Exception {
+    void processTelemetry_InactiveDevice_Throws400() throws Exception {
         // Technically the GlobalExceptionHandler converts IllegalStateException/IllegalArgumentException to 400 Bad Request
         TelemetryRequest req = new TelemetryRequest(
             inactiveDevice.getId(), Instant.now(), "TEMPERATURE_SENSOR", 25.0, "CELSIUS"

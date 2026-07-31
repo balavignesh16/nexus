@@ -12,3 +12,9 @@ class SimulatorConfig:
     device_refresh_interval_seconds: float = 60.0
     max_workers: int = 50
     batch_size: int = 10
+    
+    publish_mode: str = "mqtt"
+    mqtt_broker: str = "localhost"
+    mqtt_port: int = 1883
+    mqtt_topic_template: str = "nexus/devices/{device_id}/telemetry"
+    mqtt_qos: int = 1
