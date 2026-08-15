@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import com.nexus.realtime.RealtimePublisher;
+import com.nexus.pipeline.application.PipelineService;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +28,9 @@ class ActionExecutionEngineTest {
     void setUp() {
         registry = mock(ActionExecutorRegistry.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
-        engine = new ActionExecutionEngine(registry, eventPublisher);
+        RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
+        PipelineService pipelineService = mock(PipelineService.class);
+        engine = new ActionExecutionEngine(registry, eventPublisher, realtimePublisher, pipelineService);
     }
 
     @Test
@@ -34,7 +38,7 @@ class ActionExecutionEngineTest {
         ActionExecutionRequest request = new ActionExecutionRequest(
                 UUID.randomUUID(), UUID.randomUUID(), ActionType.CREATE_ALERT, Map.of()
         );
-        ActionContext context = mock(ActionContext.class);
+        ActionContext context = new ActionContext(null, null);
 
         ActionExecutor executor = mock(ActionExecutor.class);
         ActionExecutionResult mockResult = new ActionExecutionResult(
@@ -60,7 +64,7 @@ class ActionExecutionEngineTest {
         ActionExecutionRequest request = new ActionExecutionRequest(
                 UUID.randomUUID(), UUID.randomUUID(), ActionType.WEBHOOK, Map.of()
         );
-        ActionContext context = mock(ActionContext.class);
+        ActionContext context = new ActionContext(null, null);
 
         when(registry.resolve(ActionType.WEBHOOK)).thenReturn(Optional.empty());
 
@@ -79,7 +83,7 @@ class ActionExecutionEngineTest {
         ActionExecutionRequest request = new ActionExecutionRequest(
                 UUID.randomUUID(), UUID.randomUUID(), ActionType.SEND_COMMAND, Map.of()
         );
-        ActionContext context = mock(ActionContext.class);
+        ActionContext context = new ActionContext(null, null);
 
         ActionExecutor executor = mock(ActionExecutor.class);
         when(registry.resolve(ActionType.SEND_COMMAND)).thenReturn(Optional.of(executor));
