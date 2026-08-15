@@ -6,6 +6,10 @@ import com.nexus.action.domain.ActionExecutionFailedEvent;
 import com.nexus.action.domain.ActionExecutionRequest;
 import com.nexus.action.domain.ActionExecutionResult;
 import com.nexus.action.domain.ExecutionStatus;
+import com.nexus.pipeline.domain.PipelineTrace;
+import com.nexus.pipeline.domain.PipelineStage;
+import com.nexus.pipeline.application.PipelineService;
+import com.nexus.realtime.RealtimePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -22,16 +26,28 @@ public class ActionExecutionEngine {
 
     private final ActionExecutorRegistry registry;
     private final ApplicationEventPublisher eventPublisher;
+    private final RealtimePublisher realtimePublisher;
+    private final PipelineService pipelineService;
 
-    public ActionExecutionEngine(ActionExecutorRegistry registry, ApplicationEventPublisher eventPublisher) {
+    public ActionExecutionEngine(ActionExecutorRegistry registry, ApplicationEventPublisher eventPublisher,
+                                 RealtimePublisher realtimePublisher, PipelineService pipelineService) {
         this.registry = registry;
         this.eventPublisher = eventPublisher;
+        this.realtimePublisher = realtimePublisher;
+        this.pipelineService = pipelineService;
     }
 
     public void process(List<ActionExecutionRequest> requests, ActionContext context, String correlationId) {
         for (ActionExecutionRequest request : requests) {
+            long stageStart = System.currentTimeMillis();
             ActionExecutionResult result = executeSingleRequest(request, context);
-            
+
+            // Broadcast to WebSocket clients
+            realtimePublisher.publishActionExecuted(result, correlationId);
+            pipelineService.recordTrace(
+                    PipelineTrace.of(correlationId, null, PipelineStage.ACTION, stageStart,
+                            result.status() != ExecutionStatus.FAILURE ? "SUCCESS" : "FAILURE", result.status().name(), null));
+
             if (result.status() == ExecutionStatus.FAILURE) {
                 eventPublisher.publishEvent(new ActionExecutionFailedEvent(result, correlationId));
             } else {

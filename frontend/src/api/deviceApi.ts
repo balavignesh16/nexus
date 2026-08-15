@@ -55,6 +55,9 @@ export const deviceApi = {
   getDevicesBySpaceId: (spaceId: string) => 
     apiClient.get<Device[]>(`/spaces/${spaceId}/devices`),
     
+  getActiveDevices: () => 
+    apiClient.get<Device[]>(`/devices/active`),
+    
   getDevice: (id: string) => 
     apiClient.get<Device>(`/devices/${id}`),
     

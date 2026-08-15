@@ -59,7 +59,11 @@ export const SitesPage: React.FC = () => {
     e.preventDefault();
     if (!editingSite) return;
     try {
-      const request: UpdateSiteRequest = { name, description };
+      const request: UpdateSiteRequest = { 
+        name, 
+        description,
+        status: editingSite.status || 'ACTIVE'
+      };
       await siteApi.updateSite(editingSite.id, request);
       setIsEditModalOpen(false);
       loadSites();

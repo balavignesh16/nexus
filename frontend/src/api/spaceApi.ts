@@ -1,4 +1,4 @@
-﻿import type { Space, CreateSpaceRequest, UpdateSpaceRequest } from '../types/models';
+import type { Space, CreateSpaceRequest, UpdateSpaceRequest } from '../types/models';
 import { apiClient } from './apiClient';
 
 export const spaceApi = {

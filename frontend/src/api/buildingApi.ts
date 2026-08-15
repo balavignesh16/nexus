@@ -1,4 +1,4 @@
-﻿import type { Building, CreateBuildingRequest, UpdateBuildingRequest } from '../types/models';
+import type { Building, CreateBuildingRequest, UpdateBuildingRequest } from '../types/models';
 import { apiClient } from './apiClient';
 
 export const buildingApi = {

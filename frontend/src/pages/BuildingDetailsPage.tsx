@@ -55,7 +55,11 @@ export const BuildingDetailsPage: React.FC = () => {
     e.preventDefault();
     if (!buildingId) return;
     try {
-      const request: CreateSpaceRequest = { name, description };
+      const request: CreateSpaceRequest = {
+        name,
+        description,
+        spaceType: 'GENERAL',
+      };
       await spaceApi.createSpace(buildingId, request);
       setIsCreateModalOpen(false);
       loadData();
@@ -68,7 +72,11 @@ export const BuildingDetailsPage: React.FC = () => {
     e.preventDefault();
     if (!editingSpace) return;
     try {
-      const request: UpdateSpaceRequest = { name, description };
+      const request: UpdateSpaceRequest = { 
+        name, 
+        description,
+        status: editingSpace.status || 'ACTIVE'
+      };
       await spaceApi.updateSpace(editingSpace.id, request);
       setIsEditModalOpen(false);
       loadData();

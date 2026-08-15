@@ -1,4 +1,4 @@
-﻿import type { Site, CreateSiteRequest, UpdateSiteRequest } from '../types/models';
+import type { Site, CreateSiteRequest, UpdateSiteRequest } from '../types/models';
 import { apiClient } from './apiClient';
 
 export const siteApi = {

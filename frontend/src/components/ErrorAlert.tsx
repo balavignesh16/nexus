@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 export const ErrorAlert: React.FC<{ message?: string; onClose: () => void }> = ({ message, onClose }) => {
   if (!message) return null;
   return (

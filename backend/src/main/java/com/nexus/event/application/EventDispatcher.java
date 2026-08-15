@@ -1,7 +1,7 @@
 package com.nexus.event.application;
 
 import com.nexus.event.domain.DomainEvent;
-import com.nexus.event.domain.EventType;
+import com.nexus.realtime.RealtimePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -14,8 +14,12 @@ public class EventDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(EventDispatcher.class);
 
-    // Using a simple list for all events for now, can be optimized per event type later if needed
     private final List<EventListener> listeners = new CopyOnWriteArrayList<>();
+    private final RealtimePublisher realtimePublisher;
+
+    public EventDispatcher(RealtimePublisher realtimePublisher) {
+        this.realtimePublisher = realtimePublisher;
+    }
 
     public void subscribe(EventListener listener) {
         listeners.add(listener);
@@ -33,6 +37,10 @@ public class EventDispatcher {
 
     public void publish(DomainEvent event) {
         log.debug("Dispatching event: {} for device: {}", event.eventType(), event.deviceId());
+
+        // Broadcast to WebSocket clients
+        realtimePublisher.publishEvent(event, event.correlationId());
+
         for (EventListener listener : listeners) {
             try {
                 listener.onEvent(event);

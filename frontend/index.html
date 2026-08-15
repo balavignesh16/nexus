@@ -8,6 +8,26 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        document.body.innerHTML += '<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:red;color:white;z-index:9999;padding:20px;white-space:pre-wrap;overflow:auto;"><h1>Runtime Error</h1><p>' + message + '</p><pre>' + (error && error.stack ? error.stack : '') + '</pre></div>';
+      };
+      window.addEventListener("unhandledrejection", function(event) {
+        document.body.innerHTML += '<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:red;color:white;z-index:9999;padding:20px;white-space:pre-wrap;overflow:auto;"><h1>Unhandled Promise Rejection</h1><p>' + event.reason + '</p><pre>' + (event.reason && event.reason.stack ? event.reason.stack : '') + '</pre></div>';
+      });
+    </script>
+    <script>
+      if (typeof global === 'undefined') {
+        window.global = window;
+      }
+      
+      // Prevent SockJS from binding to 'unload' which causes a Permissions policy violation
+      const originalAddEventListener = window.addEventListener;
+      window.addEventListener = function(type, listener, options) {
+        if (type === 'unload') return; 
+        return originalAddEventListener.call(window, type, listener, options);
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

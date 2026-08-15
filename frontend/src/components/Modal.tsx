@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 export const Modal: React.FC<{ title: string; isOpen: boolean; onClose: () => void; children: React.ReactNode }> = ({ title, isOpen, onClose, children }) => {
   if (!isOpen) return null;
   return (

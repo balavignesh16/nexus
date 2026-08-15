@@ -1,14 +1,14 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import Layout from '../components/Layout'
+import { AppShell } from '../components/AppShell'
 import HomePage from '../pages/HomePage'
 import AboutPage from '../pages/AboutPage'
 
 function TestApp() {
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
+      <Route path="/" element={<AppShell />}>
         <Route index element={<HomePage />} />
         <Route path="about" element={<AboutPage />} />
       </Route>

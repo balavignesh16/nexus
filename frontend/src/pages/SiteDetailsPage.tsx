@@ -68,7 +68,11 @@ export const SiteDetailsPage: React.FC = () => {
     e.preventDefault();
     if (!editingBuilding) return;
     try {
-      const request: UpdateBuildingRequest = { name, description };
+      const request: UpdateBuildingRequest = { 
+        name, 
+        description,
+        status: editingBuilding.status || 'ACTIVE'
+      };
       await buildingApi.updateBuilding(editingBuilding.id, request);
       setIsEditModalOpen(false);
       loadData();
