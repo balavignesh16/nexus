@@ -1,12 +1,14 @@
 export const FEATURES = {
-  // Global feature flags
-  DEMO_MODE: true,
-  LIVE_BACKEND: false,
-  LIVE_SIMULATOR: true,
-  MOCK_ALERTS: true,
-  MOCK_RULES: true,
-  MOCK_EVENTS: true,
-  MOCK_ACTIONS: true,
+  // Global feature flags. Overridable at build time via VITE_DEMO_MODE so a
+  // demo build can still be produced without editing source, but the
+  // shipped default is now live-backend, not demo.
+  DEMO_MODE: import.meta.env.VITE_DEMO_MODE === 'true',
+  LIVE_BACKEND: import.meta.env.VITE_DEMO_MODE !== 'true',
+  LIVE_SIMULATOR: import.meta.env.VITE_DEMO_MODE === 'true',
+  MOCK_ALERTS: false,
+  MOCK_RULES: false,
+  MOCK_EVENTS: false,
+  MOCK_ACTIONS: false,
   SHOW_EXPERIMENTAL: true,
 
   // Real-time transport configuration. These are intentionally kept beside

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useRepositories } from '../repositories/RepositoryProvider';
 import { usePolling } from '../hooks/usePolling';
-import { FileJson, Search, Filter, Play, Plus, Activity, Zap, CheckCircle2, Clock } from 'lucide-react';
+import { FileJson, Search, Filter, Play, Plus, Zap, CheckCircle2, XCircle } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
 import { motion } from 'framer-motion';
 
@@ -15,10 +15,13 @@ export function RulesPage() {
 
   const [search, setSearch] = useState('');
 
-  const filteredRules = globalRules.filter(r => 
-    r.name?.toLowerCase().includes(search.toLowerCase()) || 
+  const filteredRules = globalRules.filter(r =>
+    r.name?.toLowerCase().includes(search.toLowerCase()) ||
     r.description?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const enabledCount = globalRules.filter(r => r.enabled).length;
+  const disabledCount = globalRules.length - enabledCount;
 
   if (isLoading && globalRules.length === 0) {
     return (
@@ -68,8 +71,8 @@ export function RulesPage() {
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
         
-        {/* STATISTICS */}
-        <div className="grid grid-cols-4 gap-4">
+        {/* STATISTICS (real counts from the loaded rule set) */}
+        <div className="grid grid-cols-3 gap-4">
           <div className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Total Rules</p>
@@ -79,34 +82,24 @@ export function RulesPage() {
               <FileJson size={20} className="text-blue-400" />
             </div>
           </div>
-          
+
           <div className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex items-center justify-between">
             <div>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Executions (24h)</p>
-              <span className="text-2xl font-bold font-mono">14,203</span>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <Zap size={20} className="text-purple-400" />
-            </div>
-          </div>
-          
-          <div className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Success Rate</p>
-              <span className="text-2xl font-bold font-mono text-success">99.8%</span>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Enabled</p>
+              <span className="text-2xl font-bold font-mono text-success">{enabledCount}</span>
             </div>
             <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
               <CheckCircle2 size={20} className="text-success" />
             </div>
           </div>
-          
+
           <div className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex items-center justify-between">
             <div>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Avg Execution Time</p>
-              <span className="text-2xl font-bold font-mono text-blue-400">42ms</span>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">Disabled</p>
+              <span className="text-2xl font-bold font-mono text-muted-foreground">{disabledCount}</span>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Clock size={20} className="text-blue-400" />
+            <div className="w-10 h-10 rounded-lg bg-muted/10 flex items-center justify-center">
+              <XCircle size={20} className="text-muted-foreground" />
             </div>
           </div>
         </div>
@@ -133,34 +126,45 @@ export function RulesPage() {
                       {rule.name || rule.id}
                     </h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
-                        Active
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${rule.enabled ? 'bg-blue-500/10 text-blue-400' : 'bg-muted/10 text-muted-foreground'}`}>
+                        {rule.enabled ? 'Active' : 'Disabled'}
                       </span>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mb-4">
                     {rule.description || "Monitors telemetry streams and triggers automated actions."}
                   </p>
-                  
+
                   <div className="bg-[#13131a] rounded-lg p-3 border border-[#1f1f28] text-xs font-mono space-y-1 mb-4">
-                    <div className="flex gap-2">
-                      <span className="text-purple-400">IF</span>
-                      <span className="text-muted-foreground">temperature &gt; 25</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="text-success">THEN</span>
-                      <span className="text-muted-foreground">EXECUTE hvac-cool</span>
-                    </div>
+                    {rule.conditions?.[0] ? (
+                      <div className="flex gap-2">
+                        <span className="text-purple-400">IF</span>
+                        <span className="text-muted-foreground">
+                          {rule.conditions[0].field} {rule.conditions[0].operator} {rule.conditions[0].expectedValue}
+                          {rule.conditions.length > 1 && ` (+${rule.conditions.length - 1} more)`}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground/60">No conditions defined</div>
+                    )}
+                    {rule.actions?.[0] ? (
+                      <div className="flex gap-2">
+                        <span className="text-success">THEN</span>
+                        <span className="text-muted-foreground">
+                          {rule.actions[0].actionType}
+                          {rule.actions.length > 1 && ` (+${rule.actions.length - 1} more)`}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground/60">No actions defined</div>
+                    )}
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between pt-4 border-t border-[#1f1f28]">
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     <div className="flex items-center gap-1">
-                      <Activity size={14} className="text-success" /> Healthy
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Zap size={14} /> 142 triggers (24h)
+                      <Zap size={14} /> Priority {rule.priority}
                     </div>
                   </div>
                   <button className="text-blue-400 hover:text-blue-300 text-xs font-medium flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

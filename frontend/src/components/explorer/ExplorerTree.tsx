@@ -1,91 +1,32 @@
-import { useState, useMemo } from 'react';
-import { Folder, Building2, Box, ChevronRight, ChevronDown, AlertTriangle, MoreVertical } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Folder, Building2, Box, ChevronRight, ChevronDown, MoreVertical, Loader2 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import type { SelectedNode, NodeType } from '../../pages/ExplorerPage';
+import { useExplorerHierarchy, type HierarchyNode } from '../../hooks/useExplorerHierarchy';
 
 interface ExplorerTreeProps {
   selectedNode: SelectedNode | null;
   onSelect: (node: SelectedNode) => void;
 }
 
-interface TreeNodeData {
-  id: string;
-  name: string;
-  type: NodeType | 'FLOOR' | 'ROOM';
-  children?: TreeNodeData[];
-  hasWarning?: boolean;
-}
-
-const STATIC_TREE: TreeNodeData[] = [
-  {
-    id: 'site-test',
-    name: 'Test Site',
-    type: 'SITE',
-    children: [
-      {
-        id: 'bldg-main',
-        name: 'Main Building',
-        type: 'BUILDING',
-        children: [
-          {
-            id: 'bldg1-floor-1',
-            name: 'Floor 1',
-            type: 'FLOOR',
-            children: [
-              { id: 'dev-temp-001', name: 'Temperature Sensor 1', type: 'DEVICE' },
-              { id: 'dev-mot-001', name: 'Motion Sensor 1', type: 'DEVICE' },
-            ]
-          },
-          {
-            id: 'bldg1-floor-2',
-            name: 'Floor 2',
-            type: 'FLOOR',
-            hasWarning: true,
-            children: [
-              { id: 'dev-gas-001', name: 'Gas Sensor 1', type: 'DEVICE' },
-            ]
-          }
-        ]
-      },
-      {
-        id: 'bldg-annex',
-        name: 'Annex Building',
-        type: 'BUILDING',
-        children: [
-          {
-            id: 'bldg2-floor-1',
-            name: 'Floor 1',
-            type: 'FLOOR',
-            children: [
-              { id: 'dev-hum-001', name: 'Humidity Sensor 1', type: 'DEVICE' },
-            ]
-          },
-          {
-            id: 'bldg2-floor-2',
-            name: 'Floor 2',
-            type: 'FLOOR',
-            children: [
-              { id: 'dev-pwr-001', name: 'Energy Meter 1', type: 'DEVICE' },
-              { id: 'dev-hvac-001', name: 'HVAC Controller 1', type: 'DEVICE' },
-            ]
-          }
-        ]
-      }
-    ]
-  }
-];
-
 interface FlatNode {
-  node: TreeNodeData;
+  node: HierarchyNode;
   level: number;
   path: { id: string; name: string; type: NodeType }[];
 }
 
 export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set([
-    'site-test', 'bldg-main', 'bldg1-floor-1', 'bldg-annex', 'bldg2-floor-2'
-  ]));
-  const searchTerm: string = '';
+  const { data: hierarchy, isLoading } = useExplorerHierarchy();
+  const tree = hierarchy?.tree ?? [];
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  // Auto-expand the first site once real data loads, so the tree isn't blank on first paint.
+  useEffect(() => {
+    if (tree.length > 0 && expandedIds.size === 0) {
+      setExpandedIds(new Set([tree[0].id]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tree]);
 
   const handleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -98,37 +39,47 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
 
   const flattenedNodes = useMemo(() => {
     const flat: FlatNode[] = [];
-    const flatten = (nodes: TreeNodeData[], level: number, parentPath: any[]) => {
+    const flatten = (nodes: HierarchyNode[], level: number, parentPath: FlatNode['path']) => {
       nodes.forEach(node => {
-        // Map FLOOR and ROOM to SPACE for the SelectedNode type compatibility
-        const mappedType = (node.type === 'FLOOR' || node.type === 'ROOM') ? 'SPACE' : node.type;
-        const currentPath = [...parentPath, { id: node.id, name: node.name, type: mappedType }];
-        
-        // Basic search filter
-        if (searchTerm && !node.name.toLowerCase().includes(searchTerm.toLowerCase()) && node.children?.length === 0) {
-          return;
-        }
-
+        const currentPath = [...parentPath, { id: node.id, name: node.name, type: node.type as NodeType }];
         flat.push({ node, level, path: parentPath });
         if (expandedIds.has(node.id) && node.children) {
           flatten(node.children, level + 1, currentPath);
         }
       });
     };
-    flatten(STATIC_TREE, 0, []);
+    // Auto-expand the first site by default so the tree isn't collapsed-empty on load.
+    flatten(tree, 0, []);
     return flat;
-  }, [expandedIds, searchTerm]);
+  }, [tree, expandedIds]);
 
   const getIcon = (type: string, isExpanded: boolean) => {
     switch (type) {
       case 'SITE': return <Folder size={14} className={isExpanded ? 'text-blue-400' : 'text-blue-500/70'} />;
       case 'BUILDING': return <Building2 size={14} className={isExpanded ? 'text-indigo-400' : 'text-indigo-500/70'} />;
-      case 'FLOOR':
-      case 'ROOM': return <Folder size={14} className={isExpanded ? 'text-cyan-400' : 'text-cyan-500/70'} />;
+      case 'SPACE': return <Folder size={14} className={isExpanded ? 'text-cyan-400' : 'text-cyan-500/70'} />;
       case 'DEVICE': return <Box size={14} className="text-emerald-500" />;
       default: return <Folder size={14} />;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 size={16} className="animate-spin" />
+        <span className="text-xs">Loading infrastructure...</span>
+      </div>
+    );
+  }
+
+  if (tree.length === 0) {
+    return (
+      <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] items-center justify-center gap-1 text-muted-foreground px-4 text-center">
+        <span className="text-xs">No sites yet.</span>
+        <span className="text-[11px] text-muted-foreground/70">Add a site to start building your infrastructure hierarchy.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] shadow-xl z-20">
@@ -138,12 +89,11 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
           data={flattenedNodes}
           itemContent={(_, { node, level, path }) => {
             const isExpanded = expandedIds.has(node.id);
-            const isSelected = selectedNode?.id === node.id || (node.id === 'dev-temp-001' && !selectedNode);
-            const hasChildren = node.children && node.children.length > 0;
-            const mappedType = (node.type === 'FLOOR' || node.type === 'ROOM') ? 'SPACE' : node.type;
+            const isSelected = selectedNode?.id === node.id;
+            const hasChildren = !!node.children && node.children.length > 0;
 
             return (
-              <div 
+              <div
                 className={`flex items-center w-full min-w-fit pr-2 py-1 cursor-pointer transition-colors group relative
                   ${isSelected ? 'bg-blue-600/15 border-l-2 border-blue-500' : 'border-l-2 border-transparent hover:bg-[#13131a]'}
                 `}
@@ -154,15 +104,15 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
                     onSelect({
                       id: node.id,
                       name: node.name,
-                      type: mappedType as NodeType,
-                      path: [...path, { id: node.id, name: node.name, type: mappedType as NodeType }]
+                      type: node.type as NodeType,
+                      path: [...path, { id: node.id, name: node.name, type: node.type as NodeType }]
                     });
                   }
                 }}
               >
                 <div className="w-5 h-5 flex items-center justify-center shrink-0">
                   {hasChildren ? (
-                    <button 
+                    <button
                       onClick={(e) => { e.stopPropagation(); handleExpand(node.id); }}
                       className="p-0.5 hover:bg-muted/50 rounded text-muted-foreground hover:text-foreground"
                     >
@@ -172,7 +122,7 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
                     <div className="w-4" />
                   )}
                 </div>
-                
+
                 <div className="flex items-center gap-2 overflow-hidden flex-1 py-0.5">
                   <div className="shrink-0 flex items-center justify-center w-5 h-5 relative">
                     {getIcon(node.type, isExpanded)}
@@ -180,11 +130,8 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
                   <span className={`text-[13px] truncate select-none ${isSelected ? 'text-blue-400 font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}>
                     {node.name}
                   </span>
-                  {node.hasWarning && (
-                    <AlertTriangle size={12} className="text-amber-500 shrink-0 ml-1" />
-                  )}
                 </div>
-                
+
                 <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
                   <MoreVertical size={14} className="text-muted-foreground/50 hover:text-foreground" />
                 </div>

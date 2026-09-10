@@ -1,9 +1,10 @@
 import { useSites, useActiveDevices, useEvents, useActionHistory } from '../hooks/queries';
+import { useExplorerHierarchy } from '../hooks/useExplorerHierarchy';
 import { StatCard } from '../components/ui/StatCard';
 import { PlatformHealthWidget } from '../components/widgets/PlatformHealthWidget';
 import { LiveAreaChart } from '../components/ui/LiveAreaChart';
 import { ActivityTimeline } from '../components/ui/ActivityTimeline';
-import { Server, Activity, AlertTriangle, Box, RefreshCw } from 'lucide-react';
+import { Activity, AlertTriangle, Box, RefreshCw } from 'lucide-react';
 import { DeviceStatusBadge } from '../components/DeviceStatusBadge';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { useMemo } from 'react';
@@ -14,6 +15,7 @@ export default function HomePage() {
   const { data: devices } = useActiveDevices();
   const { data: events = [] } = useEvents(25);
   const { data: actions = [] } = useActionHistory(25);
+  const { data: hierarchy } = useExplorerHierarchy();
   const connection = useConnectionStatus();
 
   const { data: globalTelemetry = [] } = useQuery<any[]>({
@@ -53,15 +55,9 @@ export default function HomePage() {
   }, [events, actions]);
 
   const siteCount = sites?.length || 0;
-  const buildingCount = siteCount * 2; 
-  const spaceCount = buildingCount * 4;
+  const buildingCount = hierarchy?.buildingCount ?? 0;
+  const spaceCount = hierarchy?.spaceCount ?? 0;
   const deviceCount = devices?.length || 0;
-  
-  const mockEvents = [
-    { id: '1', time: '12:05 PM', title: 'High CPU utilization', description: 'Rules engine server at 95%', icon: AlertTriangle, type: 'rule' as const },
-    { id: '2', time: '11:15 AM', title: 'Configuration synced', description: 'Updated edge policies applied', icon: Activity, type: 'action' as const },
-    { id: '3', time: '10:30 AM', title: 'New device provisioned', description: 'Sensor GS-01 added to site', icon: Server, type: 'telemetry' as const },
-  ];
 
   return (
     <div className="flex flex-col gap-6 animate-in h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
@@ -120,7 +116,7 @@ export default function HomePage() {
 
         {/* Right Column (4 columns): Event Feed */}
         <div className="xl:col-span-4 flex flex-col">
-          <ActivityTimeline title="Global System Activity" events={[...liveActivity, ...mockEvents].slice(0, 50)} />
+          <ActivityTimeline title="Global System Activity" events={liveActivity} />
         </div>
       </div>
     </div>

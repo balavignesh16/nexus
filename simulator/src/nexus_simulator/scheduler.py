@@ -85,6 +85,15 @@ class SimulatorScheduler:
                     unit = "CELSIUS"
                 elif isinstance(generator, GasGenerator):
                     unit = "PPM"
+
+                # The backend's TelemetryRequest.value is a numeric Double. MotionGenerator
+                # returns a Python bool, which Jackson cannot deserialize into a Double -
+                # that mismatch causes every motion-sensor message to be rejected and,
+                # under QoS 1, retried forever (a real poison-message loop, not hypothetical -
+                # observed live against the running backend). Encode presence as 1.0/0.0.
+                if isinstance(val, bool):
+                    val = 1.0 if val else 0.0
+                    unit = "BOOLEAN"
                 
                 sensor_type = type(generator).__name__.replace("Generator", "").upper() + "_SENSOR"
                 
