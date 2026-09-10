@@ -33,11 +33,11 @@ The framework currently features a fully functional decoupled Realtime Platform 
 `Device ➔ MQTT ➔ Telemetry ➔ Twin ➔ Event ➔ Rule ➔ Action ➔ Pipeline ➔ Realtime STOMP ➔ Frontend React Query ➔ UI`
 
 ### Hybrid Operating Modes
-The NEXUS frontend supports multiple execution environments:
-- **Backend Mode:** Standard execution connecting to the Spring Boot backend and PostgreSQL database.
-- **Demo Mode (F6.1):** Operates entirely offline using a frontend `ScenarioEngine` and `DemoRepository` mock data.
-- **Hybrid Mode (F6.2):** Toggles seamlessly between data sources using a global `DataSourceResolver`.
-- **Realtime Mode (F7):** Uses WebSockets to push live data directly into the React Query cache via `RealtimeRepositorySync`.
+The NEXUS frontend supports multiple execution environments. The shipped default is **live-backend, not demo** (`DEMO_MODE` defaults to `false`, overridable via the `VITE_DEMO_MODE` build env var):
+- **Backend Mode (default):** Connects to the real Spring Boot backend; the realtime WebSocket connects live rather than parking in a demo state, so React Query polling and live push both reflect real data.
+- **Demo Mode:** Operates entirely offline using a frontend `ScenarioEngine` and `DemoRepository` mock data. Still available by setting `VITE_DEMO_MODE=true`, but is opt-in rather than the default.
+- **Hybrid Mode:** The global `DataSourceResolver` still falls back to `DemoRepository` fixtures per-call when a live backend request fails or returns an empty result (e.g. a freshly-restarted backend with no rules registered yet will show a sample rule rather than an empty list) — this fallback is independent of the `DEMO_MODE`/`VITE_DEMO_MODE` setting above and has not been removed.
+- **Realtime Mode:** Uses WebSockets to push live data directly into the React Query cache via `RealtimeRepositorySync`.
 
 ## Current Limitations & Known Issues (Pre-F8)
 NEXUS is currently in a pre-production baseline state and has several critical limitations:
