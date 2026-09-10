@@ -1,9 +1,8 @@
 package com.nexus.telemetry.domain;
 
-import java.util.List;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
-public interface TelemetryRepository {
-    void save(TelemetryRecord record);
-    List<TelemetryRecord> findLatest(int limit);
-    List<TelemetryRecord> query(TelemetryQuery query);
+@Repository
+public interface TelemetryRepository extends JpaRepository<TelemetryRecord, TelemetryRecordId>, TelemetryRepositoryCustom {
 }

@@ -1,7 +1,8 @@
 package com.nexus.event.api;
 
 import com.nexus.event.api.dto.EventResponse;
-import com.nexus.event.persistence.BoundedEventStore;
+import com.nexus.event.domain.DomainEventRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,16 +16,16 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/v1")
 public class EventController {
 
-    private final BoundedEventStore eventStore;
+    private final DomainEventRepository eventRepository;
 
-    public EventController(BoundedEventStore eventStore) {
-        this.eventStore = eventStore;
+    public EventController(DomainEventRepository eventRepository) {
+        this.eventRepository = eventRepository;
     }
 
     @GetMapping("/events")
     public ResponseEntity<List<EventResponse>> getEvents(
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
-        List<EventResponse> responses = eventStore.getRecentEvents(limit).stream()
+        List<EventResponse> responses = eventRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, limit)).stream()
                 .map(EventResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);

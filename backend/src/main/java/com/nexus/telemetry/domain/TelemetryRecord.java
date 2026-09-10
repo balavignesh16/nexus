@@ -1,15 +1,34 @@
 package com.nexus.telemetry.domain;
 
+import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
 
+@Entity
+@Table(name = "telemetry_history")
+@IdClass(TelemetryRecordId.class)
 public class TelemetryRecord {
-    private final UUID id;
-    private final UUID deviceId;
-    private final Instant timestamp;
-    private final String sensorType;
-    private final double value;
-    private final String unit;
+    @Id
+    @Column(name = "id")
+    private UUID id;
+    
+    @Id
+    @Column(name = "timestamp")
+    private Instant timestamp;
+
+    @Column(name = "device_id", nullable = false)
+    private UUID deviceId;
+
+    @Column(name = "sensor_type", nullable = false)
+    private String sensorType;
+
+    @Column(name = "\"value\"", nullable = false)
+    private double value;
+
+    @Column(name = "unit", nullable = false)
+    private String unit;
+
+    protected TelemetryRecord() {}
 
     public TelemetryRecord(UUID id, UUID deviceId, Instant timestamp, String sensorType, double value, String unit) {
         this.id = id;

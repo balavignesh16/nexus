@@ -2,7 +2,8 @@ package com.nexus.action.api;
 
 import com.nexus.action.api.dto.ActionHistoryResponse;
 import com.nexus.action.application.ActionExecutorRegistry;
-import com.nexus.action.persistence.BoundedActionHistoryStore;
+import com.nexus.action.domain.ActionHistoryRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,19 +17,19 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/v1/actions")
 public class ActionController {
 
-    private final BoundedActionHistoryStore historyStore;
+    private final ActionHistoryRepository historyRepository;
     private final ActionExecutorRegistry registry;
 
-    public ActionController(BoundedActionHistoryStore historyStore, ActionExecutorRegistry registry) {
-        this.historyStore = historyStore;
+    public ActionController(ActionHistoryRepository historyRepository, ActionExecutorRegistry registry) {
+        this.historyRepository = historyRepository;
         this.registry = registry;
     }
 
     @GetMapping("/history")
     public ResponseEntity<List<ActionHistoryResponse>> getActionHistory(
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
-        List<ActionHistoryResponse> responses = historyStore.getRecentHistory(limit).stream()
-                .map(ActionHistoryResponse::from)
+        List<ActionHistoryResponse> responses = historyRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, limit)).stream()
+                .map(r -> ActionHistoryResponse.from(r.toResult()))
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);
     }

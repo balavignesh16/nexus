@@ -9,6 +9,8 @@ import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.api.dto.TelemetryResponse;
 import com.nexus.telemetry.domain.TelemetryRepository;
 import com.nexus.twin.application.DigitalTwinService;
+import com.nexus.realtime.RealtimePublisher;
+import com.nexus.pipeline.application.PipelineService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,7 +35,9 @@ class TelemetryServiceTest {
         telemetryRepository = mock(TelemetryRepository.class);
         deviceRepository = mock(DeviceRepository.class);
         digitalTwinService = mock(DigitalTwinService.class);
-        telemetryService = new TelemetryService(telemetryRepository, deviceRepository, digitalTwinService);
+        RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
+        PipelineService pipelineService = mock(PipelineService.class);
+        telemetryService = new TelemetryService(telemetryRepository, deviceRepository, digitalTwinService, realtimePublisher, pipelineService);
     }
 
     @Test
@@ -53,7 +57,7 @@ class TelemetryServiceTest {
         assertEquals(deviceId, response.deviceId());
 
         verify(telemetryRepository, times(1)).save(any());
-        verify(digitalTwinService, times(1)).updateTwin(request);
+        verify(digitalTwinService, times(1)).updateTwin(eq(request), anyString());
     }
 
     @Test

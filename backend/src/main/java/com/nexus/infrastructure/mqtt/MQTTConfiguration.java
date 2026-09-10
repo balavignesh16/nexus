@@ -29,10 +29,13 @@ public class MQTTConfiguration {
     public MqttClient mqttClient() throws MqttException {
         log.info("Connecting to MQTT broker at {} with clientId {}", brokerUrl, clientId);
         mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
+        // Set manual acks to true to prevent data loss on persistence failure
+        mqttClient.setManualAcks(true);
         
         MqttConnectOptions options = new MqttConnectOptions();
         options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
+        // Set clean session to false to retain QoS 1 messages while disconnected
+        options.setCleanSession(false);
         options.setConnectionTimeout(10);
         
         try {

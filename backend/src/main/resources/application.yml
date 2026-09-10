@@ -32,3 +32,10 @@ mqtt:
     id: nexus-backend-sub
   topic:
     telemetry: nexus/devices/+/telemetry
+
+nexus:
+  retention:
+    telemetry-days: 30
+    pipeline-days: 7
+    events-days: 90
+    actions-days: 90

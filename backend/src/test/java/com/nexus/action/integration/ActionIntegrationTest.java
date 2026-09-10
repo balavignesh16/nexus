@@ -2,7 +2,8 @@ package com.nexus.action.integration;
 
 import com.nexus.action.api.dto.ActionHistoryResponse;
 import com.nexus.action.domain.ActionType;
-import com.nexus.action.persistence.BoundedActionHistoryStore;
+import com.nexus.action.domain.ActionHistoryRecord;
+import com.nexus.action.domain.ActionHistoryRepository;
 import com.nexus.building.application.BuildingService;
 import com.nexus.building.dto.CreateBuildingRequest;
 import com.nexus.device.api.dto.CreateDeviceRequest;
@@ -24,6 +25,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 import java.time.Instant;
 import java.util.List;
@@ -33,7 +41,22 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
+@Testcontainers
 public class ActionIntegrationTest {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:2.16.1-pg16").asCompatibleSubstituteFor("postgres"));
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.flyway.url", postgres::getJdbcUrl);
+        registry.add("spring.flyway.user", postgres::getUsername);
+        registry.add("spring.flyway.password", postgres::getPassword);
+    }
 
     @Autowired
     private SiteService siteService;
@@ -48,13 +71,13 @@ public class ActionIntegrationTest {
     @Autowired
     private RuleRegistry ruleRegistry;
     @Autowired
-    private BoundedActionHistoryStore actionHistoryStore;
+    private ActionHistoryRepository actionHistoryRepository;
 
     private UUID deviceId;
 
     @BeforeEach
     void setup() {
-        actionHistoryStore.clear();
+        actionHistoryRepository.deleteAll();
         ruleRegistry.clear();
         
         UUID siteId = siteService.createSite(new CreateSiteRequest("Site A", "Desc")).id();
@@ -83,14 +106,14 @@ public class ActionIntegrationTest {
                 deviceId, Instant.now(), "TEMPERATURE_SENSOR", 35.0, "CELSIUS"
         ));
 
-        // Let async events process (though they are currently sync, we wait a tiny bit just in case)
+        // Let async events process
         Thread.sleep(100);
 
-        List<com.nexus.action.domain.ActionExecutionResult> history = actionHistoryStore.getRecentHistory(10);
+        List<ActionHistoryRecord> history = actionHistoryRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, 10)).getContent();
         assertEquals(1, history.size(), "One action should have been executed");
         
-        com.nexus.action.domain.ActionExecutionResult result = history.get(0);
-        assertEquals(ActionType.CREATE_ALERT, result.request().actionType());
-        assertEquals("SUCCESS", result.status().name());
+        ActionHistoryRecord result = history.get(0);
+        assertEquals(ActionType.CREATE_ALERT, result.getActionType());
+        assertEquals("SUCCESS", result.getStatus().name());
     }
 }

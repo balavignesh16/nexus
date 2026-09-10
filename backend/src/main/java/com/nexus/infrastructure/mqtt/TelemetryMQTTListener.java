@@ -89,6 +89,7 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
                 String topicDeviceId = parts[2];
                 if (!topicDeviceId.equals(request.deviceId().toString())) {
                     log.warn("Device ID mismatch! Topic ID: {}, Payload ID: {}. Dropping message.", topicDeviceId, request.deviceId());
+                    mqttClient.messageArrivedComplete(message.getId(), message.getQos());
                     return; // Reject message
                 }
             }
@@ -97,16 +98,21 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             Set<ConstraintViolation<TelemetryRequest>> violations = validator.validate(request);
             if (!violations.isEmpty()) {
                 log.warn("Invalid telemetry payload: {}", violations);
+                mqttClient.messageArrivedComplete(message.getId(), message.getQos());
                 throw new ConstraintViolationException(violations);
             }
 
-            // 4. TelemetryService Processing
+            // 4. TelemetryService Processing (Authoritative Persistence)
             telemetryService.processTelemetry(request);
             log.debug("Successfully processed MQTT telemetry for device {}", request.deviceId());
 
+            // 5. Manual ACK ONLY AFTER successful persistence
+            mqttClient.messageArrivedComplete(message.getId(), message.getQos());
+
         } catch (Exception e) {
-            log.error("Error processing MQTT message from topic {}", topic, e);
-            // In a production system, this could go to a Dead Letter Queue. For M4, we just drop.
+            log.error("Error processing MQTT message from topic {}. Did NOT ack. Message will be retried.", topic, e);
+            // Do not ack. The broker will redeliver this QoS 1 message later.
+            throw new RuntimeException("MQTT processing failed, triggering retry", e);
         }
     }
 
