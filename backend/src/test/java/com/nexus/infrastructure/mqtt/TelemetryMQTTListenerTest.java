@@ -26,13 +26,21 @@ import static org.mockito.Mockito.*;
 /**
  * Behavioral tests for TelemetryMQTTListener's message-acknowledgment
  * contract: a message is only ever acked (messageArrivedComplete) AFTER
- * telemetry has been successfully processed; any failure along the way -
- * processing exception, topic/payload device-id mismatch, bean-validation
- * failure, or a malformed payload - leaves the ack decision to whichever
- * exact code path handles that failure category (some explicitly ack-and-
- * drop; others deliberately do not ack, relying on QoS 1 broker redelivery).
- * These tests prove the CURRENT behavior of each path exactly as
- * implemented; they do not assume the design is complete or ideal.
+ * telemetry has been successfully processed. Three categories of failure are
+ * distinguished:
+ *   - PERMANENTLY INVALID input (malformed/mistyped JSON, missing required
+ *     fields, topic/payload device-id mismatch): acknowledged and dropped,
+ *     never retried, since redelivery cannot make it valid.
+ *   - TRANSIENT processing failure (TelemetryService throws): NOT
+ *     acknowledged, so QoS 1 broker redelivery can retry it later.
+ *   - SUCCESS: processed, then acknowledged, in that order.
+ *
+ * As of fix(mqtt): prevent poison-message redelivery loops, deserialization
+ * failures and missing-required-field payloads are both routed into the
+ * "permanently invalid -> ack and drop" category instead of falling through
+ * to the transient-failure path, which previously caused them to be
+ * redelivered forever (deserialization failure) or to throw a
+ * NullPointerException before validation ever ran (missing deviceId).
  *
  * No real broker is used or needed: messageArrived() is a plain method on a
  * @Component, callable directly with a mocked MqttClient (to observe ack
@@ -190,28 +198,32 @@ class TelemetryMQTTListenerTest {
         verify(mqttClient, times(1)).messageArrivedComplete(anyInt(), anyInt());
     }
 
-    // ---------- Bean validation failures: explicitly ack-and-drop ----------
+    // ---------- Bean validation failures: acknowledged and dropped, cleanly ----------
+    //
+    // FIXED (fix(mqtt): prevent poison-message redelivery loops): these
+    // paths previously acked the message and then threw a
+    // ConstraintViolationException anyway, which was caught by the outer
+    // catch and logged as "Did NOT ack" - misleading, since the ack had
+    // already happened. Bean-validation failure is now handled inline: log,
+    // acknowledge, return. No exception is thrown, and the misleading log
+    // line is structurally unreachable from this path (that log statement
+    // only exists in the processing try/catch now).
 
     @Test
-    void missingSensorType_failsBeanValidation_isNotProcessed() throws Exception {
+    void missingSensorType_failsBeanValidation_isNotProcessed_andDoesNotThrow() throws Exception {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         String json = String.format(
                 "{\"deviceId\":\"%s\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"\",\"value\":22.5,\"unit\":\"CELSIUS\"}",
                 deviceId);
 
-        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, messageFor(json)));
+        assertDoesNotThrow(() -> listener.messageArrived(topic, messageFor(json)));
 
         verify(telemetryService, never()).processTelemetry(any());
     }
 
     @Test
-    void missingSensorType_failsBeanValidation_isAcknowledgedDespiteThrowing() throws Exception {
-        // Current, exact (and slightly inconsistent) behavior: the code acks
-        // the message as soon as the ConstraintViolationException is
-        // detected, then throws anyway - so the log line at the outer catch
-        // ("Did NOT ack") is misleading for this specific path, but the ack
-        // itself has already genuinely happened by the time that log fires.
+    void missingSensorType_failsBeanValidation_isAcknowledgedExactlyOnce_cleanly() throws Exception {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         String json = String.format(
@@ -219,83 +231,101 @@ class TelemetryMQTTListenerTest {
                 deviceId);
         MqttMessage message = messageFor(json);
 
-        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
     @Test
-    void missingValue_failsBeanValidation_isNotProcessed() throws Exception {
+    void missingValue_failsBeanValidation_isNotProcessed_andDoesNotThrow() throws Exception {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         String json = String.format(
                 "{\"deviceId\":\"%s\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"unit\":\"CELSIUS\"}",
                 deviceId);
+        MqttMessage message = messageFor(json);
 
-        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, messageFor(json)));
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
         verify(telemetryService, never()).processTelemetry(any());
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
     @Test
-    void missingUnit_failsBeanValidation_isNotProcessed() throws Exception {
+    void missingUnit_failsBeanValidation_isNotProcessed_andDoesNotThrow() throws Exception {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         String json = String.format(
                 "{\"deviceId\":\"%s\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":22.5}",
                 deviceId);
+        MqttMessage message = messageFor(json);
 
-        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, messageFor(json)));
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
         verify(telemetryService, never()).processTelemetry(any());
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
-    // ---------- Malformed / structurally incomplete payloads: confirmed gap ----------
+    // ---------- Malformed / structurally incomplete payloads: FIXED ----------
+    //
+    // FIXED (fix(mqtt): prevent poison-message redelivery loops): previously,
+    // deserialization ran before either explicit ack-and-drop path, so a
+    // payload that wasn't even parseable JSON fell straight to the outer
+    // catch, which did NOT ack - meaning it would have been redelivered by
+    // the broker indefinitely. Deserialization is now wrapped in its own
+    // try/catch(IOException) that acknowledges and drops the message
+    // immediately, without throwing.
 
     @Test
-    void malformedJsonSyntax_failsDeserialization_isNotAcknowledged() throws Exception {
-        // CONFIRMED GAP (already flagged in the original forensic audit, not a
-        // new finding introduced by this test): deserialization happens
-        // before either of the two explicit ack-and-drop paths (topic check,
-        // bean validation), so a payload that isn't even parseable JSON never
-        // reaches them. It falls straight to the outer catch, which does NOT
-        // ack - meaning a genuinely malformed message (which can never become
-        // parseable) would be redelivered by the broker indefinitely, absent
-        // a dead-letter mechanism. This test proves that is the CURRENT,
-        // real, reproducible behavior - it does not fix or mask it.
+    void malformedJsonSyntax_isAcknowledgedAndDropped_doesNotThrow_isNotRetried() throws Exception {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         MqttMessage message = messageFor("{not valid json at all");
 
-        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
         verify(telemetryService, never()).processTelemetry(any());
-        verify(mqttClient, never()).messageArrivedComplete(anyInt(), anyInt());
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
     @Test
-    void nullDeviceIdInPayload_causesNullPointerDuringTopicComparison_isNotAcknowledged() throws Exception {
-        // CONCRETE INSTANCE of the same gap above, pinpointed during this
-        // investigation: a structurally valid JSON payload with "deviceId"
-        // omitted deserializes successfully (deviceId = null), but then
-        // request.deviceId().toString() in the topic-vs-payload check throws
-        // an NPE - before bean validation (which would otherwise have caught
-        // the missing @NotNull deviceId gracefully, ack-and-drop) ever runs.
-        // The NPE falls into the same uncaught/no-ack/retry-forever path as
-        // the malformed-JSON case above. This is the same already-disclosed
-        // risk category, not a new class of defect - proven here precisely
-        // rather than left as a vague possibility.
+    void jsonWithWrongFieldType_isAcknowledgedAndDropped_doesNotThrow() throws Exception {
+        // Same category as malformed syntax: syntactically valid JSON but a
+        // value of the wrong type (e.g. a boolean where a numeric "value" is
+        // expected) fails during deserialization, before either ack-and-drop
+        // path is reached. This is the exact real-world scenario a motion
+        // sensor previously triggered against the live backend (a Python
+        // bool serialized as JSON true/false into a Double field).
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+        String jsonWithBooleanValue = String.format(
+                "{\"deviceId\":\"%s\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"MOTION_SENSOR\",\"value\":false,\"unit\":\"BOOLEAN\"}",
+                deviceId);
+        MqttMessage message = messageFor(jsonWithBooleanValue);
+
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
+
+        verify(telemetryService, never()).processTelemetry(any());
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
+    }
+
+    @Test
+    void nullDeviceIdInPayload_isRejectedByBeanValidation_noNullPointerException_isAcknowledged() throws Exception {
+        // FIXED: a structurally valid JSON payload with "deviceId" omitted
+        // deserializes successfully (deviceId = null). Bean validation now
+        // runs BEFORE the topic-vs-payload device-id comparison, so the
+        // @NotNull violation on deviceId is caught here - request.deviceId()
+        // is never dereferenced against a null value, so the
+        // NullPointerException that previously occurred here cannot happen.
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         String jsonMissingDeviceId = "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":22.5,\"unit\":\"CELSIUS\"}";
         MqttMessage message = messageFor(jsonMissingDeviceId);
 
-        RuntimeException thrown = assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
-        assertInstanceOf(NullPointerException.class, thrown.getCause(),
-                "documents the exact mechanism: NPE from request.deviceId().toString() on a null deviceId");
+        assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
         verify(telemetryService, never()).processTelemetry(any());
-        verify(mqttClient, never()).messageArrivedComplete(anyInt(), anyInt());
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
     // ---------- QoS / subscription behavior ----------

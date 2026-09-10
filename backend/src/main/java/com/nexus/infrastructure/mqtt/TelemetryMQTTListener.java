@@ -5,17 +5,18 @@ import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.ConstraintViolation;
-import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.Set;
 
 @Component
@@ -76,43 +77,72 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
+        log.debug("Received MQTT message on topic: {}", topic);
+
+        // 1. Deserialize. A payload that cannot be parsed - malformed JSON
+        // syntax, or a JSON value of the wrong type for a field - can never
+        // become valid through broker redelivery. Treat it as permanently
+        // invalid input: acknowledge and drop it rather than letting the
+        // broker retry it forever.
+        TelemetryRequest request;
         try {
-            log.debug("Received MQTT message on topic: {}", topic);
-            
-            // 1. Deserialize
-            byte[] payload = message.getPayload();
-            TelemetryRequest request = objectMapper.readValue(payload, TelemetryRequest.class);
+            request = objectMapper.readValue(message.getPayload(), TelemetryRequest.class);
+        } catch (IOException e) {
+            log.error("Malformed MQTT telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic, e);
+            acknowledgeQuietly(message);
+            return;
+        }
 
-            // 2. Topic vs Payload Validation
-            String[] parts = topic.split("/");
-            if (parts.length >= 3) {
-                String topicDeviceId = parts[2];
-                if (!topicDeviceId.equals(request.deviceId().toString())) {
-                    log.warn("Device ID mismatch! Topic ID: {}, Payload ID: {}. Dropping message.", topicDeviceId, request.deviceId());
-                    mqttClient.messageArrivedComplete(message.getId(), message.getQos());
-                    return; // Reject message
-                }
+        // 2. Bean Validation. This runs BEFORE any field of `request` is
+        // dereferenced - in particular before the topic/payload device-id
+        // comparison below - so a payload with a missing/null required field
+        // (e.g. no "deviceId" at all) is rejected here as permanently invalid
+        // input instead of causing a NullPointerException further down.
+        Set<ConstraintViolation<TelemetryRequest>> violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            log.warn("Invalid telemetry payload on topic {}: {}. Acknowledging and dropping (not retryable).", topic, violations);
+            acknowledgeQuietly(message);
+            return;
+        }
+
+        // 3. Topic vs Payload Validation
+        String[] parts = topic.split("/");
+        if (parts.length >= 3) {
+            String topicDeviceId = parts[2];
+            if (!topicDeviceId.equals(request.deviceId().toString())) {
+                log.warn("Device ID mismatch! Topic ID: {}, Payload ID: {}. Acknowledging and dropping.", topicDeviceId, request.deviceId());
+                acknowledgeQuietly(message);
+                return;
             }
+        }
 
-            // 3. Bean Validation
-            Set<ConstraintViolation<TelemetryRequest>> violations = validator.validate(request);
-            if (!violations.isEmpty()) {
-                log.warn("Invalid telemetry payload: {}", violations);
-                mqttClient.messageArrivedComplete(message.getId(), message.getQos());
-                throw new ConstraintViolationException(violations);
-            }
-
-            // 4. TelemetryService Processing (Authoritative Persistence)
+        // 4. TelemetryService Processing (Authoritative Persistence) and
+        // 5. Manual ACK ONLY AFTER successful persistence. A failure here is
+        // treated as transient: do not ack, so the broker redelivers this
+        // QoS 1 message later.
+        try {
             telemetryService.processTelemetry(request);
             log.debug("Successfully processed MQTT telemetry for device {}", request.deviceId());
-
-            // 5. Manual ACK ONLY AFTER successful persistence
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
-
         } catch (Exception e) {
             log.error("Error processing MQTT message from topic {}. Did NOT ack. Message will be retried.", topic, e);
-            // Do not ack. The broker will redeliver this QoS 1 message later.
             throw new RuntimeException("MQTT processing failed, triggering retry", e);
+        }
+    }
+
+    /**
+     * Acknowledges a message that has been positively identified as
+     * permanently invalid (unparseable, fails validation, or a topic/payload
+     * device-id mismatch) so it is dropped rather than redelivered forever.
+     * If the ack call itself fails, that failure is logged and swallowed
+     * rather than escalated to a retry - retrying will not make permanently
+     * invalid input valid.
+     */
+    private void acknowledgeQuietly(MqttMessage message) {
+        try {
+            mqttClient.messageArrivedComplete(message.getId(), message.getQos());
+        } catch (MqttException e) {
+            log.error("Failed to acknowledge a permanently-invalid MQTT message (id {}); it may be redelivered despite being unprocessable.", message.getId(), e);
         }
     }
 
