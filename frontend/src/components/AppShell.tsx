@@ -167,11 +167,8 @@ export function AppShell({ children }: AppShellProps = {}) {
               {[
                 { label: 'Realtime', status: connection.realtimeStatus },
                 { label: 'Backend', status: connection.backend },
-                { label: 'MQTT', status: connection.mqtt },
+                { label: 'MQTT Broker', status: connection.mqtt },
                 { label: 'Database', status: connection.database },
-                { label: 'Twin Engine', status: connection.twinEngine },
-                { label: 'Rules Engine', status: connection.ruleEngine },
-                { label: 'Action Engine', status: connection.actionEngine },
               ].map((service, i) => {
                 const isOnline = service.status === 'Online' || service.status === 'connected' || service.status === 'demo';
                 return (

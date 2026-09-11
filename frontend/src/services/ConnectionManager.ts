@@ -7,9 +7,6 @@ export interface ConnectionState {
   backend: ServiceStatus;
   mqtt: ServiceStatus;
   database: ServiceStatus;
-  twinEngine: ServiceStatus;
-  ruleEngine: ServiceStatus;
-  actionEngine: ServiceStatus;
   latencyMs: number;
   reconnectAttempts: number;
   realtimeStatus: RealtimeConnectionState;
@@ -24,9 +21,6 @@ class ConnectionManagerService {
     backend: 'Offline',
     mqtt: 'Offline',
     database: 'Offline',
-    twinEngine: 'Offline',
-    ruleEngine: 'Offline',
-    actionEngine: 'Offline',
     latencyMs: 0,
     reconnectAttempts: 0,
     realtimeStatus: 'disconnected',
@@ -56,18 +50,13 @@ class ConnectionManagerService {
     const ping = async () => {
       const start = performance.now();
       try {
-        // Simple health check endpoint (assuming spring boot actuator or similar)
+        // Backend reachability: "the backend answered this HTTP request."
         const response = await fetch('http://localhost:8080/api/v1/devices/active');
         const latency = Math.round(performance.now() - start);
-        
+
         if (response.ok) {
           this.updateState({
             backend: 'Online',
-            database: 'Online', // Inference
-            twinEngine: 'Online',
-            ruleEngine: 'Online',
-            actionEngine: 'Online',
-            mqtt: 'Online', // In a real app, MQTT client status handles this
             latencyMs: latency,
             reconnectAttempts: 0
           });
@@ -75,15 +64,32 @@ class ConnectionManagerService {
           throw new Error('Degraded');
         }
       } catch (err) {
+        // Backend is unreachable, so database/MQTT state can't be known either.
         this.updateState({
           backend: 'Offline',
           database: 'Offline',
-          twinEngine: 'Offline',
-          ruleEngine: 'Offline',
-          actionEngine: 'Offline',
           mqtt: 'Offline',
           reconnectAttempts: this.state.reconnectAttempts + 1
         });
+        return;
+      }
+
+      // Database and MQTT are independently, directly verified via the
+      // backend's own platform-health endpoint - never inferred from the
+      // devices/active call above.
+      try {
+        const healthResponse = await fetch('http://localhost:8080/api/v1/platform-health');
+        if (healthResponse.ok) {
+          const health: { database: string; mqtt: string } = await healthResponse.json();
+          this.updateState({
+            database: health.database === 'UP' ? 'Online' : 'Offline',
+            mqtt: health.mqtt === 'CONNECTED' ? 'Online' : 'Offline',
+          });
+        } else {
+          this.updateState({ database: 'Offline', mqtt: 'Offline' });
+        }
+      } catch (err) {
+        this.updateState({ database: 'Offline', mqtt: 'Offline' });
       }
     };
 
