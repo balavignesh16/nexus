@@ -185,13 +185,17 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
             <div className="flex flex-col items-center gap-1 pt-1">
               <span className="text-[10px] text-muted-foreground">Signal Strength</span>
               <div className="flex items-end gap-1 h-7 mt-1">
-                <div className={`w-[5px] h-2 rounded-sm ${device.signalStrength && device.signalStrength > 10 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
-                <div className={`w-[5px] h-3 rounded-sm ${device.signalStrength && device.signalStrength > 30 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
-                <div className={`w-[5px] h-4 rounded-sm ${device.signalStrength && device.signalStrength > 50 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
-                <div className={`w-[5px] h-6 rounded-sm ${device.signalStrength && device.signalStrength > 70 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
-                <div className={`w-[5px] h-7 rounded-sm ${device.signalStrength && device.signalStrength > 90 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
+                <div className={`w-[5px] h-2 rounded-sm ${device.signalStrength !== null && device.signalStrength > 10 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
+                <div className={`w-[5px] h-3 rounded-sm ${device.signalStrength !== null && device.signalStrength > 30 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
+                <div className={`w-[5px] h-4 rounded-sm ${device.signalStrength !== null && device.signalStrength > 50 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
+                <div className={`w-[5px] h-6 rounded-sm ${device.signalStrength !== null && device.signalStrength > 70 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
+                <div className={`w-[5px] h-7 rounded-sm ${device.signalStrength !== null && device.signalStrength > 90 ? 'bg-[#22c55e]' : 'bg-[#1f1f28]'}`}></div>
               </div>
-              <span className="text-[10px] text-white mt-1 font-bold">-{100 - (device.signalStrength || 0)} dBm <span className="text-muted-foreground font-normal">{(device.signalStrength || 0) > 60 ? 'Strong' : 'Weak'}</span></span>
+              {device.signalStrength !== null ? (
+                <span className="text-[10px] text-white mt-1 font-bold">-{100 - device.signalStrength} dBm <span className="text-muted-foreground font-normal">{device.signalStrength > 60 ? 'Strong' : 'Weak'}</span></span>
+              ) : (
+                <span className="text-[10px] text-muted-foreground mt-1 font-bold">Unavailable</span>
+              )}
             </div>
           </div>
         </div>

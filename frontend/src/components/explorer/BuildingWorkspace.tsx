@@ -2,14 +2,13 @@ import { useSpacesByBuilding } from '../../hooks/queries';
 import { StatCard } from '../ui/StatCard';
 import { LiveAreaChart } from '../ui/LiveAreaChart';
 import { ActivityTimeline } from '../ui/ActivityTimeline';
-import { Building2, Activity } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 
 export function BuildingWorkspace({ buildingId }: { buildingId: string }) {
   const { data: spaces = [] } = useSpacesByBuilding(buildingId);
 
-  const mockEvents = [
-    { id: '1', time: '11:15 AM', title: 'HVAC setpoint adjusted', description: 'Rule engine triggered temperature optimization', icon: Activity, type: 'rule' as const },
-  ];
+  // No backend endpoint currently exposes a building-scoped activity feed.
+  // Showing an honest empty state rather than fabricated activity entries.
 
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 animate-in">
@@ -30,7 +29,7 @@ export function BuildingWorkspace({ buildingId }: { buildingId: string }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LiveAreaChart title="Building Energy Consumption" data={[]} color="#8b5cf6" />
-        <ActivityTimeline title="Building Activity Log" events={mockEvents} />
+        <ActivityTimeline title="Building Activity Log" events={[]} emptyMessage="No building-scoped activity feed available yet" />
       </div>
     </div>
   );

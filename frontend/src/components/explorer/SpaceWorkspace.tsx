@@ -2,14 +2,13 @@ import { useDevicesBySpace } from '../../hooks/queries';
 import { StatCard } from '../ui/StatCard';
 import { LiveAreaChart } from '../ui/LiveAreaChart';
 import { ActivityTimeline } from '../ui/ActivityTimeline';
-import { Layers3, Activity } from 'lucide-react';
+import { Layers3 } from 'lucide-react';
 
 export function SpaceWorkspace({ spaceId }: { spaceId: string }) {
   const { data: devices = [] } = useDevicesBySpace(spaceId);
 
-  const mockEvents = [
-    { id: '1', time: '12:05 PM', title: 'Occupancy limit reached', description: 'Zone A exceeded 50 people', icon: Activity, type: 'telemetry' as const },
-  ];
+  // No backend endpoint currently exposes a space-scoped activity feed.
+  // Showing an honest empty state rather than fabricated activity entries.
 
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 animate-in">
@@ -30,7 +29,7 @@ export function SpaceWorkspace({ spaceId }: { spaceId: string }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LiveAreaChart title="Space Occupancy Trend" data={[]} color="#10b981" />
-        <ActivityTimeline title="Space Activity Log" events={mockEvents} />
+        <ActivityTimeline title="Space Activity Log" events={[]} emptyMessage="No space-scoped activity feed available yet" />
       </div>
     </div>
   );

@@ -133,8 +133,8 @@ class ScenarioEngineClass {
 
       // Fluctuations
       device.signalStrength = -50 - Math.floor(Math.random() * 15);
-      if (tick % 10 === 0 && device.battery > 0) {
-        device.battery -= 1;
+      if (tick % 10 === 0 && (device.battery ?? 0) > 0) {
+        device.battery = (device.battery ?? 0) - 1;
       }
 
       // Update metrics array for UI mapping

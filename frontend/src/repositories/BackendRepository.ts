@@ -19,10 +19,12 @@ export class BackendDeviceRepository implements IDeviceRepository {
       healthScore: 0, // Calculated by MetricEngine in resolver
       twinQuality: 0, // Calculated by MetricEngine in resolver
       lastSeen: data.lastSeen || 'Never',
-      signalStrength: 0, // Hybrid fallback if backend doesn't provide
-      battery: 0, // Hybrid fallback
-      temperature: 0, // Hybrid fallback
-      humidity: 0, // Hybrid fallback
+      // The backend Device API does not currently expose these fields.
+      // null (not 0) means "not available" - 0 would be a real measurement.
+      signalStrength: null,
+      battery: null,
+      temperature: null,
+      humidity: null,
       metrics: [] // We'll populate this if backend sends generic metrics, otherwise telemetry API handles it
     };
   }
@@ -43,10 +45,11 @@ export class BackendDeviceRepository implements IDeviceRepository {
       healthScore: 0,
       twinQuality: 0,
       lastSeen: d.lastSeen || 'Never',
-      signalStrength: 0,
-      battery: 0,
-      temperature: 0,
-      humidity: 0,
+      // Not available from the backend Device API - see getDevice() above.
+      signalStrength: null,
+      battery: null,
+      temperature: null,
+      humidity: null,
       metrics: []
     }));
   }

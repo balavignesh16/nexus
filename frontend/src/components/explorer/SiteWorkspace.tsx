@@ -2,15 +2,14 @@ import { useBuildingsBySite } from '../../hooks/queries';
 import { StatCard } from '../ui/StatCard';
 import { LiveAreaChart } from '../ui/LiveAreaChart';
 import { ActivityTimeline } from '../ui/ActivityTimeline';
-import { Server, AlertTriangle } from 'lucide-react';
+import { Server } from 'lucide-react';
 
 export function SiteWorkspace({ siteId }: { siteId: string }) {
   const { data: buildings = [] } = useBuildingsBySite(siteId);
 
-  const mockEvents = [
-    { id: '1', time: '10:45 AM', title: 'Site configuration updated', description: 'User admin applied new policy', icon: Server, type: 'action' as const },
-    { id: '2', time: '09:30 AM', title: 'High latency detected', description: 'Gateway GW-01 reporting 500ms latency', icon: AlertTriangle, type: 'rule' as const },
-  ];
+  // No backend endpoint currently exposes a site-scoped activity feed
+  // (GET /events has no site/building/space filter). Showing an honest
+  // empty state rather than fabricated activity entries.
 
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 animate-in">
@@ -31,7 +30,7 @@ export function SiteWorkspace({ siteId }: { siteId: string }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LiveAreaChart title="Site Aggregate Telemetry" data={[]} />
-        <ActivityTimeline title="Site Activity Log" events={mockEvents} />
+        <ActivityTimeline title="Site Activity Log" events={[]} emptyMessage="No site-scoped activity feed available yet" />
       </div>
     </div>
   );

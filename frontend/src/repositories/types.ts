@@ -38,10 +38,14 @@ export interface DeviceState {
   healthScore: number;
   twinQuality: number;
   lastSeen: string;
-  signalStrength: number;
-  battery: number;
-  temperature: number;
-  humidity: number;
+  // null means "not reported by this data source" - distinct from an
+  // actual reading of 0 (e.g. 0% battery is a real measurement). The
+  // backend Device API does not currently expose these fields; only the
+  // demo simulator provides real numeric values for them.
+  signalStrength: number | null;
+  battery: number | null;
+  temperature: number | null;
+  humidity: number | null;
   metrics: Metric[];
 }
 
