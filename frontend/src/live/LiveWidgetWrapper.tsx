@@ -1,6 +1,6 @@
 import React from 'react';
 import { Activity, Pause, WifiOff, AlertTriangle, Clock } from 'lucide-react';
-import { useLiveManager } from './LiveUpdateProvider';
+import { useConnectionStatus } from '../services/ConnectionManager';
 
 export type WidgetState = 'LOADING' | 'LIVE' | 'PAUSED' | 'OFFLINE' | 'ERROR' | 'STALE';
 
@@ -23,11 +23,14 @@ export function LiveWidgetWrapper({
   onPauseToggle,
   actions
 }: LiveWidgetWrapperProps) {
-  const stats = useLiveManager();
-  
-  // Resolve effective state taking global connection into account
+  const connection = useConnectionStatus();
+
+  // Resolve effective state taking global connection into account.
+  // Mapping: the previous PollingManager-based check was
+  // `stats.status === 'OFFLINE'` (i.e. the backend is unreachable). The
+  // closest equivalent in ConnectionManager's shape is `backend === 'Offline'`.
   let effectiveState = state;
-  if (stats.status === 'OFFLINE' && state !== 'ERROR') {
+  if (connection.backend === 'Offline' && state !== 'ERROR') {
     effectiveState = 'OFFLINE';
   } else if (state === 'LIVE' && lastUpdateMs && (Date.now() - lastUpdateMs > 30000)) {
     effectiveState = 'STALE';

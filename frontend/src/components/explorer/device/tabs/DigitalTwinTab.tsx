@@ -1,13 +1,12 @@
 import { useState } from 'react';
-import { useDevice } from '../../../../hooks/queries';
-import { useLiveUpdates } from '../../../../live/useLiveUpdates';
+import { useDevice, useLatestTwins } from '../../../../hooks/queries';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Box, Code, Edit3, Save, X, GitCommit, FileDiff } from 'lucide-react';
 import { DiffEditor } from '@monaco-editor/react';
 
 export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
   const { data: device } = useDevice(deviceId);
-  const twins = useLiveUpdates<any[]>(['twins', 100], []);
+  const { data: twins = [] } = useLatestTwins(100);
   const [isEditing, setIsEditing] = useState(false);
   const [viewMode, setViewMode] = useState<'visual' | 'json' | 'diff'>('visual');
   

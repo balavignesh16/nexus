@@ -47,6 +47,10 @@ export function RealtimeRepositorySync() {
       queryClient.setQueryData<any[]>(['twins', 12], (old = []) => {
         return old.map(dev => dev.id === payload.deviceId ? { ...dev, ...deltaObj } : dev);
       });
+      // Update the higher-capacity twins query (DigitalTwinTab)
+      queryClient.setQueryData<any[]>(['twins', 100], (old = []) => {
+        return old.map(dev => dev.id === payload.deviceId ? { ...dev, ...deltaObj } : dev);
+      });
     });
 
     // 3. Sync Events -> Prepend

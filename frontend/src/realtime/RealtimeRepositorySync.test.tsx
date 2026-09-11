@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { RealtimeMessage, RuleMatchedPayload } from './RealtimeEvents';
+import type { RealtimeMessage, RuleMatchedPayload, TwinUpdatedPayload } from './RealtimeEvents';
 
 // Mock RealtimeManager so tests can synthesize a message on any topic
 // without a real STOMP/SockJS connection.
@@ -53,6 +53,76 @@ function ruleMatchMessage(overrides: Partial<RuleMatchedPayload> = {}): Realtime
     },
   };
 }
+
+function twinUpdatedMessage(overrides: Partial<TwinUpdatedPayload> = {}): RealtimeMessage<TwinUpdatedPayload> {
+  return {
+    eventId: 'evt-twin-1',
+    eventType: 'TwinUpdated',
+    deviceId: 'dev-1',
+    correlationId: 'corr-twin-1',
+    sequenceNumber: 1,
+    serverTimestamp: 1700000000000,
+    source: 'BACKEND',
+    version: 1,
+    payload: {
+      deviceId: 'dev-1',
+      deltas: [{ property: 'value', oldValue: 20, newValue: 42, timestamp: 1700000000000 }],
+      twinTimestamp: 1700000000000,
+      ...overrides,
+    },
+  };
+}
+
+describe('RealtimeRepositorySync - TWINS topic', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  function renderSync() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeRepositorySync />
+      </QueryClientProvider>
+    );
+  }
+
+  it('updates both ["twins", 12] and ["twins", 100] on a twin delta message', () => {
+    queryClient.setQueryData(['twins', 12], [
+      { id: 'dev-1', value: 20 },
+      { id: 'dev-2', value: 5 },
+    ]);
+    queryClient.setQueryData(['twins', 100], [
+      { id: 'dev-1', value: 20 },
+      { id: 'dev-2', value: 5 },
+    ]);
+
+    renderSync();
+
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
+
+    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
+    const twins100 = queryClient.getQueryData<any[]>(['twins', 100])!;
+
+    expect(twins12.find(d => d.id === 'dev-1').value).toBe(42);
+    expect(twins100.find(d => d.id === 'dev-1').value).toBe(42);
+    // Untouched device unaffected in both caches
+    expect(twins12.find(d => d.id === 'dev-2').value).toBe(5);
+    expect(twins100.find(d => d.id === 'dev-2').value).toBe(5);
+  });
+
+  it('is a no-op on ["twins", 100] when that cache entry has not been populated yet', () => {
+    // No initial setQueryData for ['twins', 100] - simulates a page where
+    // useLatestTwins(100) hasn't fetched yet.
+    renderSync();
+
+    expect(() => (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage())).not.toThrow();
+
+    const twins100 = queryClient.getQueryData<any[]>(['twins', 100]);
+    expect(twins100).toEqual([]);
+  });
+});
 
 describe('RealtimeRepositorySync - RULES topic', () => {
   let queryClient: QueryClient;
