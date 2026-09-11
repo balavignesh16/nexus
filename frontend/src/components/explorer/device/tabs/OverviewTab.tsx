@@ -4,13 +4,22 @@ import { useDevice } from '../../../../hooks/queries';
 import { SkeletonCard, SkeletonChart, SkeletonTimeline } from '../../../ui/Skeletons';
 import { ScenarioEngine } from '../../../../simulation/ScenarioEngine';
 import { DebugOverlay } from '../DebugOverlay';
+import { FEATURES } from '../../../../config/features';
+
+// These quick actions have no real backend implementation yet - they only
+// ever did anything via the demo ScenarioEngine. In live mode they must be
+// visibly unavailable rather than silently no-op or fabricate demo events.
+const LIVE_MODE_UNAVAILABLE_ACTIONS = new Set(['Refresh Twin', 'Download Telemetry', 'Test Connection']);
 
 export function OverviewTab({ deviceId }: { deviceId: string }) {
   const { data: device, isLoading } = useDevice(deviceId);
   const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
-    // Get events for timeline
+    // ScenarioEngine is a demo-only data source - never subscribe to it in
+    // live mode, so this timeline can't be populated by a demo event.
+    if (!FEATURES.DEMO_MODE) return;
+
     const updateEvents = () => {
       setEvents(ScenarioEngine.getEvents(deviceId).slice(0, 5));
     };
@@ -63,19 +72,27 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
   };
 
   // 2. Device Status
+  // Latency/Twin Age/Uptime/Firmware/Last Reboot have no real backend source
+  // today - shown as honestly unavailable rather than invented.
   const statusProperties = [
     { label: 'State', value: device.status, isSuccess: device.status === 'ACTIVE' },
     { label: 'Transport', value: 'MQTT' },
     { label: 'Polling Frequency', value: '5s' },
-    { label: 'Latency', value: `${Math.floor(Math.random() * 20 + 20)} ms` },
-    { label: 'Twin Age', value: '2.1 s' },
-    { label: 'Uptime', value: '2d 14h 36m' },
-    { label: 'Firmware', value: 'v1.2.3' },
-    { label: 'Last Reboot', value: '2026-08-01 08:13:22' },
+    { label: 'Latency', value: 'Unavailable', unavailable: true },
+    { label: 'Twin Age', value: 'Unavailable', unavailable: true },
+    { label: 'Uptime', value: 'Unavailable', unavailable: true },
+    { label: 'Firmware', value: 'Unavailable', unavailable: true },
+    { label: 'Last Reboot', value: 'Unavailable', unavailable: true },
   ];
 
   // 3. Quick Actions
+  // Refresh Twin / Test Connection / Download Telemetry have no real backend
+  // implementation - only ever simulated via the demo ScenarioEngine. This
+  // must never fire in live mode (see LIVE_MODE_UNAVAILABLE_ACTIONS below,
+  // which also disables the buttons in the UI).
   const handleQuickAction = (label: string) => {
+    if (!FEATURES.DEMO_MODE) return;
+
     if (label === 'Refresh Twin') {
       ScenarioEngine.setScenario('Normal Operations');
       // Hack to emit an event
@@ -220,7 +237,7 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
             {statusProperties.map((prop, idx) => (
               <div key={idx} className="flex items-center justify-between border-b border-[#1f1f28]/50 pb-3 last:border-0 last:pb-0">
                 <span className="text-xs text-muted-foreground">{prop.label}</span>
-                <span className={`text-xs font-mono font-medium tracking-wide ${prop.isSuccess ? 'text-[#22c55e]' : 'text-foreground/90'}`}>
+                <span className={`text-xs font-mono font-medium tracking-wide ${prop.isSuccess ? 'text-[#22c55e]' : prop.unavailable ? 'text-muted-foreground' : 'text-foreground/90'}`}>
                   {prop.value}
                 </span>
               </div>
@@ -237,14 +254,30 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
         <div className="col-span-12 lg:col-span-8 bg-[#12121a] border border-[#1f1f28] rounded-xl p-5 flex flex-col shadow-sm">
           <h3 className="text-sm font-semibold text-foreground mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
-            {actions.map((act, i) => (
-              <button key={i} onClick={() => handleQuickAction(act.label)} className="bg-[#0a0a0f]/50 border border-[#1f1f28] hover:border-blue-500/40 hover:bg-blue-500/5 hover:shadow-[0_0_15px_rgba(59,130,246,0.1)] rounded-xl p-4 flex flex-col items-center justify-center gap-3 transition-all group shadow-sm cursor-pointer">
-                <act.icon size={20} className="text-blue-500/80 group-hover:text-blue-400 group-hover:scale-110 transition-all" />
-                <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground text-center">
-                  {act.label}
-                </span>
-              </button>
-            ))}
+            {actions.map((act, i) => {
+              const isUnavailableInLiveMode = !FEATURES.DEMO_MODE && LIVE_MODE_UNAVAILABLE_ACTIONS.has(act.label);
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleQuickAction(act.label)}
+                  disabled={isUnavailableInLiveMode}
+                  title={isUnavailableInLiveMode ? 'Not available in live mode' : undefined}
+                  className={`bg-[#0a0a0f]/50 border rounded-xl p-4 flex flex-col items-center justify-center gap-3 transition-all group shadow-sm ${
+                    isUnavailableInLiveMode
+                      ? 'border-[#1f1f28] opacity-40 cursor-not-allowed'
+                      : 'border-[#1f1f28] hover:border-blue-500/40 hover:bg-blue-500/5 hover:shadow-[0_0_15px_rgba(59,130,246,0.1)] cursor-pointer'
+                  }`}
+                >
+                  <act.icon size={20} className={isUnavailableInLiveMode ? 'text-muted-foreground/50' : 'text-blue-500/80 group-hover:text-blue-400 group-hover:scale-110 transition-all'} />
+                  <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground text-center">
+                    {act.label}
+                  </span>
+                  {isUnavailableInLiveMode && (
+                    <span className="text-[9px] text-muted-foreground/70 -mt-1">Not available in live mode</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 

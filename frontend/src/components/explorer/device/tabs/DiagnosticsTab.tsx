@@ -1,57 +1,82 @@
 import { useDevice } from '../../../../hooks/queries';
+import { useRepositories } from '../../../../repositories/RepositoryProvider';
+import { usePolling } from '../../../../hooks/usePolling';
+import { useConnectionStatus } from '../../../../services/ConnectionManager';
 import { Skeleton } from '../../../ui/Skeleton';
-import { ShieldAlert, Server, Database, Wifi, Cpu, Activity, RefreshCw, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { ShieldAlert, Server, Database, Wifi, Cpu, Activity, RefreshCw, CheckCircle2, AlertTriangle, XCircle, HelpCircle } from 'lucide-react';
 import { DebugOverlay } from '../DebugOverlay';
+
+type CheckStatus = 'PASS' | 'WARN' | 'FAIL' | 'UNAVAILABLE';
 
 export function DiagnosticsTab({ deviceId }: { deviceId: string }) {
   const { data: device, isLoading } = useDevice(deviceId);
+  const { rules } = useRepositories();
+  const connection = useConnectionStatus();
+  // Shares the same cache key RulesPage uses - real registered-rule count,
+  // not a fabricated "actively evaluating" claim.
+  const { data: globalRules = [], isError: rulesUnavailable } = usePolling(
+    ['global-rules'],
+    () => rules.getRules(),
+    { interval: 5000 }
+  );
 
   if (isLoading || !device) return <Skeleton className="w-full h-full" />;
 
-  // Mocking diagnostic checks based on device state
   const isOnline = device.status === 'ACTIVE';
-  
-  const checks = [
+
+  // Every check below is backed by a real, existing signal, or is honestly
+  // marked UNAVAILABLE when no real signal exists yet. None of these are
+  // generated, inferred from unrelated state, or hardcoded.
+  const checks: { name: string; description: string; status: CheckStatus; icon: typeof Wifi; details: string }[] = [
     {
       name: 'Device Connection',
-      description: 'Last seen status and latency',
+      description: 'Reported device status',
       status: isOnline ? 'PASS' : 'FAIL',
       icon: Wifi,
-      details: isOnline ? 'Device responded 2 seconds ago. Latency 45ms.' : 'Device has been offline for 4 hours.',
+      details: `Device status is ${device.status}.`,
     },
     {
       name: 'MQTT Broker',
-      description: 'Pub/Sub topic authorization',
-      status: 'PASS',
+      description: "Backend's connection to the broker",
+      status: connection.mqtt === 'Online' ? 'PASS' : connection.mqtt === 'Offline' ? 'FAIL' : 'UNAVAILABLE',
       icon: Server,
-      details: 'Authorized on telemetry, twins, and commands topics.',
+      details:
+        connection.mqtt === 'Online' ? 'Backend is connected to the MQTT broker.' :
+        connection.mqtt === 'Offline' ? 'Backend is not connected to the MQTT broker.' :
+        'Broker connection status unavailable.',
     },
     {
       name: 'Digital Twin Sync',
-      description: 'State synchronization with cloud',
-      status: isOnline ? 'PASS' : 'WARN',
+      description: 'State synchronization freshness',
+      status: 'UNAVAILABLE',
       icon: Cpu,
-      details: isOnline ? 'Twin fully synced. Last update 10 seconds ago.' : 'Twin is stale. Awaiting next connection.',
+      details: 'Twin sync freshness is not currently exposed by the backend.',
     },
     {
       name: 'Database Persistence',
-      description: 'Telemetry and event storage',
-      status: 'PASS',
+      description: "Backend's datasource health",
+      status: connection.database === 'Online' ? 'PASS' : connection.database === 'Offline' ? 'FAIL' : 'UNAVAILABLE',
       icon: Database,
-      details: 'Connected to TimescaleDB. Inserts successful.',
+      details:
+        connection.database === 'Online' ? 'Datasource validity check passed.' :
+        connection.database === 'Offline' ? 'Datasource is unreachable.' :
+        'Database status unavailable.',
     },
     {
-      name: 'Rule Engine Evaluation',
-      description: 'Real-time monitoring health',
-      status: 'PASS',
+      name: 'Rule Engine',
+      description: 'Registered automation rules',
+      status: rulesUnavailable ? 'UNAVAILABLE' : 'PASS',
       icon: Activity,
-      details: '2 rules actively evaluating telemetry stream.',
+      details: rulesUnavailable
+        ? 'Rule count unavailable.'
+        : `${globalRules.length} rule(s) registered.`,
     }
   ];
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: CheckStatus) => {
     if (status === 'PASS') return <CheckCircle2 size={24} className="text-success" />;
     if (status === 'WARN') return <AlertTriangle size={24} className="text-warning" />;
+    if (status === 'UNAVAILABLE') return <HelpCircle size={24} className="text-muted-foreground" />;
     return <XCircle size={24} className="text-destructive" />;
   };
 
@@ -60,10 +85,10 @@ export function DiagnosticsTab({ deviceId }: { deviceId: string }) {
       
       {/* Header */}
       <div className="flex items-center justify-between bg-card/50 backdrop-blur border border-border/50 rounded-xl p-4 shadow-sm shrink-0 relative group">
-        <DebugOverlay 
-          title="System Diagnostics" 
+        <DebugOverlay
+          title="System Diagnostics"
           data={checks}
-          repository="MockData"
+          repository="ConnectionManager + RuleRepository"
         />
         <div className="flex items-center gap-3">
           <div className="p-2 bg-destructive/10 rounded-lg">
@@ -97,6 +122,7 @@ export function DiagnosticsTab({ deviceId }: { deviceId: string }) {
                     <span className={`text-[10px] font-bold uppercase tracking-wider ${
                       check.status === 'PASS' ? 'text-success' :
                       check.status === 'WARN' ? 'text-warning' :
+                      check.status === 'UNAVAILABLE' ? 'text-muted-foreground' :
                       'text-destructive'
                     }`}>
                       {check.status}
