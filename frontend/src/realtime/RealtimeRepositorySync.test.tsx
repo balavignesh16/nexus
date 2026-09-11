@@ -73,6 +73,35 @@ function twinUpdatedMessage(overrides: Partial<TwinUpdatedPayload> = {}): Realti
   };
 }
 
+// Matches the authoritative backend shape: DigitalTwinResponse.java /
+// GET /api/v1/twins - identified by `deviceId`, not `id`.
+function realisticTwin(overrides: Record<string, any> = {}) {
+  return {
+    deviceId: 'dev-1',
+    latestTimestamp: '2026-09-10T17:23:57.357686Z',
+    latestSensorType: 'GAS_SENSOR',
+    latestValue: 20,
+    latestUnit: 'PPM',
+    lastSeen: '2026-09-10T17:23:57.858832Z',
+    quality: 'GOOD',
+    metadata: {},
+    ...overrides,
+  };
+}
+
+// Matches the authoritative backend shape: GET /api/v1/devices/active -
+// identified by `id`, not `deviceId`.
+function realisticDevice(overrides: Record<string, any> = {}) {
+  return {
+    id: 'dev-1',
+    spaceId: 'space-1',
+    name: 'Gas Sensor 1',
+    deviceType: 'GAS_SENSOR',
+    status: 'ACTIVE',
+    ...overrides,
+  };
+}
+
 describe('RealtimeRepositorySync - TWINS topic', () => {
   let queryClient: QueryClient;
 
@@ -88,28 +117,122 @@ describe('RealtimeRepositorySync - TWINS topic', () => {
     );
   }
 
-  it('updates both ["twins", 12] and ["twins", 100] on a twin delta message', () => {
-    queryClient.setQueryData(['twins', 12], [
-      { id: 'dev-1', value: 20 },
-      { id: 'dev-2', value: 5 },
-    ]);
-    queryClient.setQueryData(['twins', 100], [
-      { id: 'dev-1', value: 20 },
-      { id: 'dev-2', value: 5 },
-    ]);
+  it('identifies the matching twin by deviceId, not id, in ["twins", 12] and ["twins", 100]', () => {
+    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
+    queryClient.setQueryData(['twins', 100], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
 
     renderSync();
-
     (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
 
     const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
     const twins100 = queryClient.getQueryData<any[]>(['twins', 100])!;
 
-    expect(twins12.find(d => d.id === 'dev-1').value).toBe(42);
-    expect(twins100.find(d => d.id === 'dev-1').value).toBe(42);
-    // Untouched device unaffected in both caches
-    expect(twins12.find(d => d.id === 'dev-2').value).toBe(5);
-    expect(twins100.find(d => d.id === 'dev-2').value).toBe(5);
+    expect(twins12[0].latestValue).toBe(42);
+    expect(twins100[0].latestValue).toBe(42);
+  });
+
+  it('a "value" delta updates latestValue and does not create a stray "value" field', () => {
+    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
+      deltas: [{ property: 'value', oldValue: 20, newValue: 42, timestamp: 1700000000000 }],
+    }));
+
+    const twin = queryClient.getQueryData<any[]>(['twins', 12])![0];
+    expect(twin.latestValue).toBe(42);
+    expect(twin).not.toHaveProperty('value');
+  });
+
+  it('a "sensorType" delta updates latestSensorType and does not create a stray "sensorType" field', () => {
+    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestSensorType: 'GAS_SENSOR' })]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
+      deltas: [{ property: 'sensorType', oldValue: 'GAS_SENSOR', newValue: 'TEMPERATURE_SENSOR', timestamp: 1700000000000 }],
+    }));
+
+    const twin = queryClient.getQueryData<any[]>(['twins', 12])![0];
+    expect(twin.latestSensorType).toBe('TEMPERATURE_SENSOR');
+    expect(twin).not.toHaveProperty('sensorType');
+  });
+
+  it('["twins", 12] updates correctly and leaves non-matching twins untouched', () => {
+    queryClient.setQueryData(['twins', 12], [
+      realisticTwin({ deviceId: 'dev-1', latestValue: 20 }),
+      realisticTwin({ deviceId: 'dev-2', latestValue: 5 }),
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
+
+    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
+    expect(twins12.find(t => t.deviceId === 'dev-1')!.latestValue).toBe(42);
+    expect(twins12.find(t => t.deviceId === 'dev-2')!.latestValue).toBe(5);
+  });
+
+  it('["twins", 100] updates correctly and leaves non-matching twins untouched', () => {
+    queryClient.setQueryData(['twins', 100], [
+      realisticTwin({ deviceId: 'dev-1', latestValue: 20 }),
+      realisticTwin({ deviceId: 'dev-2', latestValue: 5 }),
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
+
+    const twins100 = queryClient.getQueryData<any[]>(['twins', 100])!;
+    expect(twins100.find(t => t.deviceId === 'dev-1')!.latestValue).toBe(42);
+    expect(twins100.find(t => t.deviceId === 'dev-2')!.latestValue).toBe(5);
+  });
+
+  it('a device with a non-matching deviceId is not modified', () => {
+    const untouched = realisticTwin({ deviceId: 'dev-9', latestValue: 999 });
+    queryClient.setQueryData(['twins', 12], [untouched]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({ deviceId: 'dev-1' }));
+
+    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
+    expect(twins12[0]).toEqual(untouched);
+  });
+
+  it('["activeDevices"] still uses id-based identity matching and is unaffected by the twin field mapping', () => {
+    queryClient.setQueryData(['activeDevices'], [
+      realisticDevice({ id: 'dev-1' }),
+      realisticDevice({ id: 'dev-2' }),
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
+      deviceId: 'dev-1',
+      deltas: [{ property: 'value', oldValue: 20, newValue: 42, timestamp: 1700000000000 }],
+    }));
+
+    const devices = queryClient.getQueryData<any[]>(['activeDevices'])!;
+    const matched = devices.find(d => d.id === 'dev-1')!;
+    const untouched = devices.find(d => d.id === 'dev-2')!;
+    // Existing (unchanged) behavior: the raw delta property name is spread as-is.
+    expect(matched.value).toBe(42);
+    expect(untouched.value).toBeUndefined();
+  });
+
+  it('["all-devices"] still uses id-based identity matching and is unaffected by the twin field mapping', () => {
+    queryClient.setQueryData(['all-devices'], [
+      realisticDevice({ id: 'dev-1' }),
+      realisticDevice({ id: 'dev-2' }),
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
+      deviceId: 'dev-1',
+      deltas: [{ property: 'value', oldValue: 20, newValue: 42, timestamp: 1700000000000 }],
+    }));
+
+    const devices = queryClient.getQueryData<any[]>(['all-devices'])!;
+    const matched = devices.find(d => d.id === 'dev-1')!;
+    const untouched = devices.find(d => d.id === 'dev-2')!;
+    expect(matched.value).toBe(42);
+    expect(untouched.value).toBeUndefined();
   });
 
   it('is a no-op on ["twins", 100] when that cache entry has not been populated yet', () => {

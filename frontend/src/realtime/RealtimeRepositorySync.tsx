@@ -43,13 +43,28 @@ export function RealtimeRepositorySync() {
         if (!old) return old;
         return { ...old, ...deltaObj };
       });
+
+      // Twin-shaped caches (DigitalTwinResponse) use different field names
+      // (latestSensorType/latestValue) than the raw delta property names
+      // (sensorType/value), and identify twins by `deviceId`, not `id`.
+      // Map explicitly so no stray "sensorType"/"value" fields are added.
+      const TWIN_DELTA_FIELD_MAP: Record<string, string> = {
+        sensorType: 'latestSensorType',
+        value: 'latestValue',
+      };
+      const twinDeltaObj = Object.fromEntries(
+        payload.deltas
+          .filter(d => TWIN_DELTA_FIELD_MAP[d.property])
+          .map(d => [TWIN_DELTA_FIELD_MAP[d.property], d.newValue])
+      );
+
       // Update latest twins query
       queryClient.setQueryData<any[]>(['twins', 12], (old = []) => {
-        return old.map(dev => dev.id === payload.deviceId ? { ...dev, ...deltaObj } : dev);
+        return old.map(dev => dev.deviceId === payload.deviceId ? { ...dev, ...twinDeltaObj } : dev);
       });
       // Update the higher-capacity twins query (DigitalTwinTab)
       queryClient.setQueryData<any[]>(['twins', 100], (old = []) => {
-        return old.map(dev => dev.id === payload.deviceId ? { ...dev, ...deltaObj } : dev);
+        return old.map(dev => dev.deviceId === payload.deviceId ? { ...dev, ...twinDeltaObj } : dev);
       });
     });
 
