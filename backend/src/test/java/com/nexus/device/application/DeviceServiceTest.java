@@ -113,6 +113,40 @@ class DeviceServiceTest {
     }
 
     @Test
+    void getAllDevices_returnsAllDevicesRegardlessOfStatus() {
+        Space space1 = mock(Space.class);
+        Space space2 = mock(Space.class);
+
+        Device registered = new Device(UUID.randomUUID(), space1, "Registered Device", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null);
+        // status defaults to REGISTERED
+
+        Device active = new Device(UUID.randomUUID(), space1, "Active Device", DeviceType.GAS_SENSOR, "Acme", "M2", "SN2", null);
+        active.update("Active Device", DeviceStatus.ACTIVE, null);
+
+        Device offline = new Device(UUID.randomUUID(), space2, "Offline Device", DeviceType.MOTION_SENSOR, "Acme", "M3", "SN3", null);
+        offline.update("Offline Device", DeviceStatus.OFFLINE, null);
+
+        when(deviceRepository.findAll()).thenReturn(List.of(registered, active, offline));
+
+        List<DeviceResponse> responses = deviceService.getAllDevices();
+
+        assertThat(responses).hasSize(3);
+        assertThat(responses).extracting(DeviceResponse::status)
+                .containsExactlyInAnyOrder(DeviceStatus.REGISTERED, DeviceStatus.ACTIVE, DeviceStatus.OFFLINE);
+        assertThat(responses).extracting(DeviceResponse::name)
+                .containsExactlyInAnyOrder("Registered Device", "Active Device", "Offline Device");
+    }
+
+    @Test
+    void getAllDevices_emptyWhenNoneExist() {
+        when(deviceRepository.findAll()).thenReturn(List.of());
+
+        List<DeviceResponse> responses = deviceService.getAllDevices();
+
+        assertThat(responses).isEmpty();
+    }
+
+    @Test
     void getDevice_shouldReturnResponse() {
         UUID id = UUID.randomUUID();
         Space space = mock(Space.class);

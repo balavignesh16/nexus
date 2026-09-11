@@ -46,6 +46,13 @@ public class DeviceService {
     }
 
     @Transactional(readOnly = true)
+    public List<DeviceResponse> getAllDevices() {
+        return deviceRepository.findAll().stream()
+                .map(DeviceResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public DeviceResponse getDevice(UUID id) {
         return deviceRepository.findById(id)
                 .map(DeviceResponse::from)

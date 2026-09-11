@@ -93,6 +93,33 @@ class DeviceControllerIntegrationTest {
     }
 
     @Test
+    void getAllDevices_shouldReturn200WithSeededDevices() throws Exception {
+        CreateDeviceRequest request = new CreateDeviceRequest(
+            "Sensor", DeviceType.GAS_SENSOR, "Acme", "V1", "SN-ALL-1", "Desc"
+        );
+        mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/devices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").exists())
+                .andExpect(jsonPath("$[0].name").value("Sensor"))
+                .andExpect(jsonPath("$[0].deviceType").value("GAS_SENSOR"))
+                .andExpect(jsonPath("$[0].status").value("REGISTERED"))
+                .andExpect(jsonPath("$[0].serialNumber").value("SN-ALL-1"));
+    }
+
+    @Test
+    void getAllDevices_shouldReturnEmptyArray_whenNoDevicesExist() throws Exception {
+        mockMvc.perform(get("/api/v1/devices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     void createDevice_shouldReturn201() throws Exception {
         CreateDeviceRequest request = new CreateDeviceRequest(
             "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc"

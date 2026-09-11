@@ -14,7 +14,7 @@ export class BackendDeviceRepository implements IDeviceRepository {
       id: data.id,
       name: data.name,
       status: data.status,
-      deviceType: data.type || 'Generic',
+      deviceType: data.deviceType || 'Generic',
       mqttTopic: data.mqttTopic || '',
       healthScore: 0, // Calculated by MetricEngine in resolver
       twinQuality: 0, // Calculated by MetricEngine in resolver
@@ -40,7 +40,7 @@ export class BackendDeviceRepository implements IDeviceRepository {
       id: d.id,
       name: d.name,
       status: d.status,
-      deviceType: d.type || 'Generic',
+      deviceType: d.deviceType || 'Generic',
       mqttTopic: d.mqttTopic || '',
       healthScore: 0,
       twinQuality: 0,
