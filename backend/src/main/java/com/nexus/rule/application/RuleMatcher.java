@@ -8,6 +8,7 @@ import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
 import com.nexus.rule.persistence.RuleRegistry;
+import com.nexus.realtime.RealtimePublisher;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -29,13 +30,15 @@ public class RuleMatcher implements EventListener {
     private final RuleEvaluator ruleEvaluator;
     private final BoundedRuleMatchStore matchStore;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final RealtimePublisher realtimePublisher;
 
-    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore, ApplicationEventPublisher applicationEventPublisher) {
+    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore, ApplicationEventPublisher applicationEventPublisher, RealtimePublisher realtimePublisher) {
         this.eventDispatcher = eventDispatcher;
         this.ruleRegistry = ruleRegistry;
         this.ruleEvaluator = ruleEvaluator;
         this.matchStore = matchStore;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.realtimePublisher = realtimePublisher;
     }
 
     @PostConstruct
@@ -63,6 +66,7 @@ public class RuleMatcher implements EventListener {
                             event.correlationId()
                     );
                     matchStore.add(matchedEvent);
+                    realtimePublisher.publishRuleMatch(result, event.correlationId());
                     applicationEventPublisher.publishEvent(matchedEvent);
                 }
             } catch (Exception e) {

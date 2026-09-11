@@ -8,6 +8,7 @@ import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
 import com.nexus.rule.persistence.RuleRegistry;
+import com.nexus.realtime.RealtimePublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,6 +38,7 @@ class RuleMatcherTest {
     private RuleEvaluator ruleEvaluator;
     private BoundedRuleMatchStore matchStore;
     private ApplicationEventPublisher applicationEventPublisher;
+    private RealtimePublisher realtimePublisher;
     private RuleMatcher ruleMatcher;
 
     @BeforeEach
@@ -46,7 +48,8 @@ class RuleMatcherTest {
         ruleEvaluator = mock(RuleEvaluator.class);
         matchStore = mock(BoundedRuleMatchStore.class);
         applicationEventPublisher = mock(ApplicationEventPublisher.class);
-        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher);
+        realtimePublisher = mock(RealtimePublisher.class);
+        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher, realtimePublisher);
     }
 
     private DomainEvent sampleEvent(String correlationId) {
@@ -75,6 +78,7 @@ class RuleMatcherTest {
         assertEquals("corr-1", captor.getValue().correlationId());
 
         verify(applicationEventPublisher).publishEvent(captor.getValue());
+        verify(realtimePublisher).publishRuleMatch(matchedResult, "corr-1");
     }
 
     @Test
@@ -90,6 +94,7 @@ class RuleMatcherTest {
 
         verify(matchStore, never()).add(any());
         verify(applicationEventPublisher, never()).publishEvent(any());
+        verify(realtimePublisher, never()).publishRuleMatch(any(), any());
     }
 
     @Test
@@ -144,6 +149,7 @@ class RuleMatcherTest {
         verifyNoInteractions(ruleEvaluator);
         verifyNoInteractions(matchStore);
         verifyNoInteractions(applicationEventPublisher);
+        verifyNoInteractions(realtimePublisher);
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.nexus.action.domain.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
 import com.nexus.realtime.RealtimePublisher;
 import com.nexus.pipeline.application.PipelineService;
@@ -22,13 +23,14 @@ class ActionExecutionEngineTest {
 
     private ActionExecutorRegistry registry;
     private ApplicationEventPublisher eventPublisher;
+    private RealtimePublisher realtimePublisher;
     private ActionExecutionEngine engine;
 
     @BeforeEach
     void setUp() {
         registry = mock(ActionExecutorRegistry.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
-        RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
+        realtimePublisher = mock(RealtimePublisher.class);
         PipelineService pipelineService = mock(PipelineService.class);
         engine = new ActionExecutionEngine(registry, eventPublisher, realtimePublisher, pipelineService);
     }
@@ -97,5 +99,29 @@ class ActionExecutionEngineTest {
         ActionExecutionFailedEvent event = captor.getValue();
         assertEquals(ExecutionStatus.FAILURE, event.result().status());
         assertEquals("Simulated error", event.result().message());
+    }
+
+    @Test
+    void shouldPersistActionHistoryBeforeBroadcastingRealtimeMessage() {
+        ActionExecutionRequest request = new ActionExecutionRequest(
+                UUID.randomUUID(), UUID.randomUUID(), ActionType.CREATE_ALERT, Map.of()
+        );
+        ActionContext context = new ActionContext(null, null);
+
+        ActionExecutor executor = mock(ActionExecutor.class);
+        ActionExecutionResult mockResult = new ActionExecutionResult(
+                UUID.randomUUID(), request, ExecutionStatus.SUCCESS, java.time.Instant.now(), "Success"
+        );
+        when(registry.resolve(ActionType.CREATE_ALERT)).thenReturn(Optional.of(executor));
+        when(executor.execute(request, context)).thenReturn(mockResult);
+
+        engine.process(List.of(request), context, "corr-order-1");
+
+        // eventPublisher.publishEvent(...) synchronously drives ActionHistoryPersister's
+        // repository.save(...) before control returns here, so asserting it happens
+        // before the realtime broadcast is equivalent to asserting persist-before-broadcast.
+        InOrder inOrder = inOrder(eventPublisher, realtimePublisher);
+        inOrder.verify(eventPublisher).publishEvent(any(ActionExecutedEvent.class));
+        inOrder.verify(realtimePublisher).publishActionExecuted(eq(mockResult), eq("corr-order-1"));
     }
 }

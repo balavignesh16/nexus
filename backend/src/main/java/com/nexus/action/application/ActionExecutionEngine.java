@@ -42,17 +42,20 @@ public class ActionExecutionEngine {
             long stageStart = System.currentTimeMillis();
             ActionExecutionResult result = executeSingleRequest(request, context);
 
-            // Broadcast to WebSocket clients
-            realtimePublisher.publishActionExecuted(result, correlationId);
             pipelineService.recordTrace(
                     PipelineTrace.of(correlationId, null, PipelineStage.ACTION, stageStart,
                             result.status() != ExecutionStatus.FAILURE ? "SUCCESS" : "FAILURE", result.status().name(), null));
 
+            // Persist action history (synchronous listener) before broadcasting,
+            // so the realtime message is only sent once the result is durable.
             if (result.status() == ExecutionStatus.FAILURE) {
                 eventPublisher.publishEvent(new ActionExecutionFailedEvent(result, correlationId));
             } else {
                 eventPublisher.publishEvent(new ActionExecutedEvent(result, correlationId));
             }
+
+            // Broadcast to WebSocket clients
+            realtimePublisher.publishActionExecuted(result, correlationId);
         }
     }
 

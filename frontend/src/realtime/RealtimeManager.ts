@@ -4,7 +4,7 @@
  * Architecture:
  * - One connection per browser tab (singleton).
  * - Uses STOMP over SockJS for broad browser support.
- * - Reconnects automatically with exponential backoff.
+ * - Reconnects automatically with exponential backoff (1s initial, doubling, capped at 30s).
  * - On reconnect: restores all subscriptions + triggers replay.
  * - Batches incoming messages (100ms flush) to prevent 100 React renders/sec.
  * - Pauses chart updates when document is hidden (Visibility API).
@@ -13,7 +13,7 @@
  * - In Demo Mode: no socket is opened. Internal EventTarget bus only.
  */
 
-import { Client, type StompSubscription } from '@stomp/stompjs';
+import { Client, ReconnectionTimeMode, type StompSubscription } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import type { RealtimeMessage } from './RealtimeEvents';
 import { RealtimeBuffer } from './RealtimeBuffer';
@@ -132,7 +132,15 @@ class RealtimeManagerClass {
         this.setState('recovering');
       },
 
-      reconnectDelay: this.nextBackoffMs(),
+      onWebSocketClose: () => {
+        this.reconnectAttempt++;
+        this._metrics.reconnectAttempts = this.reconnectAttempt;
+      },
+
+      // Exponential backoff: 1s initial delay, doubling on each attempt, capped at 30s.
+      reconnectDelay: 1000,
+      reconnectTimeMode: ReconnectionTimeMode.EXPONENTIAL,
+      maxReconnectDelay: 30_000,
     });
 
     this.client.activate();
@@ -362,12 +370,6 @@ class RealtimeManagerClass {
 
   private notifyStateListeners() {
     this.stateListeners.forEach(l => l(this._state, { ...this._metrics }));
-  }
-
-  private nextBackoffMs(): number {
-    const base = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30_000);
-    this.reconnectAttempt++;
-    return base;
   }
 }
 

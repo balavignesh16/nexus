@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeManager, TOPICS } from './RealtimeManager';
-import type { TelemetryPayload, TwinUpdatedPayload, DomainEventPayload, ActionExecutedPayload, PipelineTracePayload } from './RealtimeEvents';
+import type { TelemetryPayload, TwinUpdatedPayload, DomainEventPayload, ActionExecutedPayload, PipelineTracePayload, RuleMatchedPayload } from './RealtimeEvents';
 
 export function RealtimeRepositorySync() {
   const queryClient = useQueryClient();
@@ -101,6 +101,20 @@ export function RealtimeRepositorySync() {
       });
     });
 
+    // 5b. Sync Rule Matches -> Annotate matching rule in the rules list
+    const unsubRules = RealtimeManager.subscribe<RuleMatchedPayload>(TOPICS.RULES, (msg) => {
+      const payload = msg.payload;
+      if (!payload || !payload.ruleId) return;
+
+      queryClient.setQueryData<any[]>(['global-rules'], (old = []) => {
+        return old.map(rule =>
+          (rule.ruleId === payload.ruleId || rule.id === payload.ruleId)
+            ? { ...rule, lastMatchedAt: msg.serverTimestamp, lastMatchReason: payload.reason }
+            : rule
+        );
+      });
+    });
+
     // 5. Sync Pipeline Traces -> Prepend
     const unsubPipeline = RealtimeManager.subscribe<PipelineTracePayload>(TOPICS.PIPELINE, (msg) => {
       const payload = msg.payload;
@@ -116,6 +130,7 @@ export function RealtimeRepositorySync() {
       unsubTwins();
       unsubEvents();
       unsubActions();
+      unsubRules();
       unsubPipeline();
     };
   }, [queryClient]);

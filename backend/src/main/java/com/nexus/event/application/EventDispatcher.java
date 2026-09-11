@@ -38,9 +38,8 @@ public class EventDispatcher {
     public void publish(DomainEvent event) {
         log.debug("Dispatching event: {} for device: {}", event.eventType(), event.deviceId());
 
-        // Broadcast to WebSocket clients
-        realtimePublisher.publishEvent(event, event.correlationId());
-
+        // Run listeners first (includes DomainEventPersister) so the event is
+        // guaranteed to be persisted before it is broadcast to WebSocket clients.
         for (EventListener listener : listeners) {
             try {
                 listener.onEvent(event);
@@ -48,5 +47,8 @@ public class EventDispatcher {
                 log.error("Error dispatching event {} to listener {}", event.eventType(), listener.getClass().getSimpleName(), e);
             }
         }
+
+        // Broadcast to WebSocket clients
+        realtimePublisher.publishEvent(event, event.correlationId());
     }
 }
