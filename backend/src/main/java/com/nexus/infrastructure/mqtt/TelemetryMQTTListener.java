@@ -3,6 +3,8 @@ package com.nexus.infrastructure.mqtt;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class TelemetryMQTTListener implements MqttCallbackExtended {
@@ -30,23 +33,40 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     private final Validator validator;
     private final String telemetryTopic;
     private final MqttReconnectController reconnectController;
+    private final MeterRegistry meterRegistry;
+
+    // Tier 3 Phase 4 message-level observability. "Received" means Paho
+    // invoked messageArrived() - it does NOT mean successfully deserialized,
+    // validated, or processed. This is deliberate: the purpose is detecting
+    // broker/Paho -> application delivery failure (a CONNECTED backend that
+    // silently receives nothing), a different question from data quality,
+    // which remains covered by the existing log lines below.
+    private Counter messagesReceived;
+    private final AtomicLong lastMessageAtEpochMillis = new AtomicLong(0);
+    private Counter subscribeFailures;
 
     public TelemetryMQTTListener(MqttClient mqttClient,
                                  TelemetryService telemetryService,
                                  ObjectMapper objectMapper,
                                  Validator validator,
                                  @Value("${mqtt.topic.telemetry}") String telemetryTopic,
-                                 MqttReconnectController reconnectController) {
+                                 MqttReconnectController reconnectController,
+                                 MeterRegistry meterRegistry) {
         this.mqttClient = mqttClient;
         this.telemetryService = telemetryService;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.telemetryTopic = telemetryTopic;
         this.reconnectController = reconnectController;
+        this.meterRegistry = meterRegistry;
     }
 
     @PostConstruct
     public void init() {
+        this.messagesReceived = meterRegistry.counter("mqtt.messages.received");
+        this.subscribeFailures = meterRegistry.counter("mqtt.subscribe.failures");
+        meterRegistry.gauge("mqtt.messages.seconds.since.last", this, TelemetryMQTTListener::secondsSinceLastMessage);
+
         if (mqttClient != null) {
             mqttClient.setCallback(this);
             // Connect completes before init if successful, so connectComplete may not trigger if already connected
@@ -57,12 +77,21 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         }
     }
 
+    private double secondsSinceLastMessage() {
+        long lastAt = lastMessageAtEpochMillis.get();
+        if (lastAt == 0) {
+            return -1;
+        }
+        return (System.currentTimeMillis() - lastAt) / 1000.0;
+    }
+
     private void subscribe() {
         try {
             // Hardcode QoS 1 as requested
             mqttClient.subscribe(telemetryTopic, 1);
             log.info("Subscribed to MQTT topic: {}", telemetryTopic);
         } catch (Exception e) {
+            subscribeFailures.increment();
             log.error("Failed to subscribe to MQTT topic", e);
         }
     }
@@ -82,6 +111,13 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
+        // Tier 3 Phase 4: count and timestamp every Paho callback invocation,
+        // before any deserialization/validation/processing, and regardless
+        // of their outcome - this metric answers "is Paho handing us
+        // messages at all", not "is the data good".
+        messagesReceived.increment();
+        lastMessageAtEpochMillis.set(System.currentTimeMillis());
+
         log.debug("Received MQTT message on topic: {}", topic);
 
         // 1. Deserialize. A payload that cannot be parsed - malformed JSON

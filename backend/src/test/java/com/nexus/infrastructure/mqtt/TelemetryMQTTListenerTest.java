@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -15,7 +17,13 @@ import org.mockito.InOrder;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -56,6 +64,7 @@ class TelemetryMQTTListenerTest {
     private MqttClient mqttClient;
     private TelemetryService telemetryService;
     private MqttReconnectController reconnectController;
+    private MeterRegistry meterRegistry;
     private TelemetryMQTTListener listener;
 
     @BeforeEach
@@ -63,9 +72,11 @@ class TelemetryMQTTListenerTest {
         mqttClient = mock(MqttClient.class);
         telemetryService = mock(TelemetryService.class);
         reconnectController = mock(MqttReconnectController.class);
+        meterRegistry = new SimpleMeterRegistry();
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC, reconnectController);
+        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC, reconnectController, meterRegistry);
+        listener.init();
     }
 
     private MqttMessage messageFor(String json) {
@@ -373,5 +384,129 @@ class TelemetryMQTTListenerTest {
         listener.connectionLost(cause);
 
         verify(reconnectController, times(1)).onConnectionLost(cause);
+    }
+
+    // ---------- Message-level observability (Tier 3 Phase 4) ----------
+    //
+    // "Received" means Paho invoked messageArrived() - it must NOT be
+    // redefined to mean successfully deserialized, validated, or processed.
+    // These tests deliberately exercise both a valid message and a malformed
+    // one to prove the counter fires identically for both.
+
+    private double gaugeValue(String name) {
+        return meterRegistry.get(name).gauge().value();
+    }
+
+    private double counterValue(String name) {
+        return meterRegistry.get(name).counter().count();
+    }
+
+    @Test
+    void validMessage_incrementsReceivedCounter() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+
+        listener.messageArrived(topic, messageFor(validPayload(deviceId)));
+
+        assertEquals(1.0, counterValue("mqtt.messages.received"));
+    }
+
+    @Test
+    void validMessage_updatesLastMessageGaugeToASmallRecentValue() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+
+        listener.messageArrived(topic, messageFor(validPayload(deviceId)));
+
+        double secondsSinceLast = gaugeValue("mqtt.messages.seconds.since.last");
+        assertTrue(secondsSinceLast >= 0 && secondsSinceLast < 5,
+                "expected a small non-negative value just after receipt, was " + secondsSinceLast);
+    }
+
+    @Test
+    void noMessageEverReceived_gaugeReportsNegativeOneSentinel() {
+        assertEquals(-1.0, gaugeValue("mqtt.messages.seconds.since.last"),
+                "before any message arrives, the gauge must report the defined -1 'never received' sentinel");
+    }
+
+    @Test
+    void malformedJsonPayload_stillIncrementsReceivedCounter() throws Exception {
+        // The receive counter counts every Paho callback invocation,
+        // regardless of downstream outcome - a malformed payload must still
+        // count as "received" (it did reach messageArrived()), even though
+        // it is separately ack-and-dropped without being processed.
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+
+        listener.messageArrived(topic, messageFor("{not valid json at all"));
+
+        assertEquals(1.0, counterValue("mqtt.messages.received"));
+        verify(telemetryService, never()).processTelemetry(any());
+    }
+
+    @Test
+    void subscribeException_incrementsSubscribeFailureCounter() throws Exception {
+        doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(anyString(), anyInt());
+
+        listener.connectComplete(false, "tcp://localhost:1883");
+
+        assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
+    }
+
+    @Test
+    void successfulSubscribe_doesNotIncrementSubscribeFailureCounter() {
+        listener.connectComplete(false, "tcp://localhost:1883");
+
+        assertEquals(0.0, counterValue("mqtt.subscribe.failures"));
+    }
+
+    @Test
+    void receivedCounter_remainsCumulativeAcrossAReconnectCycle() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+
+        listener.messageArrived(topic, messageFor(validPayload(deviceId)));
+        listener.connectionLost(new RuntimeException("dropped"));
+        listener.connectComplete(true, "tcp://localhost:1883");
+        listener.messageArrived(topic, messageFor(validPayload(deviceId)));
+
+        assertEquals(2.0, counterValue("mqtt.messages.received"),
+                "the counter must not reset across a reconnect cycle, exactly like the existing mqtt.reconnect.* counters");
+    }
+
+    @Test
+    void concurrentMessageArrivedInvocations_loseNoCounterIncrements() throws Exception {
+        int threads = 20;
+        int perThread = 50;
+        int totalExpected = threads * perThread;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+
+        List<UUID> deviceIds = IntStream.range(0, threads).mapToObj(i -> UUID.randomUUID()).toList();
+
+        for (int t = 0; t < threads; t++) {
+            UUID deviceId = deviceIds.get(t);
+            String topic = "nexus/devices/" + deviceId + "/telemetry";
+            String payload = validPayload(deviceId);
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();
+                    for (int i = 0; i < perThread; i++) {
+                        listener.messageArrived(topic, messageFor(payload));
+                    }
+                } catch (InterruptedException ignored) {
+                }
+            });
+        }
+
+        ready.await();
+        go.countDown();
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(30, TimeUnit.SECONDS));
+
+        assertEquals((double) totalExpected, counterValue("mqtt.messages.received"),
+                "concurrent invocations must not lose any counter increments");
     }
 }
