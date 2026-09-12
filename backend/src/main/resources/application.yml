@@ -39,3 +39,10 @@ nexus:
     pipeline-days: 7
     events-days: 90
     actions-days: 90
+  ai:
+    enabled: ${AI_ENABLED:false}
+    provider: ${AI_PROVIDER:openai}
+    model: ${AI_MODEL:gpt-4o-mini}
+    timeout-ms: ${AI_TIMEOUT_MS:8000}
+    max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:1024}
+    api-key: ${AI_API_KEY:}

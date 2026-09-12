@@ -215,7 +215,13 @@ class RuleMatchExplanationIntegrationTest {
                 c.tier() == ClaimTier.UNKNOWN && c.text().equals(DeterministicExplanationRenderer.DEVICE_UNKNOWN)));
     }
 
-    // ---------- Tier 4 Phase 2A: fake AI candidate against real persisted evidence ----------
+    // ---------- Tier 4 Phase 2A/2B: fake AI candidate against real persisted evidence ----------
+
+    private String candidateJson(UUID matchId, String claimJson) {
+        return """
+                {"matchId":"%s","summary":"s","claims":[%s]}
+                """.formatted(matchId, claimJson);
+    }
 
     @Test
     void fakeAiCandidate_deliberatelyIncorrectAssertedValue_rejectedByRealGroundingChecker() {
@@ -232,26 +238,21 @@ class RuleMatchExplanationIntegrationTest {
                 UUID.randomUUID(), matchId, null, ActionType.CREATE_ALERT, ExecutionStatus.SUCCESS,
                 Map.of(), Instant.now(), "Alert created successfully (stub)"));
 
-        RuleMatchExplanationContext context = contextBuilder.build(matchId);
-        AiExplanationContext aiContext = new AiExplanationContextMapper().toAiContext(context);
-
         // A fake AI candidate citing real evidence but asserting the wrong value.
-        AiReasoningBoundary fakeBoundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
-                matchId, "The observed value was 40.2, exceeding the threshold.",
-                List.of(new Claim(ClaimTier.FACT, "Observed value was 40.2.",
-                        "evaluationEvidence.evaluatedConditions[0].actualValue", 40.2, List.of())),
-                null, "AI"));
-        RuleMatchExplanation candidate = fakeBoundary.generate(aiContext);
+        String rawJson = candidateJson(matchId,
+                "{\"tier\":\"FACT\",\"text\":\"Observed value was 40.2.\","
+                        + "\"evidenceRef\":\"evaluationEvidence.evaluatedConditions[0].actualValue\","
+                        + "\"assertedValue\":40.2,\"supportingEvidenceRefs\":[]}");
+        RuleMatchExplanationService service = new RuleMatchExplanationService(
+                contextBuilder, new AiExplanationContextMapper(), FakeAiReasoningBoundary.alwaysReturning(rawJson),
+                new AiCandidateParser(objectMapper), groundingChecker, renderer, true);
 
-        GroundingResult result = groundingChecker.check(context, candidate);
+        RuleMatchExplanation explanation = service.explain(matchId);
 
-        assertEquals(1, result.rejectedClaimCount(), "the real, persisted actualValue is 34.7 - a 40.2 assertion must be rejected");
-        assertTrue(result.validated().claims().isEmpty(), "zero surviving claims - caller must use the deterministic fallback");
-
-        // Mandatory NEXUS safety claims remain available via the deterministic fallback path.
-        RuleMatchExplanation fallback = renderer.render(context);
-        assertTrue(fallback.claims().stream().anyMatch(c -> c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)));
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, fallback.actionNote());
+        assertEquals("DETERMINISTIC_FALLBACK", explanation.generatedBy(),
+                "the real, persisted actualValue is 34.7 - a 40.2 assertion must be rejected, forcing fallback");
+        assertTrue(explanation.claims().stream().anyMatch(c -> c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)));
+        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, explanation.actionNote());
     }
 
     @Test
@@ -266,22 +267,19 @@ class RuleMatchExplanationIntegrationTest {
                 matchId, ruleId, richRuleSnapshot("Fake AI Rule OK", "30.0"), event.eventId(),
                 "corr-fake-ai-ok", richEvidence(34.7), Instant.now(), "All conditions met"));
 
-        RuleMatchExplanationContext context = contextBuilder.build(matchId);
-        AiExplanationContext aiContext = new AiExplanationContextMapper().toAiContext(context);
+        String rawJson = candidateJson(matchId,
+                "{\"tier\":\"FACT\",\"text\":\"Observed value was 34.7.\","
+                        + "\"evidenceRef\":\"evaluationEvidence.evaluatedConditions[0].actualValue\","
+                        + "\"assertedValue\":34.7,\"supportingEvidenceRefs\":[]}");
+        RuleMatchExplanationService service = new RuleMatchExplanationService(
+                contextBuilder, new AiExplanationContextMapper(), FakeAiReasoningBoundary.alwaysReturning(rawJson),
+                new AiCandidateParser(objectMapper), groundingChecker, renderer, true);
 
-        AiReasoningBoundary fakeBoundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
-                matchId, "The observed value was 34.7, exceeding the threshold.",
-                List.of(new Claim(ClaimTier.FACT, "Observed value was 34.7.",
-                        "evaluationEvidence.evaluatedConditions[0].actualValue", 34.7, List.of())),
-                null, "AI"));
-        RuleMatchExplanation candidate = fakeBoundary.generate(aiContext);
+        RuleMatchExplanation explanation = service.explain(matchId);
 
-        GroundingResult result = groundingChecker.check(context, candidate);
-
-        assertEquals(0, result.rejectedClaimCount());
-        assertTrue(result.validated().claims().stream().anyMatch(c ->
+        assertEquals("AI", explanation.generatedBy());
+        assertTrue(explanation.claims().stream().anyMatch(c ->
                 c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)),
                 "mandatory NEXUS safety claim must be present even for a successful AI explanation");
-        assertEquals("AI", result.validated().generatedBy());
     }
 }

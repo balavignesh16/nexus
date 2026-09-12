@@ -7,17 +7,20 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Proves the full provider-independent chain end-to-end (Tier 4 Phase 2A):
+ * Proves the full provider-independent chain end-to-end (Tier 4 Phase
+ * 2A/2B):
  *
  *   RuleMatchExplanationContext
  *       -> AiExplanationContextMapper -> AiExplanationContext
- *       -> AiReasoningBoundary (fake) -> candidate RuleMatchExplanation
+ *       -> AiReasoningBoundary (fake, returns raw JSON text)
+ *       -> AiCandidateParser -> candidate RuleMatchExplanation
  *       -> GroundingChecker -> validated explanation
  *
  * No real provider is involved anywhere in this test.
@@ -25,7 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiReasoningBoundaryEndToEndTest {
 
     private final AiExplanationContextMapper mapper = new AiExplanationContextMapper();
-    private final GroundingChecker groundingChecker = new GroundingChecker(new ObjectMapper().registerModule(new JavaTimeModule()));
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final AiCandidateParser parser = new AiCandidateParser(objectMapper);
+    private final GroundingChecker groundingChecker = new GroundingChecker(objectMapper);
 
     private RuleMatchExplanationContext sampleContext() {
         return new RuleMatchExplanationContext(
@@ -41,19 +46,29 @@ class AiReasoningBoundaryEndToEndTest {
                 List.of(new ActionSummary(UUID.randomUUID(), "CREATE_ALERT", "SUCCESS", Instant.now(), "ok")));
     }
 
+    private String candidateJson(UUID matchId, String claimJson) {
+        return """
+                {"matchId":"%s","summary":"s","claims":[%s]}
+                """.formatted(matchId, claimJson);
+    }
+
     @Test
     void wellFormedFakeCandidate_flowsThroughToValidatedAiExplanation() {
         RuleMatchExplanationContext context = sampleContext();
         AiExplanationContext aiContext = mapper.toAiContext(context);
 
-        AiReasoningBoundary boundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
-                context.matchId(), "The rule matched because the observed value exceeded the threshold.",
-                List.of(new Claim(ClaimTier.FACT, "Observed value was 34.7.",
-                        "evaluationEvidence.evaluatedConditions[0].actualValue", 34.7, List.of())),
-                null, "AI"));
+        String rawJson = candidateJson(context.matchId(),
+                "{\"tier\":\"FACT\",\"text\":\"Observed value was 34.7.\","
+                        + "\"evidenceRef\":\"evaluationEvidence.evaluatedConditions[0].actualValue\","
+                        + "\"assertedValue\":34.7,\"supportingEvidenceRefs\":[]}");
+        AiReasoningBoundary boundary = FakeAiReasoningBoundary.alwaysReturning(rawJson);
 
-        RuleMatchExplanation candidate = boundary.generate(aiContext);
-        GroundingResult result = groundingChecker.check(context, candidate);
+        Optional<String> raw = boundary.generate(aiContext);
+        assertTrue(raw.isPresent());
+        AiParseResult parseResult = parser.parse(raw.get());
+        assertTrue(parseResult.success());
+
+        GroundingResult result = groundingChecker.check(context, parseResult.candidate());
 
         assertEquals(0, result.rejectedClaimCount());
         assertTrue(result.validated().claims().stream().anyMatch(c -> c.text().contains("34.7")));
@@ -68,14 +83,14 @@ class AiReasoningBoundaryEndToEndTest {
         RuleMatchExplanationContext context = sampleContext();
         AiExplanationContext aiContext = mapper.toAiContext(context);
 
-        AiReasoningBoundary boundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
-                context.matchId(), "summary",
-                List.of(new Claim(ClaimTier.FACT, "Observed value was 40.2.",
-                        "evaluationEvidence.evaluatedConditions[0].actualValue", 40.2, List.of())),
-                null, "AI"));
+        String rawJson = candidateJson(context.matchId(),
+                "{\"tier\":\"FACT\",\"text\":\"Observed value was 40.2.\","
+                        + "\"evidenceRef\":\"evaluationEvidence.evaluatedConditions[0].actualValue\","
+                        + "\"assertedValue\":40.2,\"supportingEvidenceRefs\":[]}");
+        AiReasoningBoundary boundary = FakeAiReasoningBoundary.alwaysReturning(rawJson);
 
-        RuleMatchExplanation candidate = boundary.generate(aiContext);
-        GroundingResult result = groundingChecker.check(context, candidate);
+        AiParseResult parseResult = parser.parse(boundary.generate(aiContext).orElseThrow());
+        GroundingResult result = groundingChecker.check(context, parseResult.candidate());
 
         assertEquals(1, result.rejectedClaimCount());
         assertTrue(result.validated().claims().isEmpty(), "zero surviving claims signals the caller must use the deterministic fallback");
@@ -86,14 +101,14 @@ class AiReasoningBoundaryEndToEndTest {
         RuleMatchExplanationContext context = sampleContext();
         AiExplanationContext aiContext = mapper.toAiContext(context);
 
-        AiReasoningBoundary boundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
-                context.matchId(), "summary",
-                List.of(new Claim(ClaimTier.FACT, "The actuator physically moved.",
-                        "actions[0].physicalOutcome", "MOVED", List.of())),
-                null, "AI"));
+        String rawJson = candidateJson(context.matchId(),
+                "{\"tier\":\"FACT\",\"text\":\"The actuator physically moved.\","
+                        + "\"evidenceRef\":\"actions[0].physicalOutcome\","
+                        + "\"assertedValue\":\"MOVED\",\"supportingEvidenceRefs\":[]}");
+        AiReasoningBoundary boundary = FakeAiReasoningBoundary.alwaysReturning(rawJson);
 
-        RuleMatchExplanation candidate = boundary.generate(aiContext);
-        GroundingResult result = groundingChecker.check(context, candidate);
+        AiParseResult parseResult = parser.parse(boundary.generate(aiContext).orElseThrow());
+        GroundingResult result = groundingChecker.check(context, parseResult.candidate());
 
         assertEquals(1, result.rejectedClaimCount(), "no physicalOutcome field exists anywhere in the context to cite");
     }
