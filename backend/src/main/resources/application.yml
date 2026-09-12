@@ -46,3 +46,7 @@ nexus:
     timeout-ms: ${AI_TIMEOUT_MS:8000}
     max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:1024}
     api-key: ${AI_API_KEY:}
+    rate-limit:
+      requests-per-minute: ${AI_RATE_LIMIT_REQUESTS_PER_MINUTE:5}
+      burst: ${AI_RATE_LIMIT_BURST:5}
+      concurrency-limit: ${AI_RATE_LIMIT_CONCURRENCY:4}

@@ -26,6 +26,28 @@ public class RuleMatchExplanationService {
 
     private static final Logger log = LoggerFactory.getLogger(RuleMatchExplanationService.class);
 
+    /**
+     * Fixed, machine-readable outcome/fallback-reason codes (Tier 4 Phase
+     * 2C) - additive observability only. These identify which branch of
+     * explainWithOutcome() produced the result, purely so a caller (the
+     * Phase 2C metrics layer) can classify outcomes without re-deriving or
+     * duplicating this service's own branching logic.
+     */
+    public static final String REASON_AI_SUCCESS = "AI_SUCCESS";
+    public static final String REASON_AI_DISABLED = "AI_DISABLED";
+    public static final String REASON_AI_UNAVAILABLE = "AI_UNAVAILABLE";
+    public static final String REASON_AI_PARSE_FAILURE = "AI_PARSE_FAILURE";
+    public static final String REASON_AI_GROUNDING_REJECTION = "AI_GROUNDING_REJECTION";
+
+    /**
+     * The result of explainWithOutcome(): the explanation itself, plus the
+     * fixed reason code identifying which branch produced it. explain(UUID)
+     * remains the primary, unchanged entry point for any caller that only
+     * needs the explanation.
+     */
+    public record ExplanationOutcome(RuleMatchExplanation explanation, String reason) {
+    }
+
     private final RuleMatchExplanationContextBuilder contextBuilder;
     private final AiExplanationContextMapper mapper;
     private final AiReasoningBoundary reasoningBoundary;
@@ -51,11 +73,21 @@ public class RuleMatchExplanationService {
     }
 
     public RuleMatchExplanation explain(UUID matchId) {
+        return explainWithOutcome(matchId).explanation();
+    }
+
+    /**
+     * Same behavior as explain(UUID), additionally reporting which fixed
+     * reason code produced the result (Tier 4 Phase 2C, additive only -
+     * every branch below is unchanged from explain(UUID)'s original
+     * behavior, just also tagged with a reason).
+     */
+    public ExplanationOutcome explainWithOutcome(UUID matchId) {
         RuleMatchExplanationContext context = contextBuilder.build(matchId);
 
         if (!aiEnabled) {
             log.debug("AI disabled; returning deterministic explanation for match {}", matchId);
-            return fallbackRenderer.render(context);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_DISABLED);
         }
 
         AiExplanationContext aiContext = mapper.toAiContext(context);
@@ -68,19 +100,19 @@ public class RuleMatchExplanationService {
             // service - any unexpected failure inside a boundary
             // implementation is treated identically to "no response".
             log.warn("AI reasoning boundary threw for match {}; falling back to deterministic explanation", matchId, e);
-            return fallbackRenderer.render(context);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_UNAVAILABLE);
         }
 
         if (raw.isEmpty()) {
             log.info("No usable AI response for match {}; falling back to deterministic explanation", matchId);
-            return fallbackRenderer.render(context);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_UNAVAILABLE);
         }
 
         AiParseResult parseResult = candidateParser.parse(raw.get());
         if (!parseResult.success()) {
             log.info("AI candidate for match {} failed to parse ({}); falling back to deterministic explanation",
                     matchId, parseResult.failureReason());
-            return fallbackRenderer.render(context);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_PARSE_FAILURE);
         }
 
         // matchId is never sent to the model (data minimization) - the
@@ -100,11 +132,11 @@ public class RuleMatchExplanationService {
             log.info("AI candidate for match {} had zero claims survive grounding ({} rejected: {}); "
                             + "falling back to deterministic explanation",
                     matchId, groundingResult.rejectedClaimCount(), groundingResult.rejectionReasons());
-            return fallbackRenderer.render(context);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_GROUNDING_REJECTION);
         }
 
         log.debug("AI explanation for match {} accepted with {} validated claim(s), {} rejected",
                 matchId, groundingResult.validated().claims().size(), groundingResult.rejectedClaimCount());
-        return groundingResult.validated();
+        return new ExplanationOutcome(groundingResult.validated(), REASON_AI_SUCCESS);
     }
 }

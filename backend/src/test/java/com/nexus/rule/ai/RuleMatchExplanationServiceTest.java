@@ -217,4 +217,80 @@ class RuleMatchExplanationServiceTest {
         assertNotNull(result);
         assertEquals("DETERMINISTIC_FALLBACK", result.generatedBy());
     }
+
+    // ---------- Tier 4 Phase 2C: explainWithOutcome() reason codes (additive only) ----------
+
+    @Test
+    void explainWithOutcome_aiDisabled_reasonIsAiDisabled() {
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysReturning(candidateJson(validFactClaimJson())), false);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_DISABLED, outcome.reason());
+        assertEquals("DETERMINISTIC_FALLBACK", outcome.explanation().generatedBy());
+    }
+
+    @Test
+    void explainWithOutcome_providerEmpty_reasonIsAiUnavailable() {
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysEmpty(), true);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_UNAVAILABLE, outcome.reason());
+    }
+
+    @Test
+    void explainWithOutcome_providerThrows_reasonIsAiUnavailable() {
+        AiReasoningBoundary throwingBoundary = ctx -> {
+            throw new RuntimeException("simulated provider failure");
+        };
+        RuleMatchExplanationService service = service(throwingBoundary, true);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_UNAVAILABLE, outcome.reason());
+    }
+
+    @Test
+    void explainWithOutcome_malformedJson_reasonIsAiParseFailure() {
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysReturning("{ not valid json ]]"), true);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_PARSE_FAILURE, outcome.reason());
+    }
+
+    @Test
+    void explainWithOutcome_wrongAssertedValue_reasonIsAiGroundingRejection() {
+        String wrongClaim = "{\"tier\":\"FACT\",\"text\":\"Observed value was 40.2.\","
+                + "\"evidenceRef\":\"evaluationEvidence.evaluatedConditions[0].actualValue\","
+                + "\"assertedValue\":40.2,\"supportingEvidenceRefs\":[]}";
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysReturning(candidateJson(wrongClaim)), true);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_GROUNDING_REJECTION, outcome.reason());
+    }
+
+    @Test
+    void explainWithOutcome_correctCandidate_reasonIsAiSuccess() {
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysReturning(candidateJson(validFactClaimJson())), true);
+
+        RuleMatchExplanationService.ExplanationOutcome outcome = service.explainWithOutcome(matchId);
+
+        assertEquals(RuleMatchExplanationService.REASON_AI_SUCCESS, outcome.reason());
+        assertEquals("AI", outcome.explanation().generatedBy());
+    }
+
+    @Test
+    void explainWithOutcome_explanationMatches_whatExplainWouldHaveReturned() {
+        RuleMatchExplanationService service = service(FakeAiReasoningBoundary.alwaysReturning(candidateJson(validFactClaimJson())), true);
+
+        RuleMatchExplanation viaExplain = service.explain(matchId);
+        RuleMatchExplanationService.ExplanationOutcome viaOutcome = service.explainWithOutcome(matchId);
+
+        assertEquals(viaExplain.generatedBy(), viaOutcome.explanation().generatedBy());
+        assertEquals(viaExplain.matchId(), viaOutcome.explanation().matchId());
+        assertEquals(viaExplain.claims().size(), viaOutcome.explanation().claims().size());
+    }
 }

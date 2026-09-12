@@ -13,6 +13,7 @@ import com.nexus.shared.exception.DomainException;
 import com.nexus.shared.exception.NexusException;
 import com.nexus.shared.exception.ResourceNotFoundException;
 import com.nexus.shared.exception.ValidationException;
+import com.nexus.rule.ai.RateLimitExceededException;
 
 import java.time.Instant;
 
@@ -168,5 +169,18 @@ public class GlobalExceptionHandler {
                 Instant.now()
         );
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimitExceededException(RateLimitExceededException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.TOO_MANY_REQUESTS.value(),
+                HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase(),
+                ex.getMessage(),
+                Instant.now()
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.retryAfterSeconds()))
+                .body(error);
     }
 }
