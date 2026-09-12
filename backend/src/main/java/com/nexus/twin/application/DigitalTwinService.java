@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class DigitalTwinService {
@@ -28,6 +29,27 @@ public class DigitalTwinService {
     private final ApplicationEventPublisher eventPublisher;
     private final RealtimePublisher realtimePublisher;
     private final PipelineService pipelineService;
+
+    // Tier 3 Phase 5: per-device lock objects guarding the
+    // get -> timestamp-check -> construct -> put sequence in updateTwin()
+    // below, so that sequence is atomic per device within this backend
+    // instance (see updateTwin()'s own Javadoc for why this is needed).
+    //
+    // Lifecycle: entries are created once per distinct deviceId ever seen
+    // and never removed. This is acceptable at current NEXUS scale because
+    // the number of devices is small and bounded by the Site/Building/Space
+    // hierarchy in the database - it does not grow with telemetry volume,
+    // unlike, say, a per-message or per-request map would. This mirrors
+    // DigitalTwinRegistry's own twin cache, which is exactly one entry per
+    // device and is never evicted either. A distributed lock, an eviction
+    // policy, or a lock-striping library would be premature complexity for
+    // a single-instance deployment with this device-count profile; if NEXUS
+    // is ever horizontally scaled across multiple backend instances, this
+    // in-JVM lock stops being sufficient and a database-level mechanism
+    // (optimistic locking or a conditional atomic UPDATE) would be required
+    // instead - deliberately left as a documented future option, not part
+    // of this phase.
+    private final ConcurrentHashMap<UUID, Object> deviceLocks = new ConcurrentHashMap<>();
 
     public DigitalTwinService(DigitalTwinRegistry registry, ApplicationEventPublisher eventPublisher,
                               RealtimePublisher realtimePublisher, PipelineService pipelineService) {
@@ -40,54 +62,80 @@ public class DigitalTwinService {
     /**
      * Updates the digital twin if the incoming telemetry is strictly newer
      * than the current twin's state. Broadcasts delta to WebSocket clients.
+     * <p>
+     * The read-check-write sequence (read the current twin, decide whether
+     * the incoming timestamp is newer, construct the replacement, write it
+     * back) is guarded by a per-device lock (Tier 3 Phase 5). Without this,
+     * two concurrent updates for the same device (reachable today via
+     * concurrent calls to POST /api/v1/telemetry, since Tomcat's request
+     * threads are not serialized per device the way Paho's single MQTT
+     * callback thread is) could both read the same prior state, both pass
+     * the newer-timestamp check against that same stale state, and then
+     * write in either order - allowing an older-timestamped update to win
+     * over one that was already independently accepted as newer. Only the
+     * state decision and state replacement are held under the lock; the
+     * downstream event/realtime/pipeline-trace work below intentionally
+     * runs after the lock is released, since it does not need to be
+     * serialized and does not participate in the race being fixed here.
      *
      * @param request       The incoming telemetry request
      * @param correlationId Links this update to the originating telemetry event
      */
     public void updateTwin(TelemetryRequest request, String correlationId) {
-        Optional<DigitalTwin> currentTwinOpt = registry.get(request.deviceId());
+        UUID deviceId = request.deviceId();
+        Object lock = deviceLocks.computeIfAbsent(deviceId, id -> new Object());
 
-        if (currentTwinOpt.isPresent()) {
-            DigitalTwin currentTwin = currentTwinOpt.get();
-            if (!request.timestamp().isAfter(currentTwin.latestTimestamp())) {
-                log.debug("Ignored out-of-order telemetry for device {}. Current: {}, Incoming: {}",
-                        request.deviceId(), currentTwin.latestTimestamp(), request.timestamp());
-                return;
+        DigitalTwin newTwin;
+        DigitalTwin previousTwin;
+        Instant now;
+        long stageStart;
+
+        synchronized (lock) {
+            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId);
+
+            if (currentTwinOpt.isPresent()) {
+                DigitalTwin currentTwin = currentTwinOpt.get();
+                if (!request.timestamp().isAfter(currentTwin.latestTimestamp())) {
+                    log.debug("Ignored out-of-order telemetry for device {}. Current: {}, Incoming: {}",
+                            deviceId, currentTwin.latestTimestamp(), request.timestamp());
+                    return;
+                }
             }
+
+            now = Instant.now();
+            stageStart = System.currentTimeMillis();
+
+            newTwin = new DigitalTwin(
+                    deviceId,
+                    request.timestamp(),
+                    request.sensorType(),
+                    request.value(),
+                    request.unit(),
+                    now,
+                    Map.of()
+            );
+
+            registry.put(newTwin);
+            previousTwin = currentTwinOpt.orElse(null);
         }
 
-        Instant now = Instant.now();
-        long stageStart = System.currentTimeMillis();
-
-        DigitalTwin newTwin = new DigitalTwin(
-                request.deviceId(),
-                request.timestamp(),
-                request.sensorType(),
-                request.value(),
-                request.unit(),
-                now,
-                Map.of()
-        );
-
-        registry.put(newTwin);
-
         // Broadcast delta (only changed fields) to WebSocket clients
-        realtimePublisher.publishTwinDelta(currentTwinOpt.orElse(null), newTwin, correlationId);
+        realtimePublisher.publishTwinDelta(previousTwin, newTwin, correlationId);
 
         // Pipeline trace
         pipelineService.recordTrace(
-                PipelineTrace.of(correlationId, request.deviceId().toString(), PipelineStage.TWIN, stageStart, "SUCCESS",
+                PipelineTrace.of(correlationId, deviceId.toString(), PipelineStage.TWIN, stageStart, "SUCCESS",
                         newTwin, Map.of("sensorType", request.sensorType(), "value", request.value())));
 
         TwinUpdatedEvent event = new TwinUpdatedEvent(
-                request.deviceId(),
+                deviceId,
                 now,
-                currentTwinOpt.orElse(null),
+                previousTwin,
                 newTwin,
                 correlationId
         );
         eventPublisher.publishEvent(event);
-        log.debug("Twin updated for device {}. TwinUpdatedEvent published.", request.deviceId());
+        log.debug("Twin updated for device {}. TwinUpdatedEvent published.", deviceId);
     }
 
     public Optional<DigitalTwin> getTwin(UUID deviceId) {
