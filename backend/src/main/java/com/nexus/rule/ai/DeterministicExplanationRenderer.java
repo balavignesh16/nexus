@@ -33,7 +33,7 @@ public class DeterministicExplanationRenderer {
 
         Object ruleName = context.ruleSnapshot().get("name");
         if (ruleName != null) {
-            claims.add(new Claim(ClaimTier.FACT, "Rule '" + ruleName + "' matched.", "ruleSnapshot.name", List.of()));
+            claims.add(new Claim(ClaimTier.FACT, "Rule '" + ruleName + "' matched.", "ruleSnapshot.name", ruleName, List.of()));
         }
 
         List<Map<String, Object>> evaluatedConditions = extractEvaluatedConditions(context.evaluationEvidence());
@@ -47,20 +47,20 @@ public class DeterministicExplanationRenderer {
             if (actualValue != null) {
                 claims.add(new Claim(ClaimTier.FACT,
                         "Observed value was " + actualValue + ".",
-                        "evaluationEvidence.evaluatedConditions[" + i + "].actualValue", List.of()));
+                        "evaluationEvidence.evaluatedConditions[" + i + "].actualValue", actualValue, List.of()));
             }
             if (field != null && operator != null && expectedValue != null) {
                 claims.add(new Claim(ClaimTier.FACT,
                         "Condition required " + field + " " + operator + " " + expectedValue + ".",
-                        "evaluationEvidence.evaluatedConditions[" + i + "].expectedValue", List.of()));
+                        "evaluationEvidence.evaluatedConditions[" + i + "].expectedValue", expectedValue, List.of()));
             }
         }
 
         if (context.deviceId() == null) {
-            claims.add(new Claim(ClaimTier.UNKNOWN, DEVICE_UNKNOWN, null, List.of()));
+            claims.add(new Claim(ClaimTier.UNKNOWN, DEVICE_UNKNOWN, null, null, List.of()));
         }
 
-        claims.add(new Claim(ClaimTier.UNKNOWN, CAUSAL_UNCERTAINTY, null, List.of()));
+        claims.add(new Claim(ClaimTier.UNKNOWN, CAUSAL_UNCERTAINTY, null, null, List.of()));
 
         String actionNote = null;
         if (!context.actions().isEmpty()) {
@@ -69,7 +69,7 @@ public class DeterministicExplanationRenderer {
                 ActionSummary action = actions.get(i);
                 claims.add(new Claim(ClaimTier.FACT,
                         "NEXUS recorded a " + action.actionType() + " action with status " + action.status() + ".",
-                        "actions[" + i + "].status", List.of()));
+                        "actions[" + i + "].status", action.status(), List.of()));
             }
             actionNote = ACTION_DISCLAIMER;
         }

@@ -70,7 +70,14 @@ class DeterministicExplanationRendererTest {
         GroundingResult result = groundingChecker.check(context, explanation);
 
         assertEquals(0, result.rejectedClaimCount(), "every claim the renderer produces must pass grounding: " + result.rejectionReasons());
-        assertEquals(explanation.claims().size(), result.validated().claims().size());
+        // GroundingChecker unconditionally appends its own mandatory
+        // CAUSAL_UNCERTAINTY claim on top of whatever the candidate (here,
+        // the renderer's own output) already proposed - deliberate
+        // redundancy, not a bug: the renderer's own claims all survive
+        // (rejectedClaimCount == 0 above), plus exactly one more mandatory
+        // claim (deviceId is non-null in this fixture, so DEVICE_UNKNOWN is
+        // not additionally appended).
+        assertEquals(explanation.claims().size() + 1, result.validated().claims().size());
     }
 
     @Test
@@ -159,6 +166,23 @@ class DeterministicExplanationRendererTest {
         RuleMatchExplanation explanation = renderer.render(context);
 
         assertFalse(explanation.claims().isEmpty(), "at least the always-present UNKNOWN causal claim must exist");
+    }
+
+    @Test
+    void everyFactClaim_hasCorrectAssertedValue() {
+        RuleMatchExplanationContext context = baseContext(UUID.randomUUID(),
+                List.of(new ActionSummary(UUID.randomUUID(), "CREATE_ALERT", "SUCCESS", Instant.now(), "ok")));
+
+        RuleMatchExplanation explanation = renderer.render(context);
+
+        List<Claim> facts = explanation.claims().stream().filter(c -> c.tier() == ClaimTier.FACT).toList();
+        assertFalse(facts.isEmpty());
+        for (Claim fact : facts) {
+            assertTrue(fact.evidenceRef() != null, "every FACT must have an evidenceRef: " + fact.text());
+        }
+        assertTrue(facts.stream().anyMatch(c -> "High Temperature Alert".equals(c.assertedValue())));
+        assertTrue(facts.stream().anyMatch(c -> Double.valueOf(34.7).equals(c.assertedValue())));
+        assertTrue(facts.stream().anyMatch(c -> "SUCCESS".equals(c.assertedValue())));
     }
 
     @Test

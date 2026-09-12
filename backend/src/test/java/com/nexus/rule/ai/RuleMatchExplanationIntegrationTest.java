@@ -214,4 +214,74 @@ class RuleMatchExplanationIntegrationTest {
         assertTrue(candidate.claims().stream().anyMatch(c ->
                 c.tier() == ClaimTier.UNKNOWN && c.text().equals(DeterministicExplanationRenderer.DEVICE_UNKNOWN)));
     }
+
+    // ---------- Tier 4 Phase 2A: fake AI candidate against real persisted evidence ----------
+
+    @Test
+    void fakeAiCandidate_deliberatelyIncorrectAssertedValue_rejectedByRealGroundingChecker() {
+        UUID ruleId = UUID.randomUUID();
+        DomainEvent event = domainEventRepository.save(new DomainEvent(
+                UUID.randomUUID(), EventType.TWIN_UPDATED, null, Instant.now(), "test",
+                Map.of("value", 34.7), "INFO", "corr-fake-ai"));
+
+        UUID matchId = UUID.randomUUID();
+        ruleMatchRepository.save(new RuleMatchEntity(
+                matchId, ruleId, richRuleSnapshot("Fake AI Rule", "30.0"), event.eventId(),
+                "corr-fake-ai", richEvidence(34.7), Instant.now(), "All conditions met"));
+        actionHistoryRepository.save(new ActionHistoryRecord(
+                UUID.randomUUID(), matchId, null, ActionType.CREATE_ALERT, ExecutionStatus.SUCCESS,
+                Map.of(), Instant.now(), "Alert created successfully (stub)"));
+
+        RuleMatchExplanationContext context = contextBuilder.build(matchId);
+        AiExplanationContext aiContext = new AiExplanationContextMapper().toAiContext(context);
+
+        // A fake AI candidate citing real evidence but asserting the wrong value.
+        AiReasoningBoundary fakeBoundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
+                matchId, "The observed value was 40.2, exceeding the threshold.",
+                List.of(new Claim(ClaimTier.FACT, "Observed value was 40.2.",
+                        "evaluationEvidence.evaluatedConditions[0].actualValue", 40.2, List.of())),
+                null, "AI"));
+        RuleMatchExplanation candidate = fakeBoundary.generate(aiContext);
+
+        GroundingResult result = groundingChecker.check(context, candidate);
+
+        assertEquals(1, result.rejectedClaimCount(), "the real, persisted actualValue is 34.7 - a 40.2 assertion must be rejected");
+        assertTrue(result.validated().claims().isEmpty(), "zero surviving claims - caller must use the deterministic fallback");
+
+        // Mandatory NEXUS safety claims remain available via the deterministic fallback path.
+        RuleMatchExplanation fallback = renderer.render(context);
+        assertTrue(fallback.claims().stream().anyMatch(c -> c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)));
+        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, fallback.actionNote());
+    }
+
+    @Test
+    void fakeAiCandidate_correctAssertedValue_survivesAndCarriesMandatoryClaims() {
+        UUID ruleId = UUID.randomUUID();
+        DomainEvent event = domainEventRepository.save(new DomainEvent(
+                UUID.randomUUID(), EventType.TWIN_UPDATED, null, Instant.now(), "test",
+                Map.of("value", 34.7), "INFO", "corr-fake-ai-ok"));
+
+        UUID matchId = UUID.randomUUID();
+        ruleMatchRepository.save(new RuleMatchEntity(
+                matchId, ruleId, richRuleSnapshot("Fake AI Rule OK", "30.0"), event.eventId(),
+                "corr-fake-ai-ok", richEvidence(34.7), Instant.now(), "All conditions met"));
+
+        RuleMatchExplanationContext context = contextBuilder.build(matchId);
+        AiExplanationContext aiContext = new AiExplanationContextMapper().toAiContext(context);
+
+        AiReasoningBoundary fakeBoundary = new FakeAiReasoningBoundary(ctx -> new RuleMatchExplanation(
+                matchId, "The observed value was 34.7, exceeding the threshold.",
+                List.of(new Claim(ClaimTier.FACT, "Observed value was 34.7.",
+                        "evaluationEvidence.evaluatedConditions[0].actualValue", 34.7, List.of())),
+                null, "AI"));
+        RuleMatchExplanation candidate = fakeBoundary.generate(aiContext);
+
+        GroundingResult result = groundingChecker.check(context, candidate);
+
+        assertEquals(0, result.rejectedClaimCount());
+        assertTrue(result.validated().claims().stream().anyMatch(c ->
+                c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)),
+                "mandatory NEXUS safety claim must be present even for a successful AI explanation");
+        assertEquals("AI", result.validated().generatedBy());
+    }
 }
