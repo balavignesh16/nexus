@@ -1,12 +1,20 @@
 package com.nexus.rule.api;
 
+import com.nexus.rule.api.dto.RuleMatchDetailResponse;
+import com.nexus.rule.api.dto.RuleMatchSummaryResponse;
 import com.nexus.rule.api.dto.RuleRequest;
 import com.nexus.rule.api.dto.RuleResponse;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
+import com.nexus.rule.persistence.RuleMatchEntity;
+import com.nexus.rule.persistence.RuleMatchRepository;
 import com.nexus.rule.persistence.RuleRegistry;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,12 +35,16 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/v1")
 public class RuleController {
 
+    private static final int MAX_HISTORY_LIMIT = 500;
+
     private final RuleRegistry ruleRegistry;
     private final BoundedRuleMatchStore matchStore;
+    private final RuleMatchRepository ruleMatchRepository;
 
-    public RuleController(RuleRegistry ruleRegistry, BoundedRuleMatchStore matchStore) {
+    public RuleController(RuleRegistry ruleRegistry, BoundedRuleMatchStore matchStore, RuleMatchRepository ruleMatchRepository) {
         this.ruleRegistry = ruleRegistry;
         this.matchStore = matchStore;
+        this.ruleMatchRepository = ruleMatchRepository;
     }
 
     @PostMapping("/rules")
@@ -109,5 +121,49 @@ public class RuleController {
                 .map(com.nexus.rule.api.dto.RuleMatchedResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);
+    }
+
+    /**
+     * Durable rule-match history (Tier 3 Phase 11) - reads RuleMatchRepository,
+     * not the volatile BoundedRuleMatchStore above, so results survive a
+     * restart. Ordered matchedAt DESC with matchId DESC as a stable
+     * tie-break for matches sharing a timestamp.
+     */
+    @GetMapping("/rule-matches/history")
+    public ResponseEntity<List<RuleMatchSummaryResponse>> getRuleMatchHistory(
+            @RequestParam(name = "limit", defaultValue = "100") int limit,
+            @RequestParam(name = "ruleId", required = false) UUID ruleId,
+            @RequestParam(name = "correlationId", required = false) String correlationId) {
+        if (limit <= 0 || limit > MAX_HISTORY_LIMIT) {
+            throw new IllegalArgumentException("limit must be between 1 and " + MAX_HISTORY_LIMIT);
+        }
+
+        Pageable pageable = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "matchedAt", "matchId"));
+
+        Page<RuleMatchEntity> page;
+        if (ruleId != null) {
+            page = ruleMatchRepository.findByRuleId(ruleId, pageable);
+        } else if (correlationId != null) {
+            page = ruleMatchRepository.findByCorrelationId(correlationId, pageable);
+        } else {
+            page = ruleMatchRepository.findAll(pageable);
+        }
+
+        List<RuleMatchSummaryResponse> responses = page.getContent().stream()
+                .map(RuleMatchSummaryResponse::from)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(responses);
+    }
+
+    /**
+     * Durable rule-match detail (Tier 3 Phase 11): the exact rule snapshot
+     * and evaluation evidence persisted at match time, independent of any
+     * subsequent edit to the live rule.
+     */
+    @GetMapping("/rule-matches/history/{matchId}")
+    public ResponseEntity<RuleMatchDetailResponse> getRuleMatchDetail(@PathVariable UUID matchId) {
+        RuleMatchEntity entity = ruleMatchRepository.findById(matchId)
+                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("RuleMatch", matchId.toString()));
+        return ResponseEntity.ok(RuleMatchDetailResponse.from(entity));
     }
 }

@@ -33,6 +33,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -370,5 +371,187 @@ class RuleRegistryPersistenceIntegrationTest {
                 "evaluation_evidence must preserve the actual observed value");
         assertEquals("matched", persisted.getEvaluationEvidence().get("outcome"));
         assertEquals("All conditions met", persisted.getMessage());
+    }
+
+    // ---------- Tier 3 Phase 11: durable rule-match retrieval API ----------
+
+    private com.nexus.rule.api.RuleController ruleMatchHistoryController() {
+        return new com.nexus.rule.api.RuleController(
+                new RuleRegistry(ruleRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
+    }
+
+    private RuleMatchedEvent triggerRealMatch(RuleRegistry registry, Rule rule, double value, String correlationId) {
+        EventDispatcher eventDispatcher = mock(EventDispatcher.class);
+        RuleEvaluator realEvaluator = new RuleEvaluator();
+        BoundedRuleMatchStore localMatchStore = new BoundedRuleMatchStore();
+        ApplicationEventPublisher applicationEventPublisher = mock(ApplicationEventPublisher.class);
+        RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
+        RuleMatchPersister persister = new RuleMatchPersister(ruleMatchRepository, objectMapper);
+        RuleMatcher matcher = new RuleMatcher(eventDispatcher, registry, realEvaluator, localMatchStore,
+                applicationEventPublisher, realtimePublisher, persister);
+
+        DomainEvent event = new DomainEvent(UUID.randomUUID(), EventType.TWIN_UPDATED, UUID.randomUUID(),
+                Instant.now(), "test", Map.of("value", value), "INFO", correlationId);
+        matcher.onEvent(event);
+
+        return localMatchStore.getRecentMatches(1).get(0);
+    }
+
+    @Test
+    void historyApi_listEndpoint_returnsDurableMatch() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule rule = new Rule(UUID.randomUUID(), "History List Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(rule);
+        triggerRealMatch(registry, rule, 34.7, "corr-list-api");
+
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, null);
+
+        assertTrue(response.getBody().stream().anyMatch(m -> "History List Rule".equals(m.ruleName())));
+    }
+
+    @Test
+    void historyApi_orderingIsMatchedAtDescending() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule rule = new Rule(UUID.randomUUID(), "Ordering Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(rule);
+        triggerRealMatch(registry, rule, 31.0, "corr-order-1");
+        triggerRealMatch(registry, rule, 32.0, "corr-order-2");
+
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, rule.ruleId(), null);
+
+        List<Instant> timestamps = response.getBody().stream().map(m -> m.matchedAt()).toList();
+        assertTrue(timestamps.size() >= 2);
+        for (int i = 0; i < timestamps.size() - 1; i++) {
+            assertFalse(timestamps.get(i).isBefore(timestamps.get(i + 1)), "results must be ordered matchedAt DESC");
+        }
+    }
+
+    @Test
+    void historyApi_ruleIdFilter_returnsOnlyThatRulesMatches() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule ruleA = new Rule(UUID.randomUUID(), "Filter Rule A", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        Rule ruleB = new Rule(UUID.randomUUID(), "Filter Rule B", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(ruleA);
+        registry.register(ruleB);
+        triggerRealMatch(registry, ruleA, 35.0, "corr-filter-a");
+        triggerRealMatch(registry, ruleB, 36.0, "corr-filter-b");
+
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, ruleA.ruleId(), null);
+
+        assertTrue(response.getBody().stream().allMatch(m -> m.ruleId().equals(ruleA.ruleId())));
+        assertTrue(response.getBody().stream().anyMatch(m -> "Filter Rule A".equals(m.ruleName())));
+    }
+
+    @Test
+    void historyApi_correlationIdFilter_returnsOnlyThatCorrelation() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule rule = new Rule(UUID.randomUUID(), "Correlation Filter Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(rule);
+        triggerRealMatch(registry, rule, 33.0, "corr-unique-xyz");
+
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, "corr-unique-xyz");
+
+        assertEquals(1, response.getBody().size());
+        assertEquals("corr-unique-xyz", response.getBody().get(0).correlationId());
+    }
+
+    @Test
+    void historyApi_detailEndpoint_returnsPersistedSnapshotAndEvidenceWithNumericActualValue() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule rule = new Rule(UUID.randomUUID(), "Detail Endpoint Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(rule);
+        RuleMatchedEvent match = triggerRealMatch(registry, rule, 34.7, "corr-detail-api");
+
+        var response = ruleMatchHistoryController().getRuleMatchDetail(match.matchId());
+
+        var detail = response.getBody();
+        assertEquals(match.matchId(), detail.matchId());
+        assertEquals(rule.ruleId(), detail.ruleId());
+        assertEquals("Detail Endpoint Rule", detail.ruleSnapshot().get("name"));
+        assertEquals("corr-detail-api", detail.correlationId());
+        assertEquals("All conditions met", detail.message());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> evaluatedConditions =
+                (List<Map<String, Object>>) detail.evaluationEvidence().get("evaluatedConditions");
+        Object actualValue = evaluatedConditions.get(0).get("actualValue");
+        assertTrue(actualValue instanceof Number, "actualValue must remain a JSON number, not a stringified value");
+        assertEquals(34.7, ((Number) actualValue).doubleValue());
+    }
+
+    @Test
+    void historyApi_unknownMatchId_throwsResourceNotFoundException() {
+        assertThrows(com.nexus.shared.exception.ResourceNotFoundException.class,
+                () -> ruleMatchHistoryController().getRuleMatchDetail(UUID.randomUUID()));
+    }
+
+    @Test
+    void historyApi_restartSurvival_freshControllerInstanceStillReturnsMatch() {
+        // Stands in for "restart the backend": a brand new RuleController
+        // instance (fresh RuleRegistry, fresh empty BoundedRuleMatchStore),
+        // sharing only the real database, must still be able to retrieve the
+        // match through the durable history endpoint - unlike GET
+        // /api/v1/rule-matches, which is expected to return [] after a
+        // restart because it reads only the volatile cache.
+        RuleRegistry writerRegistry = new RuleRegistry(ruleRepository);
+        Rule rule = new Rule(UUID.randomUUID(), "Restart Survival Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        writerRegistry.register(rule);
+        RuleMatchedEvent match = triggerRealMatch(writerRegistry, rule, 34.7, "corr-restart");
+
+        // "After restart": a completely fresh controller, backed only by the
+        // shared real database.
+        com.nexus.rule.api.RuleController freshController = new com.nexus.rule.api.RuleController(
+                new RuleRegistry(ruleRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
+
+        // The volatile cache-backed endpoint on a fresh instance is empty...
+        assertTrue(freshController.getRuleMatches(100).getBody().isEmpty(),
+                "a fresh BoundedRuleMatchStore must start empty, exactly as it would after a real restart");
+
+        // ...but the durable history endpoint still returns the match.
+        var historyResponse = freshController.getRuleMatchHistory(100, null, "corr-restart");
+        assertEquals(1, historyResponse.getBody().size());
+
+        var detailResponse = freshController.getRuleMatchDetail(match.matchId());
+        assertEquals("Restart Survival Rule", detailResponse.getBody().ruleSnapshot().get("name"));
+    }
+
+    @Test
+    void historyApi_ruleEditAfterMatch_historyStillReportsOriginalSnapshot() {
+        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        Rule original = new Rule(UUID.randomUUID(), "Edit Integrity Rule", true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
+        registry.register(original);
+        RuleMatchedEvent match = triggerRealMatch(registry, original, 34.7, "corr-edit-integrity");
+
+        // Edit the live rule to a materially different condition.
+        Rule edited = new Rule(original.ruleId(), original.name(), true, 1,
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "40.0")),
+                original.actions(), original.metadata());
+        registry.register(edited);
+        assertEquals("40.0", registry.get(original.ruleId()).orElseThrow().conditions().get(0).expectedValue(),
+                "sanity check: the live rule must now require > 40.0");
+
+        var detailResponse = ruleMatchHistoryController().getRuleMatchDetail(match.matchId());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> conditions =
+                (List<Map<String, Object>>) detailResponse.getBody().ruleSnapshot().get("conditions");
+        assertEquals("30.0", conditions.get(0).get("expectedValue"),
+                "the durable history API must report the rule configuration as it was AT MATCH TIME, not the current live rule");
     }
 }
