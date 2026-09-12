@@ -7,6 +7,7 @@ import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
+import com.nexus.rule.persistence.RuleMatchPersister;
 import com.nexus.rule.persistence.RuleRegistry;
 import com.nexus.realtime.RealtimePublisher;
 import jakarta.annotation.PostConstruct;
@@ -31,14 +32,16 @@ public class RuleMatcher implements EventListener {
     private final BoundedRuleMatchStore matchStore;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final RealtimePublisher realtimePublisher;
+    private final RuleMatchPersister ruleMatchPersister;
 
-    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore, ApplicationEventPublisher applicationEventPublisher, RealtimePublisher realtimePublisher) {
+    public RuleMatcher(EventDispatcher eventDispatcher, RuleRegistry ruleRegistry, RuleEvaluator ruleEvaluator, BoundedRuleMatchStore matchStore, ApplicationEventPublisher applicationEventPublisher, RealtimePublisher realtimePublisher, RuleMatchPersister ruleMatchPersister) {
         this.eventDispatcher = eventDispatcher;
         this.ruleRegistry = ruleRegistry;
         this.ruleEvaluator = ruleEvaluator;
         this.matchStore = matchStore;
         this.applicationEventPublisher = applicationEventPublisher;
         this.realtimePublisher = realtimePublisher;
+        this.ruleMatchPersister = ruleMatchPersister;
     }
 
     @PostConstruct
@@ -65,6 +68,7 @@ public class RuleMatcher implements EventListener {
                             result,
                             event.correlationId()
                     );
+                    ruleMatchPersister.persist(matchedEvent);
                     matchStore.add(matchedEvent);
                     realtimePublisher.publishRuleMatch(result, event.correlationId());
                     applicationEventPublisher.publishEvent(matchedEvent);

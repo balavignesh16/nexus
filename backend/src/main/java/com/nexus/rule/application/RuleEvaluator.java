@@ -1,11 +1,14 @@
 package com.nexus.rule.application;
 
 import com.nexus.event.domain.DomainEvent;
+import com.nexus.rule.domain.ConditionEvidence;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleCondition;
 import com.nexus.rule.domain.RuleEvaluationResult;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -16,18 +19,30 @@ public class RuleEvaluator {
             return new RuleEvaluationResult(false, rule, event, "No conditions defined");
         }
 
+        List<ConditionEvidence> evidence = new ArrayList<>();
         for (RuleCondition condition : rule.conditions()) {
-            boolean conditionMet = evaluateCondition(condition, event);
-            if (!conditionMet) {
-                return new RuleEvaluationResult(false, rule, event, "Condition not met: " + condition.field());
+            ConditionEvidence conditionEvidence = evaluateCondition(condition, event);
+            evidence.add(conditionEvidence);
+            if (!conditionEvidence.conditionMet()) {
+                return new RuleEvaluationResult(false, rule, event, "Condition not met: " + condition.field(), evidence);
             }
         }
-        
-        return new RuleEvaluationResult(true, rule, event, "All conditions met");
+
+        return new RuleEvaluationResult(true, rule, event, "All conditions met", evidence);
     }
 
-    private boolean evaluateCondition(RuleCondition condition, DomainEvent event) {
+    /**
+     * Extracts the actual value exactly once and reuses it both to decide
+     * whether the condition matched and to record it as evidence - the two
+     * concerns share a single extraction rather than each re-deriving it.
+     */
+    private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event) {
         Object actualValue = extractActualValue(condition, event);
+        boolean conditionMet = evaluateConditionMet(condition, actualValue);
+        return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), actualValue, conditionMet);
+    }
+
+    private boolean evaluateConditionMet(RuleCondition condition, Object actualValue) {
         if (actualValue == null) return false;
 
         String expectedStr = condition.expectedValue();

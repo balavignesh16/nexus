@@ -2,6 +2,7 @@ package com.nexus.rule.application;
 
 import com.nexus.event.domain.DomainEvent;
 import com.nexus.event.domain.EventType;
+import com.nexus.rule.domain.ConditionEvidence;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleCondition;
 import com.nexus.rule.domain.RuleEvaluationResult;
@@ -16,6 +17,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -303,5 +305,155 @@ class RuleEvaluatorTest {
 
         assertFalse(result.matched());
         assertTrue(result.message().contains("VALUE"), "failure message should identify which condition failed");
+    }
+
+    // ---------- Tier 3 Phase 9B: evaluation evidence ----------
+
+    @Test
+    void evidence_valueGtMatch_recordsActualExpectedAndMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of("value", 35.0));
+        Rule rule = ruleWithCondition(RuleField.VALUE, RuleOperator.GT, "30.0");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertEquals(1, result.evidence().size());
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertEquals(RuleField.VALUE, evidence.field());
+        assertEquals(RuleOperator.GT, evidence.operator());
+        assertEquals("30.0", evidence.expectedValue());
+        assertEquals(35.0, evidence.actualValue());
+        assertTrue(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_valueGtNonMatch_recordsConditionNotMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of("value", 25.0));
+        Rule rule = ruleWithCondition(RuleField.VALUE, RuleOperator.GT, "30.0");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertEquals(1, result.evidence().size());
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertEquals(25.0, evidence.actualValue());
+        assertFalse(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_eqOperator_recordsActualExpectedAndMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of());
+        Rule rule = ruleWithCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertEquals(RuleOperator.EQ, evidence.operator());
+        assertEquals("TWIN_UPDATED", evidence.expectedValue());
+        assertEquals("TWIN_UPDATED", evidence.actualValue());
+        assertTrue(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_sensorType_recordsActualValueFromPayload() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO",
+                Map.of("sensorType", "GAS_SENSOR"));
+        Rule rule = ruleWithCondition(RuleField.SENSOR_TYPE, RuleOperator.EQ, "GAS_SENSOR");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertEquals(RuleField.SENSOR_TYPE, evidence.field());
+        assertEquals("GAS_SENSOR", evidence.actualValue());
+        assertTrue(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_multipleConditionsAllMatch_recordsEveryConditionInOrder() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of("value", 35.0));
+        Rule rule = ruleWithConditions(
+                new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED"),
+                new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")
+        );
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched());
+        assertEquals(2, result.evidence().size());
+        assertEquals(RuleField.EVENT_TYPE, result.evidence().get(0).field());
+        assertEquals(RuleField.VALUE, result.evidence().get(1).field());
+        assertTrue(result.evidence().get(0).conditionMet());
+        assertTrue(result.evidence().get(1).conditionMet());
+    }
+
+    @Test
+    void evidence_multipleConditionsFirstFails_shortCircuitsAndDoesNotEvaluateLaterConditions() {
+        // EVENT_TYPE fails first; VALUE must never be evaluated, so evidence
+        // must contain exactly one entry, not two.
+        DomainEvent event = eventWithPayload(EventType.SENSOR_VALUE_CHANGED, UUID.randomUUID(), "INFO", Map.of("value", 35.0));
+        Rule rule = ruleWithConditions(
+                new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED"),
+                new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")
+        );
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertFalse(result.matched());
+        assertEquals(1, result.evidence().size(), "evaluation must short-circuit at the first failed condition");
+        assertEquals(RuleField.EVENT_TYPE, result.evidence().get(0).field());
+        assertFalse(result.evidence().get(0).conditionMet());
+    }
+
+    @Test
+    void evidence_missingValue_recordsNullActualValueAndNotMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of());
+        Rule rule = ruleWithCondition(RuleField.VALUE, RuleOperator.GT, "30.0");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertNull(evidence.actualValue());
+        assertFalse(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_missingSensorType_recordsNullActualValueAndNotMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_CREATED, UUID.randomUUID(), "INFO", Map.of());
+        Rule rule = ruleWithCondition(RuleField.SENSOR_TYPE, RuleOperator.EQ, "GAS_SENSOR");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertNull(evidence.actualValue());
+        assertFalse(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_nonNumericValueForNumericOperator_retainsRawValueAndNotMet() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO",
+                Map.of("value", "not-a-number"));
+        Rule rule = ruleWithCondition(RuleField.VALUE, RuleOperator.GT, "30.0");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        ConditionEvidence evidence = result.evidence().get(0);
+        assertEquals("not-a-number", evidence.actualValue(), "the raw non-numeric value must be preserved, not discarded");
+        assertFalse(evidence.conditionMet());
+    }
+
+    @Test
+    void evidence_conditionOrdering_isPreservedAcrossThreeConditions() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "WARNING", Map.of("value", 35.0));
+        Rule rule = ruleWithConditions(
+                new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED"),
+                new RuleCondition(RuleField.SEVERITY, RuleOperator.NE, "CRITICAL"),
+                new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")
+        );
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched());
+        assertEquals(3, result.evidence().size());
+        assertEquals(RuleField.EVENT_TYPE, result.evidence().get(0).field());
+        assertEquals(RuleField.SEVERITY, result.evidence().get(1).field());
+        assertEquals(RuleField.VALUE, result.evidence().get(2).field());
     }
 }

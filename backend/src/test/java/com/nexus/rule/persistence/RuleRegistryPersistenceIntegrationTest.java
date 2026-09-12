@@ -12,6 +12,7 @@ import com.nexus.rule.domain.RuleCondition;
 import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.domain.RuleOperator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,11 +77,16 @@ class RuleRegistryPersistenceIntegrationTest {
     @Autowired
     private RuleRepository ruleRepository;
     @Autowired
+    private RuleMatchRepository ruleMatchRepository;
+    @Autowired
+    private ObjectMapper objectMapper;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUp() {
         ruleRepository.deleteAll();
+        ruleMatchRepository.deleteAll();
     }
 
     private Rule richRule(String name, boolean enabled, int priority) {
@@ -314,7 +320,10 @@ class RuleRegistryPersistenceIntegrationTest {
         RuleRegistry writer = new RuleRegistry(ruleRepository);
         Rule rule = new Rule(
                 UUID.randomUUID(), "Matches Twin Updates", true, 1,
-                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED")),
+                List.of(
+                        new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED"),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")
+                ),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())),
                 Map.of()
         );
@@ -328,15 +337,38 @@ class RuleRegistryPersistenceIntegrationTest {
         BoundedRuleMatchStore matchStore = new BoundedRuleMatchStore();
         ApplicationEventPublisher applicationEventPublisher = mock(ApplicationEventPublisher.class);
         RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
-        RuleMatcher ruleMatcher = new RuleMatcher(eventDispatcher, hydratedRegistry, realEvaluator, matchStore, applicationEventPublisher, realtimePublisher);
+        RuleMatchPersister ruleMatchPersister = new RuleMatchPersister(ruleMatchRepository, objectMapper);
+        RuleMatcher ruleMatcher = new RuleMatcher(eventDispatcher, hydratedRegistry, realEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister);
 
         DomainEvent event = new DomainEvent(UUID.randomUUID(), EventType.TWIN_UPDATED, UUID.randomUUID(),
-                Instant.now(), "test", Map.of(), "INFO", "corr-hydrated");
+                Instant.now(), "test", Map.of("value", 34.7), "INFO", "corr-hydrated");
 
         ruleMatcher.onEvent(event);
 
         assertEquals(1, matchStore.getRecentMatches(10).size(), "the hydrated rule must actually match, exactly as an in-session-created rule would");
         verify(realtimePublisher).publishRuleMatch(any(), org.mockito.ArgumentMatchers.eq("corr-hydrated"));
         verify(applicationEventPublisher).publishEvent(any(RuleMatchedEvent.class));
+
+        // ---------- Tier 3 Phase 9B: the match must also be durably persisted ----------
+
+        RuleMatchedEvent matched = matchStore.getRecentMatches(1).get(0);
+        RuleMatchEntity persisted = ruleMatchRepository.findById(matched.matchId()).orElseThrow();
+
+        assertEquals(matched.matchId(), persisted.getMatchId());
+        assertEquals(rule.ruleId(), persisted.getRuleId());
+        assertEquals(event.eventId(), persisted.getEventId());
+        assertEquals("corr-hydrated", persisted.getCorrelationId());
+        assertEquals("Matches Twin Updates", persisted.getRuleSnapshot().get("name"),
+                "rule_snapshot must contain the evaluated rule");
+        assertEquals(2, ((List<?>) persisted.getRuleSnapshot().get("conditions")).size());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> evaluatedConditions =
+                (List<Map<String, Object>>) persisted.getEvaluationEvidence().get("evaluatedConditions");
+        assertEquals(2, evaluatedConditions.size(), "evaluation_evidence must contain both evaluated conditions");
+        assertEquals(34.7, evaluatedConditions.get(1).get("actualValue"),
+                "evaluation_evidence must preserve the actual observed value");
+        assertEquals("matched", persisted.getEvaluationEvidence().get("outcome"));
+        assertEquals("All conditions met", persisted.getMessage());
     }
 }

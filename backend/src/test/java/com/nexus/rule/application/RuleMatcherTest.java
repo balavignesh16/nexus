@@ -7,11 +7,13 @@ import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
+import com.nexus.rule.persistence.RuleMatchPersister;
 import com.nexus.rule.persistence.RuleRegistry;
 import com.nexus.realtime.RealtimePublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
@@ -39,6 +41,7 @@ class RuleMatcherTest {
     private BoundedRuleMatchStore matchStore;
     private ApplicationEventPublisher applicationEventPublisher;
     private RealtimePublisher realtimePublisher;
+    private RuleMatchPersister ruleMatchPersister;
     private RuleMatcher ruleMatcher;
 
     @BeforeEach
@@ -49,7 +52,8 @@ class RuleMatcherTest {
         matchStore = mock(BoundedRuleMatchStore.class);
         applicationEventPublisher = mock(ApplicationEventPublisher.class);
         realtimePublisher = mock(RealtimePublisher.class);
-        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher, realtimePublisher);
+        ruleMatchPersister = mock(RuleMatchPersister.class);
+        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister);
     }
 
     private DomainEvent sampleEvent(String correlationId) {
@@ -164,5 +168,57 @@ class RuleMatcherTest {
         ruleMatcher.cleanup();
 
         verify(eventDispatcher).unregister(ruleMatcher);
+    }
+
+    // ---------- Tier 3 Phase 9B: durable persistence ordering/failure semantics ----------
+
+    @Test
+    void persistenceOccursBeforeCacheRealtimeAndApplicationEvent() {
+        DomainEvent event = sampleEvent("corr-order");
+        Rule rule = sampleRule("Ordered Rule");
+        RuleEvaluationResult matchedResult = new RuleEvaluationResult(true, rule, event, "All conditions met");
+
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(rule));
+        when(ruleEvaluator.evaluate(rule, event)).thenReturn(matchedResult);
+
+        ruleMatcher.onEvent(event);
+
+        InOrder order = inOrder(ruleMatchPersister, matchStore, realtimePublisher, applicationEventPublisher);
+        order.verify(ruleMatchPersister).persist(any());
+        order.verify(matchStore).add(any());
+        order.verify(realtimePublisher).publishRuleMatch(any(), any());
+        order.verify(applicationEventPublisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void persistenceFailurePreventsDownstreamButOtherRulesContinue() {
+        DomainEvent event = sampleEvent("corr-fail");
+        Rule failingMatchRule = sampleRule("Persistence Fails");
+        Rule healthyMatchRule = sampleRule("Persists Fine");
+        RuleEvaluationResult failingResult = new RuleEvaluationResult(true, failingMatchRule, event, "All conditions met");
+        RuleEvaluationResult healthyResult = new RuleEvaluationResult(true, healthyMatchRule, event, "All conditions met");
+
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(failingMatchRule, healthyMatchRule));
+        when(ruleEvaluator.evaluate(failingMatchRule, event)).thenReturn(failingResult);
+        when(ruleEvaluator.evaluate(healthyMatchRule, event)).thenReturn(healthyResult);
+        doThrow(new RuntimeException("simulated persistence failure"))
+                .when(ruleMatchPersister).persist(argThat(m -> m.result().rule().equals(failingMatchRule)));
+
+        assertDoesNotThrow(() -> ruleMatcher.onEvent(event));
+
+        // The failing rule's match must never reach the cache, realtime, or the application event bus.
+        ArgumentCaptor<RuleMatchedEvent> matchStoreCaptor = ArgumentCaptor.forClass(RuleMatchedEvent.class);
+        verify(matchStore, times(1)).add(matchStoreCaptor.capture());
+        assertEquals(healthyMatchRule, matchStoreCaptor.getValue().result().rule(),
+                "only the healthy rule's match may reach the cache");
+
+        verify(realtimePublisher, never()).publishRuleMatch(eq(failingResult), any());
+        verify(realtimePublisher, times(1)).publishRuleMatch(eq(healthyResult), any());
+
+        ArgumentCaptor<Object> publishedEventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(applicationEventPublisher, times(1)).publishEvent(publishedEventCaptor.capture());
+        RuleMatchedEvent publishedEvent = (RuleMatchedEvent) publishedEventCaptor.getValue();
+        assertEquals(healthyMatchRule, publishedEvent.result().rule(),
+                "only the healthy rule's match may reach the application event bus");
     }
 }
