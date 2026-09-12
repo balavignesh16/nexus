@@ -29,17 +29,20 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final String telemetryTopic;
+    private final MqttReconnectController reconnectController;
 
-    public TelemetryMQTTListener(MqttClient mqttClient, 
-                                 TelemetryService telemetryService, 
+    public TelemetryMQTTListener(MqttClient mqttClient,
+                                 TelemetryService telemetryService,
                                  ObjectMapper objectMapper,
                                  Validator validator,
-                                 @Value("${mqtt.topic.telemetry}") String telemetryTopic) {
+                                 @Value("${mqtt.topic.telemetry}") String telemetryTopic,
+                                 MqttReconnectController reconnectController) {
         this.mqttClient = mqttClient;
         this.telemetryService = telemetryService;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.telemetryTopic = telemetryTopic;
+        this.reconnectController = reconnectController;
     }
 
     @PostConstruct
@@ -68,11 +71,13 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     public void connectComplete(boolean reconnect, String serverURI) {
         log.info("MQTT Connection complete (reconnect: {}). Subscribing...", reconnect);
         subscribe();
+        reconnectController.onConnectComplete();
     }
 
     @Override
     public void connectionLost(Throwable cause) {
         log.warn("MQTT connection lost", cause);
+        reconnectController.onConnectionLost(cause);
     }
 
     @Override

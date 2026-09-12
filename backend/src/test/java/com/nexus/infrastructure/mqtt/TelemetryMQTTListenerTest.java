@@ -55,15 +55,17 @@ class TelemetryMQTTListenerTest {
 
     private MqttClient mqttClient;
     private TelemetryService telemetryService;
+    private MqttReconnectController reconnectController;
     private TelemetryMQTTListener listener;
 
     @BeforeEach
     void setUp() {
         mqttClient = mock(MqttClient.class);
         telemetryService = mock(TelemetryService.class);
+        reconnectController = mock(MqttReconnectController.class);
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC);
+        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC, reconnectController);
     }
 
     private MqttMessage messageFor(String json) {
@@ -353,5 +355,23 @@ class TelemetryMQTTListenerTest {
         listener.connectComplete(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(TELEMETRY_TOPIC, 1);
+    }
+
+    // ---------- Reconnect controller notification (Tier 3 Phase 2) ----------
+
+    @Test
+    void connectComplete_notifiesReconnectController() {
+        listener.connectComplete(true, "tcp://localhost:1883");
+
+        verify(reconnectController, times(1)).onConnectComplete();
+    }
+
+    @Test
+    void connectionLost_notifiesReconnectControllerWithTheCause() {
+        RuntimeException cause = new RuntimeException("broker unreachable");
+
+        listener.connectionLost(cause);
+
+        verify(reconnectController, times(1)).onConnectionLost(cause);
     }
 }

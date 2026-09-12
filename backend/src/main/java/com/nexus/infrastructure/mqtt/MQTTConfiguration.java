@@ -10,12 +10,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import jakarta.annotation.PreDestroy;
-
 @Configuration
 public class MQTTConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(MQTTConfiguration.class);
+
+    // Extra margin beyond connectionTimeout to bound MqttClient's synchronous
+    // connect() wait (see setTimeToWait below). Not exposed as a property:
+    // it is a fixed safety margin, not an operational tuning knob (Tier 3
+    // Phase 2C).
+    private static final long TIME_TO_WAIT_GRACE_MS = 5000L;
 
     @Value("${mqtt.broker.url}")
     private String brokerUrl;
@@ -23,40 +27,42 @@ public class MQTTConfiguration {
     @Value("${mqtt.client.id}")
     private String clientId;
 
-    private MqttClient mqttClient;
-
     @Bean
-    public MqttClient mqttClient() throws MqttException {
-        log.info("Connecting to MQTT broker at {} with clientId {}", brokerUrl, clientId);
-        mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
-        // Set manual acks to true to prevent data loss on persistence failure
-        mqttClient.setManualAcks(true);
-        
+    public MqttConnectOptions mqttConnectOptions() {
         MqttConnectOptions options = new MqttConnectOptions();
-        options.setAutomaticReconnect(true);
+        // Reconnection is now owned entirely by MqttReconnectController; Paho's
+        // own automaticReconnect is disabled so there is exactly one reconnect
+        // mechanism (Tier 3 Phase 2).
+        options.setAutomaticReconnect(false);
         // Set clean session to false to retain QoS 1 messages while disconnected
         options.setCleanSession(false);
         options.setConnectionTimeout(10);
-        
+        return options;
+    }
+
+    @Bean
+    public MqttClient mqttClient(MqttConnectOptions options) throws MqttException {
+        log.info("Connecting to MQTT broker at {} with clientId {}", brokerUrl, clientId);
+        MqttClient mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
+        // Set manual acks to true to prevent data loss on persistence failure
+        mqttClient.setManualAcks(true);
+
+        // Bound how long the synchronous connect() wrapper blocks the calling
+        // thread. Without this, a Paho 1.2.5 ConnectBG thread that never
+        // completes (confirmed defect - Tier 3 Phase 1) would block the
+        // caller (this bean's startup thread, and later MqttReconnectController's
+        // scheduler thread) forever (Tier 3 Phase 2B). This does NOT fix that
+        // underlying Paho defect - it only bounds NEXUS's own exposure to it.
+        long timeToWaitMs = (options.getConnectionTimeout() * 1000L) + TIME_TO_WAIT_GRACE_MS;
+        mqttClient.setTimeToWait(timeToWaitMs);
+
         try {
             mqttClient.connect(options);
             log.info("Connected successfully to MQTT broker.");
         } catch (MqttException e) {
-            log.warn("Failed to connect to MQTT broker at startup. It will retry if automaticReconnect is true, or we are in a test environment.", e);
+            log.warn("Failed to connect to MQTT broker at startup. The reconnect controller will retry.", e);
         }
-        
-        return mqttClient;
-    }
 
-    @PreDestroy
-    public void disconnect() {
-        if (mqttClient != null && mqttClient.isConnected()) {
-            try {
-                mqttClient.disconnect();
-                log.info("Disconnected from MQTT broker.");
-            } catch (MqttException e) {
-                log.error("Error disconnecting from MQTT broker", e);
-            }
-        }
+        return mqttClient;
     }
 }
