@@ -12,6 +12,7 @@ export type RealtimeEventType =
   | 'DomainEventCreated'
   | 'RuleMatched'
   | 'ActionExecuted'
+  | 'ActionAcknowledged'
   | 'DeviceOnline'
   | 'DeviceOffline'
   | 'PlatformHealthChanged'
@@ -77,6 +78,20 @@ export interface ActionExecutedPayload {
   status: string;
   executedAt: number;
   message: string;
+}
+
+/**
+ * Tier 5E: whether the device acknowledged/processed a dispatched command -
+ * NOT physical-outcome verification. ACCEPTED means the device parsed the
+ * command, passed its own validation, and applied it (e.g. called
+ * digitalWrite()); it never means "LED is ON/OFF".
+ */
+export interface ActionAcknowledgedPayload {
+  commandId: string;
+  deviceId: string;
+  status: 'ACCEPTED' | 'REJECTED';
+  message: string;
+  timestamp: number;
 }
 
 export interface PipelineTracePayload {

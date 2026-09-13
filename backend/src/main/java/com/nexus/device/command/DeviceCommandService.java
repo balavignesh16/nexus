@@ -73,6 +73,6 @@ public class DeviceCommandService {
         ActionHistoryRecord record = actionHistoryRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Action history record missing immediately after synchronous processing: " + requestId));
-        return ActionHistoryResponse.from(record.toResult());
+        return ActionHistoryResponse.from(record);
     }
 }

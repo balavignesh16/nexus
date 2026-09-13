@@ -41,6 +41,19 @@ public class ActionHistoryRecord {
     @Column(name = "message")
     private String message;
 
+    // Tier 5E: nullable - only ever populated for a SEND_COMMAND row once an
+    // MQTT ACK has been correlated to it. NULL means either "not applicable"
+    // (any other ActionType) or "no ACK received yet".
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ack_status")
+    private AcknowledgementStatus ackStatus;
+
+    @Column(name = "ack_received_at")
+    private Instant ackReceivedAt;
+
+    @Column(name = "ack_message")
+    private String ackMessage;
+
     protected ActionHistoryRecord() {}
 
     public ActionHistoryRecord(UUID requestId, UUID matchId, UUID deviceId, ActionType actionType, ExecutionStatus status, Map<String, Object> parameters, Instant timestamp, String message) {
@@ -52,6 +65,18 @@ public class ActionHistoryRecord {
         this.parameters = parameters;
         this.timestamp = timestamp;
         this.message = message;
+    }
+
+    /**
+     * Tier 5E: applies a correlated ACK to this row. A plain overwrite -
+     * deliberately idempotent for duplicate/delayed MQTT redelivery (see
+     * DeviceCommandAckMessageHandler) rather than guarded by any prior-state
+     * check, version, or sequence number.
+     */
+    public void applyAcknowledgement(AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage) {
+        this.ackStatus = ackStatus;
+        this.ackReceivedAt = ackReceivedAt;
+        this.ackMessage = ackMessage;
     }
 
     public static ActionHistoryRecord fromResult(ActionExecutionResult result) {
@@ -89,4 +114,7 @@ public class ActionHistoryRecord {
     public Map<String, Object> getParameters() { return parameters; }
     public Instant getTimestamp() { return timestamp; }
     public String getMessage() { return message; }
+    public AcknowledgementStatus getAckStatus() { return ackStatus; }
+    public Instant getAckReceivedAt() { return ackReceivedAt; }
+    public String getAckMessage() { return ackMessage; }
 }

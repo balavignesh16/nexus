@@ -1,23 +1,34 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { deviceApi, CapabilityType, ExecutionStatus, type DeviceCapability } from '../api/deviceApi';
 import { ApiError } from '../api/apiClient';
+import { useActionAcknowledgementStream } from '../realtime/streams/useActionAcknowledgementStream';
 
 interface DeviceCommandControlsProps {
   deviceId: string;
   capabilities: DeviceCapability[];
 }
 
-type DispatchState = 'idle' | 'sending' | 'sent' | 'failed';
+// Tier 5E: UI-only lifecycle. 'sent' means only "NEXUS published the
+// command to MQTT" - it then waits for a device ACK. No state here is ever
+// persisted to the backend, and a timeout never claims the command or the
+// device failed (see 'ack-timeout' below).
+type DispatchState = 'idle' | 'sending' | 'sent' | 'waiting-ack' | 'acknowledged' | 'rejected' | 'ack-timeout' | 'failed';
+
+// UI-only - not backend-persisted, not a scheduler. If an ACK arrives after
+// this fires, the realtime handler below still updates the UI to the real
+// state; this only changes the displayed text while nothing has arrived yet.
+const ACK_TIMEOUT_MS = 15000;
 
 /**
- * Tier 5D: the first manual physical-command trigger in NEXUS. Renders a
+ * Tier 5D/5E: the manual physical-command trigger in NEXUS. Renders a
  * control ONLY for a capability the device is actually, authoritatively
  * provisioned with WRITE for (never inferred, never assumed).
  *
- * On a successful backend publish this shows "Command sent" - never "LED
- * is ON/OFF" and never "Command delivered". No acknowledgement or physical
- * outcome exists yet (deferred to a later phase); this control can only
- * ever report that NEXUS attempted and published the request.
+ * Lifecycle: "Command sent" (NEXUS published to MQTT) -> "Waiting for
+ * acknowledgement" -> "Acknowledged" (ACCEPTED) or "Rejected: <reason>",
+ * or "No acknowledgement received yet" after a UI-only timeout. None of
+ * these ever claim a physical outcome (e.g. "LED is ON/OFF") - ACCEPTED
+ * means only that the device processed and applied the instruction.
  */
 export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ deviceId, capabilities }) => {
   const hasLedWrite = capabilities.some(
@@ -26,6 +37,33 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
 
   const [state, setState] = useState<DispatchState>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const pendingCommandIdRef = useRef<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  useActionAcknowledgementStream(deviceId, (payload) => {
+    if (payload.commandId !== pendingCommandIdRef.current) {
+      return;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (payload.status === 'ACCEPTED') {
+      setState('acknowledged');
+      setMessage('Acknowledged');
+    } else {
+      setState('rejected');
+      setMessage(`Rejected: ${payload.message || 'unknown reason'}`);
+    }
+  });
 
   if (!hasLedWrite) {
     return null;
@@ -34,6 +72,11 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
   const sendCommand = async (value: boolean) => {
     setState('sending');
     setMessage(null);
+    pendingCommandIdRef.current = null;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     try {
       const result = await deviceApi.sendDeviceCommand(deviceId, {
         capability: CapabilityType.LED,
@@ -41,8 +84,20 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
         value,
       });
       if (result.status === ExecutionStatus.SUCCESS) {
-        setState('sent');
-        setMessage('Command sent');
+        setState('waiting-ack');
+        setMessage('Command sent - waiting for acknowledgement');
+        pendingCommandIdRef.current = result.requestId;
+        const dispatchedCommandId = result.requestId;
+        timeoutRef.current = setTimeout(() => {
+          // Only downgrade the display if this exact command is still the
+          // one being waited on and no ACK has arrived for it yet - an ACK
+          // that arrives afterward still updates the UI via the handler
+          // above (pendingCommandIdRef is untouched by this branch).
+          if (pendingCommandIdRef.current === dispatchedCommandId) {
+            setState((current) => (current === 'waiting-ack' ? 'ack-timeout' : current));
+            setMessage('No acknowledgement received yet');
+          }
+        }, ACK_TIMEOUT_MS);
       } else {
         setState('failed');
         setMessage(result.message);
@@ -76,7 +131,7 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
       {message && (
         <span
           data-testid="device-command-result"
-          className={`text-xs ${state === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}
+          className={`text-xs ${state === 'failed' || state === 'rejected' ? 'text-destructive' : 'text-muted-foreground'}`}
         >
           {message}
         </span>

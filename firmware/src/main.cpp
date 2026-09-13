@@ -19,11 +19,20 @@
 // supports exactly one command: {capability:"LED", command:"SET_STATE",
 // value:<boolean>}. This is a closed allowlist, not a generic passthrough -
 // any other capability/command, a stale timestamp, an unsynced clock, or a
-// malformed payload is logged and ignored, never partially applied. No
-// acknowledgement is published back (deferred to a later phase) - this
-// firmware can only ever act on a command, never confirm it did.
+// malformed payload is logged and ignored, never partially applied.
 //
-// No OTA, no device registration/discovery, no capability self-declaration.
+// Tier 5E additionally publishes an ACK to
+// nexus/devices/{deviceId}/commands/ack once a command's commandId has been
+// extracted: ACCEPTED after digitalWrite() is called, or REJECTED (with a
+// closed-enum reason) for a correlatable command that fails validation. A
+// command whose commandId cannot even be determined (unsynced clock,
+// unparseable JSON, or a missing/wrong-typed commandId field) gets NO ack at
+// all - there is nothing to correlate it to. An ACK only ever means "this
+// device processed the command" - it is NOT physical-outcome verification
+// (no GPIO readback, no current sensing); that remains a later phase.
+//
+// No OTA, no device registration/discovery, no capability self-declaration,
+// no ACK retries, no persistent command queue/replay.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -41,6 +50,7 @@ static DHT dht(DHT_PIN, DHT_TYPE);
 static String telemetryTopic;
 static String deviceStatusTopic;
 static String deviceCommandTopic;
+static String deviceCommandAckTopic;
 static String mqttClientId;
 
 static unsigned long lastPublishMillis = 0;
@@ -118,32 +128,65 @@ String currentIsoTimestampUtc() {
     return String(buffer);
 }
 
-// Tier 5D: the sole command handler. Validates every field before ever
-// calling digitalWrite() - a malformed, unsupported, or stale command is
-// logged and ignored, never partially applied. Never publishes anything
-// back (no acknowledgement exists yet).
+// Tier 5E: publishes an ACK for a command whose commandId is known. QoS 1,
+// retained=false - mirrors the command topic's own delivery semantics, and
+// is deliberately not retained since its value is entirely time-bound to
+// one already-in-flight command.
+void publishAck(const String &commandId, const char* status, const char* reason) {
+    JsonDocument ackDoc;
+    ackDoc["commandId"] = commandId;
+    ackDoc["status"] = status;
+    ackDoc["timestamp"] = (long) time(nullptr);
+    if (reason != nullptr) {
+        ackDoc["reason"] = reason;
+    }
+    String ackPayload;
+    serializeJson(ackDoc, ackPayload);
+
+    bool published = mqttClient.publish(deviceCommandAckTopic, ackPayload, /*retained=*/false, /*qos=*/1);
+    if (published) {
+        Serial.printf("[Command] Published ACK to %s: %s\n", deviceCommandAckTopic.c_str(), ackPayload.c_str());
+    } else {
+        Serial.printf("[Command] Failed to publish ACK to %s\n", deviceCommandAckTopic.c_str());
+    }
+}
+
+// Tier 5D/5E: the sole command handler. commandId is extracted first and
+// validated before any other field - only once it is known can a REJECTED
+// ACK be correlated back to the command at all. A command whose commandId
+// cannot be determined (unsynced clock, unparseable JSON, missing/wrong-typed
+// commandId) gets NO ack - there is nothing to correlate it to; a
+// malformed, unsupported, or stale command is logged and ignored, never
+// partially applied.
 void onMqttMessage(String &topic, String &payload) {
     if (topic != deviceCommandTopic) {
-        return; // we only ever subscribe to one topic, but stay defensive
+        return; // we only ever subscribe to one command topic, but stay defensive
     }
 
     Serial.printf("[Command] Received on %s: %s\n", topic.c_str(), payload.c_str());
 
     if (!isTimeSynced()) {
-        Serial.println("[Command] Rejected: clock not yet NTP-synced, cannot validate command freshness.");
+        Serial.println("[Command] Rejected: clock not yet NTP-synced, cannot validate command freshness. No ACK possible (commandId not yet known).");
         return;
     }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err) {
-        Serial.printf("[Command] Rejected: malformed JSON (%s).\n", err.c_str());
+        Serial.printf("[Command] Rejected: malformed JSON (%s). No ACK possible (commandId not yet known).\n", err.c_str());
         return;
     }
+
+    if (!doc["commandId"].is<const char*>()) {
+        Serial.println("[Command] Rejected: missing or wrong-typed commandId. No ACK possible - nothing to correlate it to.");
+        return;
+    }
+    String commandId = String((const char*) doc["commandId"]);
 
     if (!doc["capability"].is<const char*>() || !doc["command"].is<const char*>()
             || !doc["value"].is<bool>() || !doc["timestamp"].is<long>()) {
         Serial.println("[Command] Rejected: missing or wrong-typed field(s).");
+        publishAck(commandId, "REJECTED", "MALFORMED");
         return;
     }
 
@@ -156,6 +199,7 @@ void onMqttMessage(String &topic, String &payload) {
     // Never a generic passthrough.
     if (strcmp(capability, "LED") != 0 || strcmp(command, "SET_STATE") != 0) {
         Serial.printf("[Command] Rejected: unsupported capability=%s command=%s.\n", capability, command);
+        publishAck(commandId, "REJECTED", "UNSUPPORTED");
         return;
     }
 
@@ -166,11 +210,13 @@ void onMqttMessage(String &topic, String &payload) {
     }
     if (age > COMMAND_STALENESS_WINDOW_SECONDS) {
         Serial.printf("[Command] Rejected: stale (age=%lds, window=%lds).\n", age, COMMAND_STALENESS_WINDOW_SECONDS);
+        publishAck(commandId, "REJECTED", "STALE");
         return;
     }
 
     digitalWrite(LED_PIN, value ? HIGH : LOW);
     Serial.printf("[Command] Applied: LED set to %s\n", value ? "ON" : "OFF");
+    publishAck(commandId, "ACCEPTED", nullptr);
 }
 
 void connectMqtt() {
@@ -271,6 +317,7 @@ void setup() {
     telemetryTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/telemetry";
     deviceStatusTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/status";
     deviceCommandTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/commands";
+    deviceCommandAckTopic = deviceCommandTopic + "/ack";
     // Client ID derived from the device UUID (not a fixed shared string) so
     // multiple real devices never collide, unlike the simulator's current
     // single hardcoded MQTT client ID. This same, stable client ID across
@@ -282,6 +329,7 @@ void setup() {
     Serial.printf("[Boot] Telemetry topic: %s\n", telemetryTopic.c_str());
     Serial.printf("[Boot] Device status topic: %s\n", deviceStatusTopic.c_str());
     Serial.printf("[Boot] Device command topic: %s\n", deviceCommandTopic.c_str());
+    Serial.printf("[Boot] Device command-ack topic: %s\n", deviceCommandAckTopic.c_str());
 
     connectWiFi();
     syncTime();

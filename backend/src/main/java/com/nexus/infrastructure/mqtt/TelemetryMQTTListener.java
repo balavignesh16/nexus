@@ -1,6 +1,7 @@
 package com.nexus.infrastructure.mqtt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
@@ -45,6 +46,13 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     private final String deviceStatusTopic;
     private final DeviceStatusMessageHandler deviceStatusMessageHandler;
 
+    // Tier 5E: command acknowledgements share this same single MQTT
+    // connection/callback too (no second MqttClient/reconnect controller -
+    // same architectural decision as Tier 5B's status routing above). All
+    // actual ACK logic lives in DeviceCommandAckMessageHandler.
+    private final String commandAckTopic;
+    private final DeviceCommandAckMessageHandler deviceCommandAckMessageHandler;
+
     // Tier 3 Phase 4 message-level observability. "Received" means Paho
     // invoked messageArrived() - it does NOT mean successfully deserialized,
     // validated, or processed. This is deliberate: the purpose is detecting
@@ -63,7 +71,9 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
                                  MqttReconnectController reconnectController,
                                  MeterRegistry meterRegistry,
                                  @Value("${mqtt.topic.status}") String deviceStatusTopic,
-                                 DeviceStatusMessageHandler deviceStatusMessageHandler) {
+                                 DeviceStatusMessageHandler deviceStatusMessageHandler,
+                                 @Value("${mqtt.topic.command-ack}") String commandAckTopic,
+                                 DeviceCommandAckMessageHandler deviceCommandAckMessageHandler) {
         this.mqttClient = mqttClient;
         this.telemetryService = telemetryService;
         this.objectMapper = objectMapper;
@@ -73,6 +83,8 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         this.meterRegistry = meterRegistry;
         this.deviceStatusTopic = deviceStatusTopic;
         this.deviceStatusMessageHandler = deviceStatusMessageHandler;
+        this.commandAckTopic = commandAckTopic;
+        this.deviceCommandAckMessageHandler = deviceCommandAckMessageHandler;
     }
 
     @PostConstruct
@@ -119,6 +131,15 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             subscribeFailures.increment();
             log.error("Failed to subscribe to device status MQTT topic", e);
         }
+        try {
+            // Tier 5E: subscribed on every connect/reconnect, mirroring the
+            // telemetry/status pattern above.
+            mqttClient.subscribe(commandAckTopic, 1);
+            log.info("Subscribed to MQTT topic: {}", commandAckTopic);
+        } catch (Exception e) {
+            subscribeFailures.increment();
+            log.error("Failed to subscribe to command-ack MQTT topic", e);
+        }
     }
 
     @Override
@@ -152,6 +173,15 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         // is completely unreached and unmodified for a status message.
         if (topic.endsWith("/status")) {
             handleStatusMessage(topic, message);
+            return;
+        }
+
+        // Tier 5E: command acknowledgements share this same callback/connection
+        // (see class-level note above). Checked before the status suffix would
+        // ever be reached for this shape since "/commands/ack" does not end
+        // with "/status" - order between the two branches does not matter.
+        if (topic.endsWith("/commands/ack")) {
+            handleCommandAck(topic, message);
             return;
         }
 
@@ -223,6 +253,25 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         } catch (Exception e) {
             log.error("Error processing device status message from topic {}. Did NOT ack. Message will be retried.", topic, e);
             throw new RuntimeException("Device status processing failed, triggering retry", e);
+        }
+    }
+
+    /**
+     * Tier 5E: own explicit ACK/error contract, independent of telemetry's
+     * and device-status's - mirrors handleStatusMessage exactly.
+     * DeviceCommandAckMessageHandler.handle() returns normally for every
+     * permanently-invalid case it recognizes (malformed JSON/topic, unknown
+     * commandId, device-binding mismatch); those are acknowledged here. A
+     * genuine transient failure propagates as an exception, is NOT
+     * acknowledged, and triggers QoS 1 redelivery.
+     */
+    private void handleCommandAck(String topic, MqttMessage message) {
+        try {
+            deviceCommandAckMessageHandler.handle(topic, message.getPayload());
+            mqttClient.messageArrivedComplete(message.getId(), message.getQos());
+        } catch (Exception e) {
+            log.error("Error processing command-ack message from topic {}. Did NOT ack. Message will be retried.", topic, e);
+            throw new RuntimeException("Command-ack processing failed, triggering retry", e);
         }
     }
 

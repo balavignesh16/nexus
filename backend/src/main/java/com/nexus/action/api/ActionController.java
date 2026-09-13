@@ -29,7 +29,7 @@ public class ActionController {
     public ResponseEntity<List<ActionHistoryResponse>> getActionHistory(
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
         List<ActionHistoryResponse> responses = historyRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, limit)).stream()
-                .map(r -> ActionHistoryResponse.from(r.toResult()))
+                .map(ActionHistoryResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);
     }

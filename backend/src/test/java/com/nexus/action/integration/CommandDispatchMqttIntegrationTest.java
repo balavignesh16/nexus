@@ -222,4 +222,72 @@ class CommandDispatchMqttIntegrationTest {
                         && t.stage() == com.nexus.pipeline.domain.PipelineStage.ACTION),
                 "the ACTION-stage PipelineTrace must carry the real deviceId, not null");
     }
+
+    // ---------- Tier 5E: command acknowledgement loop, against a real broker ----------
+
+    @Test
+    @Timeout(30)
+    void syntheticAck_publishedByObserver_isCorrelatedAndPersisted() throws Exception {
+        // Dispatch a real command first, exactly like the device would
+        // receive one, so a genuine ActionHistoryRecord (with a real
+        // commandId/deviceId) exists to correlate the ACK against.
+        com.nexus.device.command.api.dto.CreateDeviceCommandRequest commandRequest =
+                new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", true);
+        com.nexus.action.api.dto.ActionHistoryResponse dispatched = deviceCommandService.dispatchCommand(deviceId, commandRequest);
+        UUID commandId = dispatched.requestId();
+
+        String ackTopic = "nexus/devices/" + deviceId + "/commands/ack";
+        String ackPayload = String.format(
+                "{\"commandId\":\"%s\",\"status\":\"ACCEPTED\",\"timestamp\":%d}",
+                commandId, Instant.now().getEpochSecond());
+        MqttMessage message = new MqttMessage(ackPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        message.setQos(1);
+        message.setRetained(false);
+        observer.publish(ackTopic, message);
+
+        com.nexus.action.domain.ActionHistoryRecord persisted = pollUntilAcknowledged(commandId);
+
+        assertEquals(com.nexus.action.domain.AcknowledgementStatus.ACCEPTED, persisted.getAckStatus());
+        assertNotNull(persisted.getAckReceivedAt());
+        assertEquals(deviceId, persisted.getDeviceId());
+    }
+
+    @Test
+    @Timeout(30)
+    void syntheticAck_wrongDeviceTopic_isNeverApplied() throws Exception {
+        com.nexus.device.command.api.dto.CreateDeviceCommandRequest commandRequest =
+                new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", true);
+        com.nexus.action.api.dto.ActionHistoryResponse dispatched = deviceCommandService.dispatchCommand(deviceId, commandRequest);
+        UUID commandId = dispatched.requestId();
+
+        UUID otherDeviceId = UUID.randomUUID();
+        String ackTopic = "nexus/devices/" + otherDeviceId + "/commands/ack";
+        String ackPayload = String.format(
+                "{\"commandId\":\"%s\",\"status\":\"ACCEPTED\",\"timestamp\":%d}",
+                commandId, Instant.now().getEpochSecond());
+        MqttMessage message = new MqttMessage(ackPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        message.setQos(1);
+        message.setRetained(false);
+        observer.publish(ackTopic, message);
+
+        // No positive way to observe "never happens" other than waiting past
+        // the point a genuine ack (proven above) would already have landed,
+        // then asserting the record is still un-acknowledged.
+        Thread.sleep(3000);
+        com.nexus.action.domain.ActionHistoryRecord persisted = actionHistoryRepository.findById(commandId).orElseThrow();
+        assertNull(persisted.getAckStatus(), "an ACK arriving on a different device's topic must never be applied");
+    }
+
+    private com.nexus.action.domain.ActionHistoryRecord pollUntilAcknowledged(UUID commandId) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 15000;
+        while (System.currentTimeMillis() < deadline) {
+            com.nexus.action.domain.ActionHistoryRecord record = actionHistoryRepository.findById(commandId).orElseThrow();
+            if (record.getAckStatus() != null) {
+                return record;
+            }
+            Thread.sleep(200);
+        }
+        fail("ActionHistoryRecord for " + commandId + " was never acknowledged within the timeout");
+        return null;
+    }
 }

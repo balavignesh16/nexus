@@ -33,6 +33,7 @@ mqtt:
   topic:
     telemetry: nexus/devices/+/telemetry
     status: nexus/devices/+/status
+    command-ack: nexus/devices/+/commands/ack
 
 nexus:
   retention:

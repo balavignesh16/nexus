@@ -2,6 +2,7 @@ package com.nexus.infrastructure.mqtt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
@@ -63,12 +64,14 @@ class TelemetryMQTTListenerTest {
 
     private static final String TELEMETRY_TOPIC = "nexus/devices/+/telemetry";
     private static final String DEVICE_STATUS_TOPIC = "nexus/devices/+/status";
+    private static final String COMMAND_ACK_TOPIC = "nexus/devices/+/commands/ack";
 
     private MqttClient mqttClient;
     private TelemetryService telemetryService;
     private MqttReconnectController reconnectController;
     private MeterRegistry meterRegistry;
     private DeviceStatusMessageHandler deviceStatusMessageHandler;
+    private DeviceCommandAckMessageHandler deviceCommandAckMessageHandler;
     private TelemetryMQTTListener listener;
 
     @BeforeEach
@@ -78,10 +81,12 @@ class TelemetryMQTTListenerTest {
         reconnectController = mock(MqttReconnectController.class);
         meterRegistry = new SimpleMeterRegistry();
         deviceStatusMessageHandler = mock(DeviceStatusMessageHandler.class);
+        deviceCommandAckMessageHandler = mock(DeviceCommandAckMessageHandler.class);
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC,
-                reconnectController, meterRegistry, DEVICE_STATUS_TOPIC, deviceStatusMessageHandler);
+                reconnectController, meterRegistry, DEVICE_STATUS_TOPIC, deviceStatusMessageHandler,
+                COMMAND_ACK_TOPIC, deviceCommandAckMessageHandler);
         listener.init();
     }
 
@@ -596,5 +601,70 @@ class TelemetryMQTTListenerTest {
         assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
 
         verify(mqttClient, never()).messageArrivedComplete(anyInt(), anyInt());
+    }
+
+    // ---------- Tier 5E: command-ack routing isolation ----------
+
+    @Test
+    void commandAckTopicMessage_routesToAckHandler_neverToTelemetryService() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/commands/ack";
+        MqttMessage message = messageFor("{\"commandId\":\"" + UUID.randomUUID() + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}");
+
+        listener.messageArrived(topic, message);
+
+        verify(deviceCommandAckMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
+        verify(telemetryService, never()).processTelemetry(any());
+        verify(deviceStatusMessageHandler, never()).handle(anyString(), any(byte[].class));
+    }
+
+    @Test
+    void commandAckMessage_handledSuccessfully_isAcknowledged() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/commands/ack";
+        MqttMessage message = messageFor("{\"commandId\":\"" + UUID.randomUUID() + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}");
+
+        listener.messageArrived(topic, message);
+
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
+    }
+
+    @Test
+    void commandAckHandler_permanentlyInvalidCase_stillAcknowledged() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/commands/ack";
+        MqttMessage message = messageFor("not valid json");
+
+        listener.messageArrived(topic, message);
+
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
+    }
+
+    @Test
+    void commandAckHandler_transientFailure_isNotAcknowledged_andPropagates() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/commands/ack";
+        MqttMessage message = messageFor("{\"commandId\":\"" + UUID.randomUUID() + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}");
+        doThrow(new RuntimeException("simulated DB failure")).when(deviceCommandAckMessageHandler).handle(anyString(), any(byte[].class));
+
+        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
+
+        verify(mqttClient, never()).messageArrivedComplete(anyInt(), anyInt());
+    }
+
+    @Test
+    void connectComplete_alsoSubscribesToCommandAckTopic() throws Exception {
+        listener.connectComplete(true, "tcp://localhost:1883");
+
+        verify(mqttClient).subscribe(COMMAND_ACK_TOPIC, 1);
+    }
+
+    @Test
+    void subscribeException_onCommandAckTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
+        doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(COMMAND_ACK_TOPIC), anyInt());
+
+        listener.connectComplete(false, "tcp://localhost:1883");
+
+        assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }
 }

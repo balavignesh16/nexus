@@ -1,5 +1,6 @@
 package com.nexus.realtime;
 
+import com.nexus.action.domain.AcknowledgementStatus;
 import com.nexus.action.domain.ActionExecutionResult;
 import com.nexus.event.domain.DomainEvent;
 import com.nexus.rule.domain.RuleEvaluationResult;
@@ -135,6 +136,21 @@ public class RealtimePublisher {
         );
         broadcast(RealtimeTopics.ACTIONS, "ActionExecuted",
                 null, correlationId, payload);
+    }
+
+    // ─── Command Acknowledgement (Tier 5E) ───────────────────────────────────
+
+    public void publishActionAcknowledged(UUID commandId, UUID deviceId, AcknowledgementStatus status,
+                                           String message, java.time.Instant timestamp) {
+        Map<String, Object> payload = Map.of(
+                "commandId", commandId.toString(),
+                "deviceId",  deviceId.toString(),
+                "status",    status.name(),
+                "message",   message != null ? message : "",
+                "timestamp", timestamp.toEpochMilli()
+        );
+        broadcast(RealtimeTopics.ACTIONS, "ActionAcknowledged",
+                deviceId.toString(), commandId.toString(), payload);
     }
 
     // ─── Platform Health ─────────────────────────────────────────────────────
