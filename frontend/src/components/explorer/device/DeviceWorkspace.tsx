@@ -2,6 +2,8 @@ import { useState, createContext, useContext } from 'react';
 import { useDevice } from '../../../hooks/queries';
 import { Activity, Server, Code, Signal, Clock, Box, Zap, Hash, ChevronDown, RefreshCw, MoreHorizontal, Settings } from 'lucide-react';
 import { DeviceStatusBadge } from '../../DeviceStatusBadge';
+import { DeviceConnectivityBadge, type DeviceConnectivity } from '../../DeviceConnectivityBadge';
+import { useDeviceConnectivityStream } from '../../../realtime/streams/useDeviceConnectivityStream';
 
 export const DeveloperModeContext = createContext<boolean>(false);
 export const useDeveloperMode = () => useContext(DeveloperModeContext);
@@ -26,7 +28,12 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
   const { data: device, isLoading, error } = useDevice(deviceId);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [devMode, setDevMode] = useState(false);
-  
+  // Tier 5B: physical MQTT connectivity, deliberately separate from
+  // device.status (lifecycle). 'UNKNOWN' until the first realtime
+  // connectivity event arrives for this device in the current session.
+  const [connectivity, setConnectivity] = useState<DeviceConnectivity>('UNKNOWN');
+  useDeviceConnectivityStream(deviceId, (payload) => setConnectivity(payload.status));
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-full bg-[#0a0a0f] p-4 space-y-4">
@@ -149,6 +156,7 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
             <div className="flex items-center gap-3 mb-1">
               <h1 className="text-xl font-bold tracking-tight text-white">{device.name}</h1>
               <DeviceStatusBadge status={device.status} />
+              <DeviceConnectivityBadge connectivity={connectivity} />
             </div>
             
             <div className="flex flex-col text-xs font-mono text-muted-foreground leading-[18px]">

@@ -42,13 +42,14 @@ interface Metrics {
 type StateListener = (state: ConnectionState, metrics: Metrics) => void;
 
 const TOPICS = {
-  TELEMETRY: '/topic/telemetry',
-  TWINS:     '/topic/twins',
-  EVENTS:    '/topic/events',
-  RULES:     '/topic/rules',
-  ACTIONS:   '/topic/actions',
-  HEALTH:    '/topic/platform/health',
-  PIPELINE:  '/topic/pipeline',
+  TELEMETRY:    '/topic/telemetry',
+  TWINS:        '/topic/twins',
+  EVENTS:       '/topic/events',
+  RULES:        '/topic/rules',
+  ACTIONS:      '/topic/actions',
+  HEALTH:       '/topic/platform/health',
+  PIPELINE:     '/topic/pipeline',
+  CONNECTIVITY: '/topic/devices/connectivity',
 } as const;
 
 export { TOPICS };

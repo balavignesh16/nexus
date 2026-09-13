@@ -30,6 +30,13 @@ public final class RealtimeTopics {
     public static final String HEALTH = "/topic/platform/health";
 
     /**
+     * Physical MQTT connectivity (ONLINE/OFFLINE) per device (Tier 5B).
+     * Deliberately distinct from TWINS (telemetry-derived sensor state) and
+     * from any device lifecycle status - see DeviceConnectivityStatus.
+     */
+    public static final String CONNECTIVITY = "/topic/devices/connectivity";
+
+    /**
      * Pipeline execution traces.
      * Foundation for F7.5 Pipeline Visualization.
      * Each trace message carries a correlationId linking

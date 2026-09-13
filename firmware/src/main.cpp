@@ -1,4 +1,4 @@
-// NEXUS Tier 5A — ESP32 temperature sensor firmware.
+// NEXUS Tier 5A/5B — ESP32 temperature sensor + connectivity firmware.
 //
 // Publishes a real DHT22/DHT11 temperature reading into the EXACT SAME
 // telemetry wire contract the Python simulator already uses
@@ -8,10 +8,12 @@
 // TelemetryService) is not modified and does not need to be: it already
 // accepts this contract from any transport.
 //
-// Deliberately minimal (Tier 5A scope): no command subscription, no
-// actuator, no OTA, no device registration/discovery, no Last Will and
-// Testament. A single file is appropriate at this scope - see the Tier 5
-// hardware audit for what later phases would add.
+// Tier 5B additionally registers an MQTT Last Will and Testament (fires
+// "offline", retained, if this device's connection is ever lost
+// ungracefully) and publishes a retained "online" birth message after every
+// successful connect - see nexus/devices/{deviceId}/status in the backend's
+// DeviceStatusMessageHandler for how this is consumed. No command
+// subscription, no actuator, no OTA, no device registration/discovery.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -27,6 +29,7 @@ static MQTTClient mqttClient(256); // buffer size in bytes, comfortably fits our
 static DHT dht(DHT_PIN, DHT_TYPE);
 
 static String telemetryTopic;
+static String deviceStatusTopic;
 static String mqttClientId;
 
 static unsigned long lastPublishMillis = 0;
@@ -117,6 +120,20 @@ void connectMqtt() {
     }
     Serial.println();
     Serial.println("[MQTT] Connected.");
+
+    // Tier 5B: publish the retained "online" birth message immediately
+    // after every successful (re)connect - including a reconnect using
+    // this same stable client ID, which is what makes the ordering
+    // guarantee against the LWT "offline" (registered once, before the
+    // very first connect, in setup()) hold: the broker evicts and fires
+    // the will for any prior connection under this same client ID before
+    // this new connection can even reach this point.
+    bool published = mqttClient.publish(deviceStatusTopic, "online", /*retained=*/true, /*qos=*/1);
+    if (published) {
+        Serial.printf("[MQTT] Published retained online status to %s\n", deviceStatusTopic.c_str());
+    } else {
+        Serial.printf("[MQTT] Failed to publish online status to %s\n", deviceStatusTopic.c_str());
+    }
 }
 
 // Reads the sensor and publishes one telemetry message in the exact NEXUS
@@ -164,18 +181,27 @@ void setup() {
     dht.begin();
 
     telemetryTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/telemetry";
+    deviceStatusTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/status";
     // Client ID derived from the device UUID (not a fixed shared string) so
     // multiple real devices never collide, unlike the simulator's current
-    // single hardcoded MQTT client ID.
+    // single hardcoded MQTT client ID. This same, stable client ID across
+    // every reconnect is also what makes the LWT/birth-message ordering
+    // guarantee hold (see connectMqtt()).
     mqttClientId = String("nexus-esp32-") + String(NEXUS_DEVICE_UUID).substring(0, 8);
 
     Serial.printf("[Boot] Device UUID: %s\n", NEXUS_DEVICE_UUID);
     Serial.printf("[Boot] Telemetry topic: %s\n", telemetryTopic.c_str());
+    Serial.printf("[Boot] Device status topic: %s\n", deviceStatusTopic.c_str());
 
     connectWiFi();
     syncTime();
 
     mqttClient.begin(MQTT_BROKER_HOST, MQTT_BROKER_PORT, netClient);
+    // Tier 5B: the will must be registered before the first connect() call -
+    // it is stored by the client and applied to every subsequent connect
+    // attempt (reconnects included), so this is a one-time setup call, not
+    // something repeated per reconnect.
+    mqttClient.setWill(deviceStatusTopic.c_str(), "offline", /*retained=*/true, /*qos=*/1);
     connectMqtt();
 }
 

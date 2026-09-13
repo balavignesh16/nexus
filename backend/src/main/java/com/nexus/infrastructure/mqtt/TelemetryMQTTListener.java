@@ -1,6 +1,7 @@
 package com.nexus.infrastructure.mqtt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
 import io.micrometer.core.instrument.Counter;
@@ -35,6 +36,15 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     private final MqttReconnectController reconnectController;
     private final MeterRegistry meterRegistry;
 
+    // Tier 5B: the existing single MQTT connection/callback also carries
+    // device-connectivity status messages (see the approved Tier 5B
+    // architecture decision - a second MqttClient/reconnect controller was
+    // explicitly rejected). All actual status logic lives in
+    // DeviceStatusMessageHandler; this class only routes matching messages
+    // to it and otherwise remains unaware of what it does.
+    private final String deviceStatusTopic;
+    private final DeviceStatusMessageHandler deviceStatusMessageHandler;
+
     // Tier 3 Phase 4 message-level observability. "Received" means Paho
     // invoked messageArrived() - it does NOT mean successfully deserialized,
     // validated, or processed. This is deliberate: the purpose is detecting
@@ -51,7 +61,9 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
                                  Validator validator,
                                  @Value("${mqtt.topic.telemetry}") String telemetryTopic,
                                  MqttReconnectController reconnectController,
-                                 MeterRegistry meterRegistry) {
+                                 MeterRegistry meterRegistry,
+                                 @Value("${mqtt.topic.status}") String deviceStatusTopic,
+                                 DeviceStatusMessageHandler deviceStatusMessageHandler) {
         this.mqttClient = mqttClient;
         this.telemetryService = telemetryService;
         this.objectMapper = objectMapper;
@@ -59,6 +71,8 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         this.telemetryTopic = telemetryTopic;
         this.reconnectController = reconnectController;
         this.meterRegistry = meterRegistry;
+        this.deviceStatusTopic = deviceStatusTopic;
+        this.deviceStatusMessageHandler = deviceStatusMessageHandler;
     }
 
     @PostConstruct
@@ -94,6 +108,17 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             subscribeFailures.increment();
             log.error("Failed to subscribe to MQTT topic", e);
         }
+        try {
+            // Tier 5B: subscribed on every connect/reconnect via this same
+            // method, exactly like the telemetry topic above - this is what
+            // makes retained device-status messages reliably redelivered on
+            // every backend (re)connect, including after a restart.
+            mqttClient.subscribe(deviceStatusTopic, 1);
+            log.info("Subscribed to MQTT topic: {}", deviceStatusTopic);
+        } catch (Exception e) {
+            subscribeFailures.increment();
+            log.error("Failed to subscribe to device status MQTT topic", e);
+        }
     }
 
     @Override
@@ -119,6 +144,16 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         lastMessageAtEpochMillis.set(System.currentTimeMillis());
 
         log.debug("Received MQTT message on topic: {}", topic);
+
+        // Tier 5B: device-connectivity status messages share this same
+        // callback/connection (see class-level note above). This is a thin,
+        // early routing branch only - all actual status logic lives in
+        // DeviceStatusMessageHandler, and the existing telemetry path below
+        // is completely unreached and unmodified for a status message.
+        if (topic.endsWith("/status")) {
+            handleStatusMessage(topic, message);
+            return;
+        }
 
         // 1. Deserialize. A payload that cannot be parsed - malformed JSON
         // syntax, or a JSON value of the wrong type for a field - can never
@@ -168,6 +203,26 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         } catch (Exception e) {
             log.error("Error processing MQTT message from topic {}. Did NOT ack. Message will be retried.", topic, e);
             throw new RuntimeException("MQTT processing failed, triggering retry", e);
+        }
+    }
+
+    /**
+     * Tier 5B: own explicit ACK/error contract, independent of telemetry's.
+     * DeviceStatusMessageHandler.handle() returns normally (without
+     * throwing) for every permanently-invalid case it recognizes (malformed
+     * topic, unrecognized payload, unknown device) - those are acknowledged
+     * here, same as telemetry's own ack-and-drop categories. A genuine
+     * transient failure inside the handler propagates as an exception, is
+     * NOT acknowledged, and triggers QoS 1 redelivery, exactly like
+     * telemetry's own processing-failure path above.
+     */
+    private void handleStatusMessage(String topic, MqttMessage message) {
+        try {
+            deviceStatusMessageHandler.handle(topic, message.getPayload());
+            mqttClient.messageArrivedComplete(message.getId(), message.getQos());
+        } catch (Exception e) {
+            log.error("Error processing device status message from topic {}. Did NOT ack. Message will be retried.", topic, e);
+            throw new RuntimeException("Device status processing failed, triggering retry", e);
         }
     }
 

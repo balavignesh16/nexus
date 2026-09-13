@@ -97,3 +97,14 @@ export interface PlatformHealthPayload {
   database: string;
   [key: string]: string;
 }
+
+/**
+ * Physical MQTT connectivity (Tier 5B) - deliberately independent of a
+ * device's manually-managed lifecycle status (REGISTERED/ACTIVE/
+ * MAINTENANCE/OFFLINE). Delivered as eventType "DeviceOnline" or
+ * "DeviceOffline".
+ */
+export interface DeviceConnectivityPayload {
+  deviceId: string;
+  status: 'ONLINE' | 'OFFLINE';
+}

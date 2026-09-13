@@ -2,6 +2,7 @@ package com.nexus.infrastructure.mqtt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -60,11 +62,13 @@ import static org.mockito.Mockito.*;
 class TelemetryMQTTListenerTest {
 
     private static final String TELEMETRY_TOPIC = "nexus/devices/+/telemetry";
+    private static final String DEVICE_STATUS_TOPIC = "nexus/devices/+/status";
 
     private MqttClient mqttClient;
     private TelemetryService telemetryService;
     private MqttReconnectController reconnectController;
     private MeterRegistry meterRegistry;
+    private DeviceStatusMessageHandler deviceStatusMessageHandler;
     private TelemetryMQTTListener listener;
 
     @BeforeEach
@@ -73,9 +77,11 @@ class TelemetryMQTTListenerTest {
         telemetryService = mock(TelemetryService.class);
         reconnectController = mock(MqttReconnectController.class);
         meterRegistry = new SimpleMeterRegistry();
+        deviceStatusMessageHandler = mock(DeviceStatusMessageHandler.class);
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC, reconnectController, meterRegistry);
+        listener = new TelemetryMQTTListener(mqttClient, telemetryService, objectMapper, validator, TELEMETRY_TOPIC,
+                reconnectController, meterRegistry, DEVICE_STATUS_TOPIC, deviceStatusMessageHandler);
         listener.init();
     }
 
@@ -446,11 +452,30 @@ class TelemetryMQTTListenerTest {
 
     @Test
     void subscribeException_incrementsSubscribeFailureCounter() throws Exception {
-        doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(anyString(), anyInt());
+        // Stubbed for the telemetry topic specifically (not anyString()) so
+        // this test's count is unaffected by Tier 5B's additional device
+        // status subscribe call, which succeeds by default here.
+        doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(TELEMETRY_TOPIC), anyInt());
 
         listener.connectComplete(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
+    }
+
+    @Test
+    void subscribeException_onDeviceStatusTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
+        doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(DEVICE_STATUS_TOPIC), anyInt());
+
+        listener.connectComplete(false, "tcp://localhost:1883");
+
+        assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
+    }
+
+    @Test
+    void connectComplete_alsoSubscribesToDeviceStatusTopic() throws Exception {
+        listener.connectComplete(true, "tcp://localhost:1883");
+
+        verify(mqttClient).subscribe(DEVICE_STATUS_TOPIC, 1);
     }
 
     @Test
@@ -508,5 +533,68 @@ class TelemetryMQTTListenerTest {
 
         assertEquals((double) totalExpected, counterValue("mqtt.messages.received"),
                 "concurrent invocations must not lose any counter increments");
+    }
+
+    // ---------- Tier 5B: device status / telemetry routing isolation ----------
+
+    @Test
+    void deviceStatusTopicMessage_routesToStatusHandler_neverToTelemetryService() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/status";
+        MqttMessage message = messageFor("online");
+
+        listener.messageArrived(topic, message);
+
+        verify(deviceStatusMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
+        verify(telemetryService, never()).processTelemetry(any());
+    }
+
+    @Test
+    void telemetryTopicMessage_neverRoutesToStatusHandler() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/telemetry";
+
+        listener.messageArrived(topic, messageFor(validPayload(deviceId)));
+
+        verify(deviceStatusMessageHandler, never()).handle(anyString(), any(byte[].class));
+    }
+
+    @Test
+    void deviceStatusMessage_handledSuccessfully_isAcknowledged() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/status";
+        MqttMessage message = messageFor("online");
+
+        listener.messageArrived(topic, message);
+
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
+    }
+
+    @Test
+    void deviceStatusHandler_permanentlyInvalidCase_stillAcknowledged() throws Exception {
+        // The handler itself decides "permanently invalid" by returning
+        // normally (not throwing) - from the listener's perspective this
+        // looks identical to a successful case: it acknowledges either way.
+        // Handler-level unknown-device/invalid-payload behavior is unit
+        // tested directly in DeviceStatusMessageHandlerTest.
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/status";
+        MqttMessage message = messageFor("not-a-real-status");
+
+        listener.messageArrived(topic, message);
+
+        verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
+    }
+
+    @Test
+    void deviceStatusHandler_transientFailure_isNotAcknowledged_andPropagates() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        String topic = "nexus/devices/" + deviceId + "/status";
+        MqttMessage message = messageFor("online");
+        doThrow(new RuntimeException("simulated DB failure")).when(deviceStatusMessageHandler).handle(anyString(), any(byte[].class));
+
+        assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
+
+        verify(mqttClient, never()).messageArrivedComplete(anyInt(), anyInt());
     }
 }

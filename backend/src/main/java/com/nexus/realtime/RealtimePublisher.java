@@ -143,6 +143,21 @@ public class RealtimePublisher {
         broadcast(RealtimeTopics.HEALTH, "PlatformHealthChanged", null, null, status);
     }
 
+    // ─── Device Connectivity (Tier 5B) ───────────────────────────────────────
+
+    public void publishDeviceConnectivity(UUID deviceId, String status) {
+        Map<String, Object> payload = Map.of(
+                "deviceId", deviceId.toString(),
+                "status",   status
+        );
+        // eventType matches the frontend's pre-existing RealtimeEventType
+        // union ("DeviceOnline"/"DeviceOffline" were already declared there,
+        // anticipating this exact feature) rather than introducing a third,
+        // new event name.
+        String eventType = "ONLINE".equals(status) ? "DeviceOnline" : "DeviceOffline";
+        broadcast(RealtimeTopics.CONNECTIVITY, eventType, deviceId.toString(), null, payload);
+    }
+
     // ─── Pipeline Trace (F7.5 foundation) ────────────────────────────────────
 
     public void publishPipelineTrace(com.nexus.pipeline.domain.PipelineTrace trace) {
