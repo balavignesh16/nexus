@@ -1,243 +1,228 @@
 import { useState } from 'react';
-import { useRepositories } from '../repositories/RepositoryProvider';
+import { TrendingUp, Calendar } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
-import { TrendingUp, Server, Zap, CheckCircle2, Battery, Download, Calendar } from 'lucide-react';
-import { Skeleton } from '../components/ui/Skeleton';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { ResponsiveGridLayout } from 'react-grid-layout';
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
+import { analyticsApi, type AnalyticsRangeParam } from '../api/analyticsApi';
+import { TimeRangeSelector } from '../components/analytics/TimeRangeSelector';
+import { AnalyticsSection } from '../components/analytics/AnalyticsSection';
+import { DistributionBar } from '../components/analytics/DistributionBar';
+import { TimeSeriesChart } from '../components/analytics/TimeSeriesChart';
 
-const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
+const CONNECTIVITY_COLORS: Record<string, string> = {
+  ONLINE: 'var(--data-live)',
+  OFFLINE: 'var(--danger)',
+  UNKNOWN: 'var(--data-unavailable)',
+};
+
+const ACTION_STATUS_COLORS: Record<string, string> = {
+  SUCCESS: 'var(--success)',
+  FAILURE: 'var(--danger)',
+  IGNORED: 'var(--warning)',
+  UNSUPPORTED: 'var(--data-unavailable)',
+};
+
+// NO_ACK_YET is deliberately NOT a failure color - it means "not yet
+// resolved" (or a device that never acknowledges), never "went wrong".
+const ACK_COLORS: Record<string, string> = {
+  ACCEPTED: 'var(--success)',
+  REJECTED: 'var(--danger)',
+  NO_ACK_YET: 'var(--data-unavailable)',
+};
+
+const DEVICE_TYPE_PALETTE = ['var(--primary)', 'var(--info)', 'var(--warning)', 'var(--success)', 'var(--data-simulated)', 'var(--data-ai)'];
+
+function paletteColor(index: number, palette: string[]): string {
+  return palette[index % palette.length];
+}
 
 export default function AnalyticsPage() {
-  const { device } = useRepositories();
-  const { data: devices = [], isLoading } = usePolling(
-    ['all-devices'],
-    () => device.getDevices(),
-    { interval: 10000 }
+  const [range, setRange] = useState<AnalyticsRangeParam>('24h');
+
+  const summaryQuery = usePolling(
+    ['analytics-summary', range],
+    () => analyticsApi.getSummary(range),
+    { interval: 0 }
+  );
+  const telemetrySeries = usePolling(
+    ['analytics-timeseries', 'telemetry', range],
+    () => analyticsApi.getTimeSeries('telemetry', range),
+    { interval: 0 }
+  );
+  const eventsSeries = usePolling(
+    ['analytics-timeseries', 'events', range],
+    () => analyticsApi.getTimeSeries('events', range),
+    { interval: 0 }
+  );
+  const ruleMatchesSeries = usePolling(
+    ['analytics-timeseries', 'rule-matches', range],
+    () => analyticsApi.getTimeSeries('rule-matches', range),
+    { interval: 0 }
+  );
+  const actionsSeries = usePolling(
+    ['analytics-timeseries', 'actions', range],
+    () => analyticsApi.getTimeSeries('actions', range),
+    { interval: 0 }
+  );
+  const pipelineSeries = usePolling(
+    ['analytics-timeseries', 'pipeline', range],
+    () => analyticsApi.getTimeSeries('pipeline', range),
+    { interval: 0 }
   );
 
-  const defaultLayouts = {
-    lg: [
-      { i: 'kpi-sla', x: 0, y: 0, w: 3, h: 2, static: true },
-      { i: 'kpi-devices', x: 3, y: 0, w: 3, h: 2, static: true },
-      { i: 'kpi-battery', x: 6, y: 0, w: 3, h: 2, static: true },
-      { i: 'kpi-latency', x: 9, y: 0, w: 3, h: 2, static: true },
-      { i: 'chart-volume', x: 0, y: 2, w: 8, h: 4 },
-      { i: 'chart-types', x: 8, y: 2, w: 4, h: 4 },
-      { i: 'chart-comparison', x: 0, y: 6, w: 12, h: 4 }
-    ]
-  };
-
-  const [layouts, setLayouts] = useState(() => {
-    const saved = localStorage.getItem('nexus-analytics-layout');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return defaultLayouts;
-      }
-    }
-    return defaultLayouts;
-  });
-
-  const onLayoutChange = (_layout: any, allLayouts: any) => {
-    setLayouts(allLayouts);
-    localStorage.setItem('nexus-analytics-layout', JSON.stringify(allLayouts));
-  };
-
-  if (isLoading && devices.length === 0) {
-    return (
-      <div className="p-8 h-full">
-        <Skeleton className="w-full h-full rounded-xl" />
-      </div>
-    );
-  }
-
-  // Mock data for analytics
-  const telemetryVolume = [
-    { time: '00:00', volume: 4000 }, { time: '04:00', volume: 3000 },
-    { time: '08:00', volume: 6000 }, { time: '12:00', volume: 8000 },
-    { time: '16:00', volume: 7500 }, { time: '20:00', volume: 5000 }
-  ];
-
-  const siteComparison = [
-    { name: 'Site Alpha', uptime: 99.9, incidents: 2 },
-    { name: 'Site Beta', uptime: 99.5, incidents: 5 },
-    { name: 'Site Gamma', uptime: 98.2, incidents: 12 },
-    { name: 'Site Delta', uptime: 100, incidents: 0 }
-  ];
-
-  const deviceTypes = [
-    { name: 'HVAC', value: 45 },
-    { name: 'Lighting', value: 25 },
-    { name: 'Security', value: 20 },
-    { name: 'Sensors', value: 10 }
-  ];
+  const summary = summaryQuery.data;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#060b14] overflow-hidden text-foreground animate-in fade-in duration-300">
-      
+    <div className="flex-1 flex flex-col h-full bg-canvas overflow-hidden text-foreground animate-in fade-in duration-300">
+
       {/* TOOLBAR */}
-      <div className="shrink-0 h-16 border-b border-[#1f1f28] flex items-center justify-between px-6 bg-[#0a0a0f] z-10 relative">
+      <div className="shrink-0 h-16 border-b border-surface-border flex items-center justify-between px-6 bg-sunken z-10 relative">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-500/10 rounded-lg">
-            <TrendingUp size={20} className="text-blue-400" />
+          <div className="p-2 bg-primary/10 rounded-lg">
+            <TrendingUp size={20} className="text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-bold">Executive Analytics</h1>
-            <p className="text-xs text-muted-foreground">Platform-wide KPI dashboard</p>
+            <h1 className="text-lg font-bold">Operational Analytics</h1>
+            <p className="text-xs text-muted-foreground">
+              {summary ? `${new Date(summary.from).toLocaleString()} — ${new Date(summary.to).toLocaleString()}` : 'What is happening across the physical system'}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-[#13131a] border border-[#1f1f28] rounded-md text-sm text-muted-foreground hover:text-foreground">
-            <Calendar size={14} /> Last 30 Days
-          </button>
-          
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors">
-            <Download size={14} /> Export Report
-          </button>
+        <div className="flex items-center gap-3">
+          <Calendar size={14} className="text-muted-foreground" />
+          <TimeRangeSelector value={range} onChange={setRange} />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-        <ResponsiveGridLayout
-          className="layout"
-          layouts={layouts}
-          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-          cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
-          rowHeight={60}
-          onLayoutChange={onLayoutChange}
-          // @ts-ignore - react-grid-layout types are incomplete in this version
-          draggableHandle=".drag-handle"
-          margin={[16, 16]}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 lg:grid-cols-2 gap-4 content-start">
+
+        {/* SYSTEM ACTIVITY */}
+        <AnalyticsSection
+          title="System Activity"
+          subtitle="Telemetry volume over time"
+          isLoading={telemetrySeries.isLoading}
+          error={telemetrySeries.error}
+          isEmpty={!telemetrySeries.data || telemetrySeries.data.points.length === 0}
+          emptyMessage="No telemetry recorded in selected period."
+          drillDownTo="/telemetry"
         >
-          {/* KPI 1 */}
-          <div key="kpi-sla" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col justify-between group">
-            <div className="flex justify-between items-start mb-2 drag-handle cursor-move">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Platform SLA</p>
-              <CheckCircle2 size={16} className="text-success group-hover:scale-110 transition-transform" />
-            </div>
-            <div>
-              <span className="text-3xl font-bold font-mono">99.98%</span>
-              <p className="text-xs text-success mt-2 flex items-center gap-1">↑ +0.02% vs last month</p>
-            </div>
-          </div>
-          
-          {/* KPI 2 */}
-          <div key="kpi-devices" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col justify-between group">
-            <div className="flex justify-between items-start mb-2 drag-handle cursor-move">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Active Devices</p>
-              <Server size={16} className="text-blue-400 group-hover:scale-110 transition-transform" />
-            </div>
-            <div>
-              <span className="text-3xl font-bold font-mono">{devices.length || 1248}</span>
-              <p className="text-xs text-success mt-2 flex items-center gap-1">↑ 12 new devices</p>
-            </div>
-          </div>
-          
-          {/* KPI 3 */}
-          <div key="kpi-battery" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col justify-between group">
-            <div className="flex justify-between items-start mb-2 drag-handle cursor-move">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Avg Battery Forecast</p>
-              <Battery size={16} className="text-success group-hover:scale-110 transition-transform" />
-            </div>
-            <div>
-              <span className="text-3xl font-bold font-mono">84%</span>
-              <p className="text-xs text-muted-foreground mt-2">Estimated 14 months remaining</p>
-            </div>
-          </div>
-          
-          {/* KPI 4 */}
-          <div key="kpi-latency" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col justify-between group">
-            <div className="flex justify-between items-start mb-2 drag-handle cursor-move">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Edge Latency</p>
-              <Zap size={16} className="text-purple-400 group-hover:scale-110 transition-transform" />
-            </div>
-            <div>
-              <span className="text-3xl font-bold font-mono">42ms</span>
-              <p className="text-xs text-muted-foreground mt-2">Global average</p>
-            </div>
-          </div>
+          {telemetrySeries.data && <TimeSeriesChart data={telemetrySeries.data} color="#3b82f6" />}
+        </AnalyticsSection>
 
-          {/* Chart 1 */}
-          <div key="chart-volume" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col overflow-hidden">
-            <h3 className="text-sm font-semibold mb-6 drag-handle cursor-move shrink-0">Telemetry Ingestion Volume</h3>
-            <div className="flex-1 min-h-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={telemetryVolume} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f28" vertical={false} />
-                  <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `${val/1000}k`} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0a0a0f', borderColor: '#1f1f28', borderRadius: '8px' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                  <Area type="monotone" dataKey="volume" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorVolume)" />
-                </AreaChart>
-              </ResponsiveContainer>
+        {/* DEVICE ACTIVITY */}
+        <AnalyticsSection
+          title="Device Activity"
+          subtitle={summary ? `${summary.totalDeviceCount} device(s) registered` : undefined}
+          isLoading={summaryQuery.isLoading}
+          error={summaryQuery.error}
+          isEmpty={!summary || summary.totalDeviceCount === 0}
+          emptyMessage="No devices registered."
+          drillDownTo="/explorer"
+        >
+          {summary && (
+            <div className="flex flex-col gap-4">
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1 block">By type</span>
+                <DistributionBar
+                  data={summary.deviceCountByType}
+                  colorFor={(key) => paletteColor(Object.keys(summary.deviceCountByType).indexOf(key), DEVICE_TYPE_PALETTE)}
+                />
+              </div>
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1 block">Connectivity (current)</span>
+                <DistributionBar
+                  data={summary.connectivityDistribution}
+                  colorFor={(key) => CONNECTIVITY_COLORS[key] ?? 'var(--data-unavailable)'}
+                />
+              </div>
             </div>
-          </div>
-          
-          {/* Chart 2 */}
-          <div key="chart-types" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col overflow-hidden">
-            <h3 className="text-sm font-semibold mb-6 drag-handle cursor-move shrink-0">Device Distribution</h3>
-            <div className="flex-1 min-h-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={deviceTypes}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={60}
-                    paddingAngle={5}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {deviceTypes.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0a0a0f', borderColor: '#1f1f28', borderRadius: '8px' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          )}
+        </AnalyticsSection>
 
-          {/* Chart 3 */}
-          <div key="chart-comparison" className="bg-card/50 backdrop-blur border border-border/50 rounded-xl p-5 flex flex-col overflow-hidden">
-            <h3 className="text-sm font-semibold mb-6 drag-handle cursor-move shrink-0">Site Performance Comparison</h3>
-            <div className="flex-1 min-h-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={siteComparison} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f28" vertical={false} />
-                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="left" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} domain={[95, 100]} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0a0a0f', borderColor: '#1f1f28', borderRadius: '8px' }}
-                    cursor={{ fill: '#1f1f28', opacity: 0.4 }}
-                  />
-                  <Bar yAxisId="left" dataKey="uptime" fill="#10b981" radius={[4, 4, 0, 0]} name="Uptime %" />
-                  <Bar yAxisId="right" dataKey="incidents" fill="#ef4444" radius={[4, 4, 0, 0]} name="Incidents" />
-                </BarChart>
-              </ResponsiveContainer>
+        {/* EVENT ACTIVITY */}
+        <AnalyticsSection
+          title="Event Activity"
+          subtitle={summary ? `${summary.eventCount} event(s) in selected period` : undefined}
+          isLoading={eventsSeries.isLoading}
+          error={eventsSeries.error}
+          isEmpty={!eventsSeries.data || eventsSeries.data.points.length === 0}
+          emptyMessage="No events recorded in selected period."
+          drillDownTo="/events"
+        >
+          {eventsSeries.data && <TimeSeriesChart data={eventsSeries.data} color="var(--info)" />}
+        </AnalyticsSection>
+
+        {/* RULE ACTIVITY */}
+        <AnalyticsSection
+          title="Rule Activity"
+          subtitle={summary ? `${summary.ruleMatchCount} rule match(es) in selected period` : undefined}
+          isLoading={ruleMatchesSeries.isLoading}
+          error={ruleMatchesSeries.error}
+          isEmpty={!ruleMatchesSeries.data || ruleMatchesSeries.data.points.length === 0}
+          emptyMessage="No rule matches recorded in selected period."
+          drillDownTo="/rules"
+        >
+          {ruleMatchesSeries.data && <TimeSeriesChart data={ruleMatchesSeries.data} color="var(--data-simulated)" />}
+        </AnalyticsSection>
+
+        {/* ACTION ACTIVITY */}
+        <AnalyticsSection
+          title="Action Activity"
+          subtitle="Status distribution in selected period"
+          isLoading={summaryQuery.isLoading}
+          error={summaryQuery.error}
+          isEmpty={!summary || Object.keys(summary.actionStatusDistribution).length === 0}
+          emptyMessage="No actions executed in selected period."
+          drillDownTo="/actions"
+        >
+          {summary && (
+            <div className="flex flex-col gap-4">
+              <DistributionBar
+                data={summary.actionStatusDistribution}
+                colorFor={(key) => ACTION_STATUS_COLORS[key] ?? 'var(--data-unavailable)'}
+              />
+              {actionsSeries.data && actionsSeries.data.points.length > 0 && (
+                <TimeSeriesChart data={actionsSeries.data} color="var(--success)" />
+              )}
             </div>
-          </div>
-          
-        </ResponsiveGridLayout>
+          )}
+        </AnalyticsSection>
+
+        {/* COMMAND RELIABILITY */}
+        <AnalyticsSection
+          title="Command Reliability"
+          subtitle="Physical command acknowledgement outcome (SEND_COMMAND only)"
+          isLoading={summaryQuery.isLoading}
+          error={summaryQuery.error}
+          isEmpty={!summary || Object.keys(summary.commandAckDistribution).length === 0}
+          emptyMessage="No commands dispatched in selected period."
+          drillDownTo="/actions"
+        >
+          {summary && (
+            <DistributionBar
+              data={summary.commandAckDistribution}
+              colorFor={(key) => ACK_COLORS[key] ?? 'var(--data-unavailable)'}
+              labelFor={(key) => (key === 'NO_ACK_YET' ? 'No ack yet' : key)}
+            />
+          )}
+        </AnalyticsSection>
+
+        {/* PIPELINE ACTIVITY */}
+        <AnalyticsSection
+          title="Pipeline Activity"
+          subtitle={
+            pipelineSeries.data
+              ? `Retained window: ${new Date(pipelineSeries.data.from).toLocaleDateString()} — ${new Date(pipelineSeries.data.to).toLocaleDateString()} (pipeline traces retain only 7 days, regardless of the selected range)`
+              : undefined
+          }
+          isLoading={pipelineSeries.isLoading}
+          error={pipelineSeries.error}
+          isEmpty={!pipelineSeries.data || pipelineSeries.data.points.length === 0}
+          emptyMessage="No pipeline traces recorded in the retained 7-day window."
+          drillDownTo="/pipeline"
+        >
+          {pipelineSeries.data && <TimeSeriesChart data={pipelineSeries.data} color="var(--data-ai)" />}
+        </AnalyticsSection>
+
       </div>
     </div>
   );
