@@ -35,9 +35,10 @@ export interface DeviceState {
   status: DeviceStatus;
   deviceType: string;
   mqttTopic: string;
-  healthScore: number;
-  twinQuality: number;
   lastSeen: string;
+  // Real backend hierarchy foreign key - undefined for demo-simulated
+  // devices, which have no resolvable real Site/Building/Space record.
+  spaceId?: string;
   // null means "not reported by this data source" - distinct from an
   // actual reading of 0 (e.g. 0% battery is a real measurement). The
   // backend Device API does not currently expose these fields; only the

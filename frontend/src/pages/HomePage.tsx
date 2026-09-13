@@ -9,6 +9,8 @@ import { DeviceStatusBadge } from '../components/DeviceStatusBadge';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { usePolling } from '../hooks/usePolling';
+import { analyticsApi } from '../api/analyticsApi';
 
 export default function HomePage() {
   const { data: sites } = useSites();
@@ -17,6 +19,17 @@ export default function HomePage() {
   const { data: actions = [] } = useActionHistory(25);
   const { data: hierarchy } = useExplorerHierarchy();
   const connection = useConnectionStatus();
+
+  // Real connectivity distribution (Phase 8) - reuses the same Analytics
+  // aggregation already built and tested for the connectivity summary
+  // (devices LEFT JOIN device_connectivity, COALESCE to UNKNOWN). UNKNOWN
+  // is never counted as OFFLINE. No duplicate backend logic is introduced.
+  const { data: summary, isLoading: summaryLoading, error: summaryError } = usePolling(
+    ['analytics-summary', '24h'],
+    () => analyticsApi.getSummary('24h'),
+    { interval: 0 }
+  );
+  const offlineCount = summary?.connectivityDistribution?.OFFLINE ?? 0;
 
   const { data: globalTelemetry = [] } = useQuery<any[]>({
     queryKey: ['telemetry', 100],
@@ -85,7 +98,12 @@ export default function HomePage() {
         <StatCard title="Spaces" value={spaceCount} subtitle="Active zones" />
         <StatCard title="Total Devices" value={deviceCount} subtitle="Provisioned sensors" />
         <StatCard title="Throughput" value={connection.messagesPerSec} subtitle="Live packets / sec" />
-        <StatCard title="Offline" value={0} subtitle="Require maintenance" />
+        <StatCard
+          title="Offline"
+          value={summaryError ? 'Unavailable' : summaryLoading ? '…' : offlineCount}
+          subtitle="Devices with last-known status OFFLINE"
+          badge={summaryError ? 'UNAVAILABLE' : 'CALCULATED'}
+        />
       </section>
 
       {/* Main Content Grid - 12 Column Grid */}
@@ -94,9 +112,13 @@ export default function HomePage() {
         <div className="xl:col-span-8 flex flex-col gap-6">
           <LiveAreaChart title="Global Telemetry Ingestion" data={chartData} />
           
-          {/* Mock Active Twins */}
+          {/* Real device list - honestly labeled "Devices", not "Digital
+              Twins" (Phase 8): this is a plain roster (name/id/status),
+              not twin state. The real per-device twin signals (connectivity,
+              telemetry recency, reported fields) live on the Digital Twin
+              page and device detail view. */}
           <div className="bg-[#12121a] border border-[#1f1f28] rounded-xl p-5 shadow-sm">
-            <h3 className="text-sm font-semibold text-foreground mb-4">Active Digital Twins</h3>
+            <h3 className="text-sm font-semibold text-foreground mb-4">Devices</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {(devices ?? []).slice(0, 4).map(device => (
                 <div key={device.id} className="flex items-center gap-4 p-3 rounded-lg bg-[#0a0a0f] border border-[#1f1f28] transition-all hover:border-blue-400 hover:shadow-[0_0_16px_rgba(59,130,246,.15)]">

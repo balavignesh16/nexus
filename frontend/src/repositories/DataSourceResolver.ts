@@ -1,7 +1,6 @@
 import type { IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, DeviceState, TelemetryData, PipelineTracePayload } from './types';
 import { DemoDeviceRepository, DemoTelemetryRepository, DemoEventRepository, DemoRuleRepository, DemoActionRepository, DemoPipelineRepository } from './DemoRepository';
 import { BackendDeviceRepository, BackendTelemetryRepository, BackendEventRepository, BackendRuleRepository, BackendActionRepository, BackendPipelineRepository } from './BackendRepository';
-import { MetricEngine } from '../metrics/MetricEngine';
 import { FEATURES } from '../config/features';
 
 /**
@@ -52,20 +51,15 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
     if (!FEATURES.DEMO_MODE) {
       // LIVE MODE: real backend data, as returned. A failure (404, network
       // error, etc.) propagates so the caller's error state is honest.
-      const backendState = await this.backendDevice.getDevice(backendId);
-      backendState.healthScore = MetricEngine.calculateHealthScore(backendState, 0);
-      backendState.twinQuality = MetricEngine.calculateTwinQuality(backendState);
-      return backendState;
+      return this.backendDevice.getDevice(backendId);
     }
 
     // DEMO MODE (explicit, opt-in): original hybrid-blend behavior.
     let backendState: Partial<DeviceState> | null = null;
-    let backendLatency = 0;
-
     const start = performance.now();
     try {
       backendState = await this.backendDevice.getDevice(backendId);
-      backendLatency = performance.now() - start;
+      (window as any).__lastLatency = performance.now() - start;
     } catch (e) {
       console.warn(`[DEMO_MODE] Backend device fetch failed for ${backendId}, falling back to demo fixture.`);
     }
@@ -73,8 +67,6 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
     const demoState = await this.demoDevice.getDevice(id);
 
     if (!backendState) {
-      demoState.healthScore = MetricEngine.calculateHealthScore(demoState, 0);
-      demoState.twinQuality = MetricEngine.calculateTwinQuality(demoState);
       return demoState;
     }
 
@@ -86,11 +78,6 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
       metrics: backendState.metrics?.length ? backendState.metrics : demoState.metrics,
       status: backendState.status || demoState.status,
     };
-
-    hybridState.healthScore = MetricEngine.calculateHealthScore(hybridState, backendLatency);
-    hybridState.twinQuality = MetricEngine.calculateTwinQuality(hybridState);
-
-    (window as any).__lastLatency = backendLatency;
 
     return hybridState;
   }

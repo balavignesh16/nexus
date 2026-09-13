@@ -10,7 +10,6 @@ export interface NodeData {
   hasChildren: boolean;
   isLoaded: boolean;
   deviceCount?: number;
-  healthScore?: number;
 }
 
 interface TreeNodeProps {
@@ -80,25 +79,22 @@ export function TreeNode({ node, level, selectedNode, onSelect, onExpand, path, 
             {node.name}
           </span>
           <span className="relative flex h-2 w-2 shrink-0">
-            {node.type === 'DEVICE' ? (
-               node.status === 'ACTIVE' ? <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span> : null
-            ) : (
-               (node.healthScore || 100) > 90 ? <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span> : null
+            {node.type === 'DEVICE' && node.status === 'ACTIVE' && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
             )}
             <span className={`relative inline-flex rounded-full h-2 w-2 ${
-              node.type === 'DEVICE' 
+              node.type === 'DEVICE'
                 ? (node.status === 'ACTIVE' ? 'bg-success' : node.status === 'OFFLINE' ? 'bg-danger' : 'bg-warning')
-                : ((node.healthScore || 100) > 90 ? 'bg-success' : 'bg-warning')
+                : 'bg-muted-foreground/40'
             }`}></span>
           </span>
         </div>
-        
-        {/* Rich Metadata Row */}
+
+        {/* Rich Metadata Row - only real, backend-derived counts; no
+            fabricated health percentage or alert count (Phase 8). */}
         {node.type !== 'DEVICE' ? (
           <div className="flex items-center flex-wrap gap-2 text-[10px] text-muted-foreground font-medium">
             <span className="bg-muted/50 px-1.5 py-0.5 rounded border border-border/50 text-foreground/80 shadow-sm">{node.deviceCount || 0} Devices</span>
-            <span className={`px-1.5 py-0.5 rounded border shadow-sm ${node.healthScore && node.healthScore > 90 ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-warning border-warning/20'}`}>{node.healthScore || 100}% Healthy</span>
-            <span className="bg-danger/10 text-danger border border-danger/20 px-1.5 py-0.5 rounded shadow-sm">3 Alerts</span>
           </div>
         ) : (
           <div className="flex items-center gap-2 text-[10px] font-medium">

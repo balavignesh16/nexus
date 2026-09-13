@@ -3,13 +3,18 @@ import { useDevice, useLatestTwins } from '../../../../hooks/queries';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Box, Code, Edit3, Save, X, GitCommit, FileDiff } from 'lucide-react';
 import { DiffEditor } from '@monaco-editor/react';
+import { useDeviceTwinState } from '../../../../hooks/useDeviceTwinState';
+import { formatAge } from '../../../../utils/formatAge';
+import { DataSourceBadge } from '../../../ui/DataSourceBadge';
 
 export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
   const { data: device } = useDevice(deviceId);
   const { data: twins = [] } = useLatestTwins(100);
   const [isEditing, setIsEditing] = useState(false);
   const [viewMode, setViewMode] = useState<'visual' | 'json' | 'diff'>('visual');
-  
+  const twinState = useDeviceTwinState(deviceId);
+  const connectivity = twinState.connectivity?.status ?? 'UNKNOWN';
+
   if (!device) return <Skeleton className="w-full h-full" />;
 
   const currentTwin = twins.find((t: any) => t.deviceId === deviceId) || null;
@@ -76,6 +81,40 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
               <Edit3 size={14} /> Edit Twin
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Real Digital Twin state (Phase 8) - evidence-based, no fabricated
+          quality score. Connectivity is LIVE; telemetry recency and field
+          count are CALCULATED from this device's own real telemetry
+          history; anything not derivable is shown as Unavailable rather
+          than invented. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+        <div className="bg-card/50 border border-border/50 rounded-xl p-4 flex flex-col gap-1">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            Connectivity <DataSourceBadge classification="LIVE" />
+          </span>
+          <span className={`text-sm font-bold ${
+            connectivity === 'ONLINE' ? 'text-success' : connectivity === 'OFFLINE' ? 'text-destructive' : 'text-[var(--data-unavailable)]'
+          }`}>
+            {connectivity}
+          </span>
+        </div>
+        <div className="bg-card/50 border border-border/50 rounded-xl p-4 flex flex-col gap-1">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            Last Telemetry <DataSourceBadge classification="CALCULATED" />
+          </span>
+          <span className="text-sm font-bold text-foreground" title={twinState.lastTelemetryAt ? new Date(twinState.lastTelemetryAt).toLocaleString() : undefined}>
+            {twinState.telemetryLoading ? '…' : twinState.lastTelemetryAt ? formatAge(twinState.lastTelemetryAt) : 'Unavailable'}
+          </span>
+        </div>
+        <div className="bg-card/50 border border-border/50 rounded-xl p-4 flex flex-col gap-1">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            Reporting Fields <DataSourceBadge classification="CALCULATED" />
+          </span>
+          <span className="text-sm font-bold text-foreground">
+            {twinState.reportedFields.length > 0 ? twinState.reportedFields.join(', ') : 'None reported'}
+          </span>
         </div>
       </div>
 

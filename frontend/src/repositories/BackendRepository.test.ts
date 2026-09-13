@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { BackendDeviceRepository } from './BackendRepository';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { BackendDeviceRepository, BackendTelemetryRepository } from './BackendRepository';
 
 function jsonResponse(body: unknown, ok = true) {
   return { ok, status: ok ? 200 : 500, json: async () => body } as Response;
@@ -48,5 +48,71 @@ describe('BackendDeviceRepository - deviceType mapping', () => {
     const device = await repo.getDevice('dev-1');
 
     expect(device.deviceType).toBe('Generic');
+  });
+});
+
+/**
+ * Regression coverage (Phase 8) for a real bug found during live
+ * verification: the real GET /devices/{id}/telemetry endpoint returns
+ * { records: [{sensorType, value, unit, timestamp}] }, not the
+ * { content: [{payload: {...}}] } shape this repository used to assume -
+ * which meant it silently returned [] against the real backend, always.
+ */
+describe('BackendTelemetryRepository - parses the real backend response shape', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function mockRecordsResponse() {
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        records: [
+          { id: 'r1', deviceId: 'd1', timestamp: '2026-01-01T00:00:00Z', sensorType: 'TEMPERATURE_SENSOR', value: 21.5, unit: 'CELSIUS' },
+          { id: 'r2', deviceId: 'd1', timestamp: '2026-01-01T00:01:00Z', sensorType: 'HUMIDITY_SENSOR', value: 45, unit: 'PERCENT' },
+        ],
+        returnedCount: 2,
+        hasMore: false,
+      }),
+    });
+  }
+
+  it('getTelemetryHistory normalizes real flat records into the payload shape downstream consumers expect', async () => {
+    mockRecordsResponse();
+    const repo = new BackendTelemetryRepository();
+
+    const history = await repo.getTelemetryHistory('d1');
+
+    expect(history).toHaveLength(2);
+    expect(history[0].payload).toEqual({ TEMPERATURE_SENSOR: 21.5 });
+    expect(history[1].payload).toEqual({ HUMIDITY_SENSOR: 45 });
+  });
+
+  it('getTelemetry filters real records by sensorType and returns real values', async () => {
+    mockRecordsResponse();
+    const repo = new BackendTelemetryRepository();
+
+    const points = await repo.getTelemetry('d1', 'TEMPERATURE_SENSOR');
+
+    expect(points).toHaveLength(1);
+    expect(points[0].value).toBe(21.5);
+  });
+
+  it('getTelemetryHistory returns an honest empty array when the device has no telemetry, not a parsing error', async () => {
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({ records: [], returnedCount: 0, hasMore: false }),
+    });
+    const repo = new BackendTelemetryRepository();
+
+    const history = await repo.getTelemetryHistory('d1');
+
+    expect(history).toEqual([]);
   });
 });

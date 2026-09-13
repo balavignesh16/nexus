@@ -16,9 +16,8 @@ export class BackendDeviceRepository implements IDeviceRepository {
       status: data.status,
       deviceType: data.deviceType || 'Generic',
       mqttTopic: data.mqttTopic || '',
-      healthScore: 0, // Calculated by MetricEngine in resolver
-      twinQuality: 0, // Calculated by MetricEngine in resolver
       lastSeen: data.lastSeen || 'Never',
+      spaceId: data.spaceId,
       // The backend Device API does not currently expose these fields.
       // null (not 0) means "not available" - 0 would be a real measurement.
       signalStrength: null,
@@ -46,9 +45,8 @@ export class BackendDeviceRepository implements IDeviceRepository {
       status: d.status,
       deviceType: d.deviceType || 'Generic',
       mqttTopic: d.mqttTopic || '',
-      healthScore: 0,
-      twinQuality: 0,
       lastSeen: d.lastSeen || 'Never',
+      spaceId: d.spaceId,
       // Not available from the backend Device API - see getDevice() above.
       signalStrength: null,
       battery: null,
@@ -67,16 +65,18 @@ export class BackendTelemetryRepository implements ITelemetryRepository {
       throw new Error(`Failed to fetch telemetry: ${response.status}`);
     }
     const data = await response.json();
-    
-    if (data.content) {
-      // Filter the paginated response to only the requested metric
-      const filtered = data.content.filter((item: any) => item.payload && item.payload[metric] !== undefined);
-      return filtered.map((item: any) => ({
+
+    // Phase 8 fix: the real endpoint returns { records: [{sensorType, value, ...}] },
+    // not { content: [{payload: {...}}] } - the previous parsing here always
+    // silently returned [] against the real backend (data.content is always
+    // undefined). See getTelemetryHistory() below for the same fix.
+    const records = data.records || data.content || [];
+    return records
+      .filter((item: any) => item.sensorType === metric)
+      .map((item: any) => ({
         timestamp: new Date(item.timestamp).getTime(),
-        value: Number(item.payload[metric])
+        value: Number(item.value)
       }));
-    }
-    return [];
   }
 
   async getTelemetryHistory(deviceId: string): Promise<any[]> {
@@ -85,7 +85,20 @@ export class BackendTelemetryRepository implements ITelemetryRepository {
       throw new Error(`Failed to fetch telemetry: ${response.status}`);
     }
     const data = await response.json();
-    return data.content || [];
+
+    // Real records are flat ({id, deviceId, timestamp, sensorType, value,
+    // unit}) - normalized here into the {timestamp, payload: {[sensorType]:
+    // value}} shape every downstream consumer (TelemetryPage, OverviewTab,
+    // the Digital Twin state) already expects, so the fix lives in exactly
+    // one place rather than in every caller.
+    const records = data.records || data.content || [];
+    return records.map((item: any) => ({
+      id: item.id,
+      deviceId: item.deviceId,
+      timestamp: item.timestamp,
+      payload: { [item.sensorType]: item.value },
+      unit: item.unit,
+    }));
   }
 }
 

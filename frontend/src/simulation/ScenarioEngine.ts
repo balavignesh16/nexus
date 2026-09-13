@@ -45,8 +45,6 @@ class ScenarioEngineClass {
         status: DeviceStatus.ACTIVE,
         deviceType: d.type,
         mqttTopic: `sensors/${d.space.toLowerCase().replace(' ', '-')}/${d.id}`,
-        healthScore: 100,
-        twinQuality: 100,
         lastSeen: 'Just now',
         signalStrength: -50,
         battery: 100,
@@ -109,25 +107,20 @@ class ScenarioEngineClass {
       if (scenario === 'Sensor Offline' && id === 'dev-temp-001') {
         if (device.status === DeviceStatus.ACTIVE) {
           device.status = DeviceStatus.OFFLINE;
-          device.healthScore = 0;
           this.emitEvent('Connection Lost', 'Sensor dropped off the network', id);
         }
       } else if (device.status === DeviceStatus.OFFLINE && scenario !== 'Sensor Offline') {
         device.status = DeviceStatus.ACTIVE;
-        device.healthScore = 100;
         this.emitEvent('Sensor Online', 'Sensor reconnected', id);
       }
 
       // Update specific scenario side effects
       if (scenario === 'Gas Leak' && id === 'dev-gas-001' && tick === 5) {
-        device.healthScore = 40;
-        device.twinQuality = 80;
         this.emitEvent('Rule Matched', 'High Gas Concentration Detected', id);
         this.emitEvent('Alert Raised', 'Evacuation protocol suggested', id);
       }
 
       if (scenario === 'High Temperature' && id === 'dev-temp-001' && tick === 8) {
-        device.healthScore = 60;
         this.emitEvent('Rule Matched', 'Temperature exceeded threshold', id);
       }
 

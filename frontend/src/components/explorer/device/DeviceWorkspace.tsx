@@ -6,6 +6,10 @@ import { DeviceConnectivityBadge, type DeviceConnectivity } from '../../DeviceCo
 import { useDeviceConnectivityStream } from '../../../realtime/streams/useDeviceConnectivityStream';
 import { DeviceCapabilitiesList } from '../../DeviceCapabilitiesList';
 import { DeviceCommandControls } from '../../DeviceCommandControls';
+import { useDeviceLocationPath } from '../../../hooks/useDeviceLocationPath';
+import { useDeviceTwinState } from '../../../hooks/useDeviceTwinState';
+import { formatAge } from '../../../utils/formatAge';
+import { DataSourceBadge } from '../../ui/DataSourceBadge';
 
 export const DeveloperModeContext = createContext<boolean>(false);
 export const useDeveloperMode = () => useContext(DeveloperModeContext);
@@ -35,6 +39,9 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
   // connectivity event arrives for this device in the current session.
   const [connectivity, setConnectivity] = useState<DeviceConnectivity>('UNKNOWN');
   useDeviceConnectivityStream(deviceId, (payload) => setConnectivity(payload.status));
+
+  const locationPath = useDeviceLocationPath(device?.spaceId);
+  const twinState = useDeviceTwinState(deviceId);
 
   if (isLoading) {
     return (
@@ -68,54 +75,29 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
     { id: 'json', label: 'Raw JSON', icon: Code },
   ];
 
-  // Circular Progress Component
-  const CircularProgress = ({ value, label, colorClass, labelColor }: any) => {
-    const radius = 24;
-    const circumference = radius * 2 * Math.PI;
-    const strokeDashoffset = circumference - (value / 100) * circumference;
-    
-    return (
-      <div className="flex flex-col items-center gap-1 shrink-0">
-        <span className="text-[10px] text-muted-foreground">{label}</span>
-        <div className="relative flex items-center justify-center">
-          <svg className="w-14 h-14 transform -rotate-90">
-            <circle cx="28" cy="28" r={radius} className="stroke-muted/30 fill-none" strokeWidth="4" />
-            <circle 
-              cx="28" cy="28" r={radius} 
-              className={`fill-none transition-all duration-1000 ease-in-out ${colorClass}`}
-              strokeWidth="4"
-              strokeDasharray={circumference}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-            />
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className={`text-sm font-bold ${labelColor || 'text-foreground'}`}>{value}</span>
-          </div>
-        </div>
-        {value >= 90 ? (
-          <span className="text-[10px] text-success font-medium tracking-wide">Excellent</span>
-        ) : value >= 70 ? (
-          <span className="text-[10px] text-warning font-medium tracking-wide">Good</span>
-        ) : (
-          <span className="text-[10px] text-destructive font-medium tracking-wide">Poor</span>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="flex flex-col h-full bg-[#0a0a0f] overflow-hidden animate-in fade-in relative p-4 space-y-4">
       
       {/* TOP HEADER: Breadcrumbs & Actions */}
       <div className="shrink-0 flex items-center justify-between pb-1">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground/80">
-          <span className="hover:text-foreground cursor-pointer transition-colors">Test Site</span>
-          <span className="text-muted-foreground/40">{'>'}</span>
-          <span className="hover:text-foreground cursor-pointer transition-colors">Main Building</span>
-          <span className="text-muted-foreground/40">{'>'}</span>
-          <span className="hover:text-foreground cursor-pointer transition-colors">Floor 1</span>
-          <span className="text-muted-foreground/40">{'>'}</span>
+          {locationPath.isLoading ? (
+            <span className="text-muted-foreground/50">Resolving location…</span>
+          ) : locationPath.data ? (
+            <>
+              <span className="hover:text-foreground cursor-pointer transition-colors">{locationPath.data.site}</span>
+              <span className="text-muted-foreground/40">{'>'}</span>
+              <span className="hover:text-foreground cursor-pointer transition-colors">{locationPath.data.building}</span>
+              <span className="text-muted-foreground/40">{'>'}</span>
+              <span className="hover:text-foreground cursor-pointer transition-colors">{locationPath.data.space}</span>
+              <span className="text-muted-foreground/40">{'>'}</span>
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground/50" data-testid="breadcrumb-unavailable">Location unavailable</span>
+              <span className="text-muted-foreground/40">{'>'}</span>
+            </>
+          )}
           <div className="flex items-center gap-1.5 text-foreground">
             <span className="font-semibold text-white flex items-center gap-1.5">
               <Settings size={14} className="text-muted-foreground" />
@@ -179,16 +161,43 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
 
         {/* Right: Health Metrics */}
         <div className="flex-1 flex items-center justify-evenly pl-4 gap-4">
-          {/* Health Score */}
+          {/* Digital Twin state - real signals only (Phase 8): no
+              fabricated health/quality score. Connectivity is LIVE;
+              telemetry recency and field count are CALCULATED from the
+              device's own real telemetry history. */}
           <div className="flex items-center justify-center pr-8 border-r border-[#1f1f28] h-full">
-            <CircularProgress value={device.healthScore ?? 0} label="Health Score" colorClass="stroke-[#22c55e]" labelColor="text-white" />
+            <div className="flex flex-col items-center gap-1 pt-1">
+              <span className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                Digital Twin <DataSourceBadge classification="LIVE" />
+              </span>
+              <span className={`text-sm font-bold mt-1 ${
+                connectivity === 'ONLINE' ? 'text-success' : connectivity === 'OFFLINE' ? 'text-destructive' : 'text-[var(--data-unavailable)]'
+              }`}>
+                {connectivity}
+              </span>
+            </div>
           </div>
-          
-          {/* Twin Quality */}
+
           <div className="flex items-center justify-center pr-8 border-r border-[#1f1f28] h-full">
-            <CircularProgress value={device.twinQuality ?? 0} label="Twin Quality" colorClass="stroke-[#22c55e]" labelColor="text-white" />
+            <div className="flex flex-col items-center gap-1 pt-1">
+              <span className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                Last Telemetry <DataSourceBadge classification="CALCULATED" />
+              </span>
+              {twinState.telemetryLoading ? (
+                <span className="text-sm font-bold text-muted-foreground mt-1">…</span>
+              ) : twinState.lastTelemetryAt ? (
+                <span className="text-sm font-bold text-white mt-1" title={new Date(twinState.lastTelemetryAt).toLocaleString()}>
+                  {formatAge(twinState.lastTelemetryAt)}
+                </span>
+              ) : (
+                <span className="text-sm font-bold text-muted-foreground mt-1">Unavailable</span>
+              )}
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {twinState.reportedFields.length > 0 ? `${twinState.reportedFields.length} field(s) reporting` : '—'}
+              </span>
+            </div>
           </div>
-          
+
           {/* Last Seen */}
           <div className="flex items-center justify-center pr-8 border-r border-[#1f1f28] h-full">
             <div className="flex flex-col items-center gap-1 pt-1">

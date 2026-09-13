@@ -14,6 +14,7 @@ public record ActionHistoryResponse(
     UUID executionId,
     UUID requestId,
     UUID matchId,
+    UUID deviceId,
     ActionType actionType,
     Map<String, Object> parameters,
     ExecutionStatus status,
@@ -28,12 +29,15 @@ public record ActionHistoryResponse(
      * ackMessage are always null here, since {@link ActionExecutionResult}
      * never carries ACK data (it is the return value of the synchronous
      * publish step, which happens before any ACK could possibly exist).
+     * deviceId is also null: ActionExecutionResult/ActionExecutionRequest
+     * never carry a deviceId field (unlike the persisted ActionHistoryRecord).
      */
     public static ActionHistoryResponse from(ActionExecutionResult result) {
         return new ActionHistoryResponse(
                 result.executionId(),
                 result.request().requestId(),
                 result.request().matchId(),
+                null,
                 result.request().actionType(),
                 result.request().parameters(),
                 result.status(),
@@ -56,6 +60,7 @@ public record ActionHistoryResponse(
                 record.getRequestId(),
                 record.getRequestId(),
                 record.getMatchId(),
+                record.getDeviceId(),
                 record.getActionType(),
                 record.getParameters(),
                 record.getStatus(),

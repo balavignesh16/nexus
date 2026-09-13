@@ -1,47 +1,4 @@
-import type { DeviceState } from '../repositories/types';
-import { DeviceStatus } from '../api/deviceApi';
-
 export class MetricEngine {
-  
-  /**
-   * Calculates the overall health score (0-100) of a device.
-   * Derives from status, latency, and telemetry staleness.
-   */
-  static calculateHealthScore(device: DeviceState, currentLatencyMs?: number): number {
-    if (device.status === DeviceStatus.OFFLINE) return 0;
-    if (device.status === DeviceStatus.MAINTENANCE) return 50;
-    
-    let score = 100;
-
-    // Deduct for high latency
-    if (currentLatencyMs) {
-      if (currentLatencyMs > 500) score -= 15;
-      else if (currentLatencyMs > 200) score -= 5;
-    }
-
-    // Deduct for missing metrics
-    if (!device.metrics || device.metrics.length === 0) {
-      score -= 20;
-    }
-
-    return Math.max(0, Math.min(100, score));
-  }
-
-  /**
-   * Calculates Twin Quality (0-100) based on how fully populated the twin schema is.
-   * If twin data is mostly populated, quality is high.
-   */
-  static calculateTwinQuality(device: DeviceState): number {
-    // In a real scenario, this checks the Twin payload against the JSON schema.
-    // For now, we derive it from the basic properties we know.
-    let quality = 50; // Base quality
-    
-    if (device.deviceType) quality += 10;
-    if (device.mqttTopic) quality += 10;
-    if (device.metrics && device.metrics.length > 0) quality += 30;
-
-    return Math.max(0, Math.min(100, quality));
-  }
 
   /**
    * Infers average latency from network request metrics or Simulator constraints.

@@ -27,6 +27,15 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
     }
   };
 
+  // Reuses the exact ack semantics/coloring established on the Analytics
+  // page (Phase 8): ACCEPTED/REJECTED are real device acknowledgements;
+  // an absent ackStatus means NO_ACK_YET - never rendered as a failure.
+  const ackLabel = (ackStatus: string | null | undefined) => {
+    if (ackStatus === 'ACCEPTED') return { label: 'ACCEPTED', className: 'bg-success/10 text-success' };
+    if (ackStatus === 'REJECTED') return { label: 'REJECTED', className: 'bg-destructive/10 text-destructive' };
+    return { label: 'NO ACK YET', className: 'bg-muted/30 text-muted-foreground' };
+  };
+
   const filteredActions = deviceActions.filter((a: any) => filter === 'ALL' || a.status === filter);
 
   return (
@@ -120,6 +129,18 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
                     <p className="text-sm text-foreground/90 font-medium">
                       {action.message || 'Action executed'}
                     </p>
+                    {/* Acknowledgement (Phase 8): whether the device itself
+                        confirmed the command, distinct from execution
+                        status. Only SEND_COMMAND rows ever carry ack data -
+                        an absent ackStatus is NO_ACK_YET, never a failure. */}
+                    {action.actionType === 'SEND_COMMAND' && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <span className="text-[10px] text-muted-foreground">Device ack:</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${ackLabel(action.ackStatus).className}`}>
+                          {ackLabel(action.ackStatus).label}
+                        </span>
+                      </div>
+                    )}
                     {action.payload && Object.keys(action.payload).length > 0 && (
                       <div className="mt-3 bg-muted/30 rounded p-2 text-xs font-mono text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                         {JSON.stringify(action.payload)}
