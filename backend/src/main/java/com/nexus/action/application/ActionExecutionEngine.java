@@ -43,7 +43,7 @@ public class ActionExecutionEngine {
             ActionExecutionResult result = executeSingleRequest(request, context);
 
             pipelineService.recordTrace(
-                    PipelineTrace.of(correlationId, null, PipelineStage.ACTION, stageStart,
+                    PipelineTrace.of(correlationId, deviceIdFromRequest(request), PipelineStage.ACTION, stageStart,
                             result.status() != ExecutionStatus.FAILURE ? "SUCCESS" : "FAILURE", result.status().name(), null));
 
             // Persist action history (synchronous listener) before broadcasting,
@@ -56,6 +56,23 @@ public class ActionExecutionEngine {
 
             // Broadcast to WebSocket clients
             realtimePublisher.publishActionExecuted(result, correlationId);
+        }
+    }
+
+    /**
+     * Tier 5D: mirrors the same defensive extraction ActionHistoryRecord.fromResult()
+     * already uses - deliberately reads request.parameters() rather than
+     * ActionContext.triggeringEvent(), which may be null for a manually
+     * triggered command (no rule match, no triggering event).
+     */
+    private String deviceIdFromRequest(ActionExecutionRequest request) {
+        if (request.parameters() == null || !request.parameters().containsKey("deviceId")) {
+            return null;
+        }
+        try {
+            return java.util.UUID.fromString(request.parameters().get("deviceId").toString()).toString();
+        } catch (Exception e) {
+            return null;
         }
     }
 

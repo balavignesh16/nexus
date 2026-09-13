@@ -171,4 +171,67 @@ class DeviceControllerIntegrationTest {
 
         assertThat(deviceRepository.existsById(UUID.fromString(id))).isFalse();
     }
+
+    // ---------- Tier 5D: POST /devices/{deviceId}/commands endpoint contract ----------
+    //
+    // This test class has no Mosquitto broker configured - MQTTConfiguration's
+    // startup is non-fatal without one (an existing, already-proven Tier 3
+    // guarantee), so mqttClient.isConnected() simply returns false here. That
+    // makes this the right place to test the endpoint's own contract (404,
+    // 400) without needing a real broker; the full authorized/online publish
+    // path is proven separately in CommandDispatchMqttIntegrationTest, which
+    // does provision a real Mosquitto container.
+
+    @Test
+    void sendDeviceCommand_unknownDevice_returns404() throws Exception {
+        String body = "{\"capability\":\"LED\",\"command\":\"SET_STATE\",\"value\":true}";
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/commands", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void sendDeviceCommand_missingRequiredField_returns400() throws Exception {
+        CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-400", "Desc");
+        String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(deviceRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String deviceId = objectMapper.readTree(deviceResponse).get("id").asText();
+
+        // Missing required "value" field.
+        String invalidBody = "{\"capability\":\"LED\",\"command\":\"SET_STATE\"}";
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/commands", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidBody))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void sendDeviceCommand_authorizedDevice_withoutBroker_returnsTruthfulFailure_never200Success() throws Exception {
+        // No MQTT broker is configured in this test class - the command
+        // must be honestly reported as FAILURE (never a fabricated
+        // SUCCESS), even though the REST call itself succeeds (201).
+        CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-NOBROKER", "Desc");
+        String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(deviceRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String deviceId = objectMapper.readTree(deviceResponse).get("id").asText();
+
+        String body = "{\"capability\":\"LED\",\"command\":\"SET_STATE\",\"value\":true}";
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/commands", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FAILURE"));
+    }
 }

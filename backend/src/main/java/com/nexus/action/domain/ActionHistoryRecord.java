@@ -16,7 +16,8 @@ public class ActionHistoryRecord {
     @Column(name = "request_id")
     private UUID requestId;
 
-    @Column(name = "match_id", nullable = false)
+    // Tier 5D: nullable - a manually-triggered command has no RuleMatch.
+    @Column(name = "match_id")
     private UUID matchId;
 
     @Column(name = "device_id")

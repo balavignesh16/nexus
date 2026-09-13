@@ -4,9 +4,12 @@ import com.nexus.device.api.dto.CreateDeviceRequest;
 import com.nexus.device.api.dto.DeviceResponse;
 import com.nexus.device.api.dto.UpdateDeviceRequest;
 import com.nexus.device.application.DeviceService;
+import com.nexus.action.api.dto.ActionHistoryResponse;
 import com.nexus.device.capability.DeviceCapabilityService;
 import com.nexus.device.capability.api.dto.CreateDeviceCapabilityRequest;
 import com.nexus.device.capability.api.dto.DeviceCapabilityResponse;
+import com.nexus.device.command.DeviceCommandService;
+import com.nexus.device.command.api.dto.CreateDeviceCommandRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -20,10 +23,13 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     private final DeviceCapabilityService deviceCapabilityService;
+    private final DeviceCommandService deviceCommandService;
 
-    public DeviceController(DeviceService deviceService, DeviceCapabilityService deviceCapabilityService) {
+    public DeviceController(DeviceService deviceService, DeviceCapabilityService deviceCapabilityService,
+                             DeviceCommandService deviceCommandService) {
         this.deviceService = deviceService;
         this.deviceCapabilityService = deviceCapabilityService;
+        this.deviceCommandService = deviceCommandService;
     }
 
     @GetMapping("/spaces/{spaceId}/devices")
@@ -89,5 +95,23 @@ public class DeviceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteDeviceCapability(@PathVariable UUID deviceId, @PathVariable UUID capabilityId) {
         deviceCapabilityService.deleteCapability(deviceId, capabilityId);
+    }
+
+    // ---------- Device commands (Tier 5D) ----------
+    //
+    // HTTP 201 reflects that the command request was recorded and
+    // processed - it does NOT mean the command reached or was obeyed by
+    // the device. The response body's own `status` field (SUCCESS/FAILURE)
+    // and `message` are the truthful outcome (e.g. "Command published to
+    // MQTT" vs "Device is offline"); callers must read that field, never
+    // infer success from the HTTP status alone.
+
+    @PostMapping("/devices/{deviceId}/commands")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ActionHistoryResponse sendDeviceCommand(
+            @PathVariable UUID deviceId,
+            @Valid @RequestBody CreateDeviceCommandRequest request
+    ) {
+        return deviceCommandService.dispatchCommand(deviceId, request);
     }
 }

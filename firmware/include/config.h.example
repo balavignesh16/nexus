@@ -23,5 +23,10 @@
 #define DHT_PIN  4
 #define DHT_TYPE DHT22   // change to DHT11 if using a DHT11 sensor instead
 
+// ---- Actuator wiring (Tier 5D) ----
+// A plain LED (with a current-limiting resistor) is the only supported
+// actuator. Safe default state is LOW (off) on every boot.
+#define LED_PIN 2
+
 // ---- Telemetry publish interval, in seconds (matches the Python simulator's default) ----
 #define PUBLISH_INTERVAL_SECONDS 5

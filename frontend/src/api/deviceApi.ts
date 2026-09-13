@@ -87,6 +87,43 @@ export interface UpdateDeviceRequest {
   description?: string;
 }
 
+export const ExecutionStatus = {
+  SUCCESS: 'SUCCESS',
+  FAILURE: 'FAILURE',
+  IGNORED: 'IGNORED',
+  UNSUPPORTED: 'UNSUPPORTED',
+} as const;
+export type ExecutionStatus = typeof ExecutionStatus[keyof typeof ExecutionStatus];
+
+/**
+ * Tier 5D: request to dispatch a physical command. Only capability=LED,
+ * command="SET_STATE" is currently supported by the backend - any other
+ * combination is rejected (400/FAILURE), never silently accepted.
+ */
+export interface CreateDeviceCommandRequest {
+  capability: CapabilityType;
+  command: string;
+  value: boolean;
+}
+
+/**
+ * The truthful outcome of a command dispatch. `status`/`message` are what
+ * actually happened - a 201 HTTP response alone never means the command
+ * succeeded; callers must read `status`. SUCCESS here means only "NEXUS
+ * published the command to MQTT" - never that the device received,
+ * processed, or acted on it.
+ */
+export interface DeviceCommandResult {
+  executionId: string;
+  requestId: string;
+  matchId: string | null;
+  actionType: string;
+  parameters: Record<string, unknown>;
+  status: ExecutionStatus;
+  timestamp: string;
+  message: string;
+}
+
 export const deviceApi = {
   getDevicesBySpaceId: (spaceId: string) => 
     apiClient.get<Device[]>(`/spaces/${spaceId}/devices`),
@@ -113,5 +150,8 @@ export const deviceApi = {
     apiClient.post<DeviceCapability>(`/devices/${deviceId}/capabilities`, data),
 
   deleteDeviceCapability: (deviceId: string, capabilityId: string) =>
-    apiClient.delete(`/devices/${deviceId}/capabilities/${capabilityId}`)
+    apiClient.delete(`/devices/${deviceId}/capabilities/${capabilityId}`),
+
+  sendDeviceCommand: (deviceId: string, data: CreateDeviceCommandRequest) =>
+    apiClient.post<DeviceCommandResult>(`/devices/${deviceId}/commands`, data)
 };

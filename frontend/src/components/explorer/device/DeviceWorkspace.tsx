@@ -5,6 +5,7 @@ import { DeviceStatusBadge } from '../../DeviceStatusBadge';
 import { DeviceConnectivityBadge, type DeviceConnectivity } from '../../DeviceConnectivityBadge';
 import { useDeviceConnectivityStream } from '../../../realtime/streams/useDeviceConnectivityStream';
 import { DeviceCapabilitiesList } from '../../DeviceCapabilitiesList';
+import { DeviceCommandControls } from '../../DeviceCommandControls';
 
 export const DeveloperModeContext = createContext<boolean>(false);
 export const useDeveloperMode = () => useContext(DeveloperModeContext);
@@ -169,6 +170,9 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
             <div className="mt-2">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">Capabilities</span>
               <DeviceCapabilitiesList capabilities={device.capabilities ?? []} />
+              <div className="mt-2">
+                <DeviceCommandControls deviceId={device.id} capabilities={device.capabilities ?? []} />
+              </div>
             </div>
           </div>
         </div>

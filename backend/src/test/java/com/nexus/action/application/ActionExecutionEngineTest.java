@@ -24,6 +24,7 @@ class ActionExecutionEngineTest {
     private ActionExecutorRegistry registry;
     private ApplicationEventPublisher eventPublisher;
     private RealtimePublisher realtimePublisher;
+    private PipelineService pipelineService;
     private ActionExecutionEngine engine;
 
     @BeforeEach
@@ -31,7 +32,7 @@ class ActionExecutionEngineTest {
         registry = mock(ActionExecutorRegistry.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         realtimePublisher = mock(RealtimePublisher.class);
-        PipelineService pipelineService = mock(PipelineService.class);
+        pipelineService = mock(PipelineService.class);
         engine = new ActionExecutionEngine(registry, eventPublisher, realtimePublisher, pipelineService);
     }
 
@@ -123,5 +124,50 @@ class ActionExecutionEngineTest {
         InOrder inOrder = inOrder(eventPublisher, realtimePublisher);
         inOrder.verify(eventPublisher).publishEvent(any(ActionExecutedEvent.class));
         inOrder.verify(realtimePublisher).publishActionExecuted(eq(mockResult), eq("corr-order-1"));
+    }
+
+    // ---------- Tier 5D: PipelineTrace carries the real deviceId ----------
+
+    @Test
+    void pipelineTrace_carriesDeviceIdFromRequestParameters_notFromActionContext() {
+        UUID deviceId = UUID.randomUUID();
+        ActionExecutionRequest request = new ActionExecutionRequest(
+                UUID.randomUUID(), null, ActionType.SEND_COMMAND, Map.of("deviceId", deviceId.toString()));
+        // ActionContext is null/null (manual command, per the corrected Tier 5D
+        // audit) - the trace must NOT depend on it being populated.
+        ActionContext context = new ActionContext(null, null);
+
+        ActionExecutor executor = mock(ActionExecutor.class);
+        ActionExecutionResult mockResult = new ActionExecutionResult(
+                request.requestId(), request, ExecutionStatus.SUCCESS, java.time.Instant.now(), "Command published to MQTT");
+        when(registry.resolve(ActionType.SEND_COMMAND)).thenReturn(Optional.of(executor));
+        when(executor.execute(request, context)).thenReturn(mockResult);
+
+        engine.process(List.of(request), context, "corr-device-id");
+
+        ArgumentCaptor<com.nexus.pipeline.domain.PipelineTrace> traceCaptor =
+                ArgumentCaptor.forClass(com.nexus.pipeline.domain.PipelineTrace.class);
+        verify(pipelineService).recordTrace(traceCaptor.capture());
+        assertEquals(deviceId.toString(), traceCaptor.getValue().deviceId());
+    }
+
+    @Test
+    void pipelineTrace_deviceIdAbsentFromParameters_isNullNotFabricated() {
+        ActionExecutionRequest request = new ActionExecutionRequest(
+                UUID.randomUUID(), UUID.randomUUID(), ActionType.CREATE_ALERT, Map.of());
+        ActionContext context = new ActionContext(null, null);
+
+        ActionExecutor executor = mock(ActionExecutor.class);
+        ActionExecutionResult mockResult = new ActionExecutionResult(
+                request.requestId(), request, ExecutionStatus.SUCCESS, java.time.Instant.now(), "ok");
+        when(registry.resolve(ActionType.CREATE_ALERT)).thenReturn(Optional.of(executor));
+        when(executor.execute(request, context)).thenReturn(mockResult);
+
+        engine.process(List.of(request), context, "corr-no-device-id");
+
+        ArgumentCaptor<com.nexus.pipeline.domain.PipelineTrace> traceCaptor =
+                ArgumentCaptor.forClass(com.nexus.pipeline.domain.PipelineTrace.class);
+        verify(pipelineService).recordTrace(traceCaptor.capture());
+        assertEquals(null, traceCaptor.getValue().deviceId());
     }
 }

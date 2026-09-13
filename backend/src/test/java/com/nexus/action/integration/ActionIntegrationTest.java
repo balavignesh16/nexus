@@ -115,5 +115,9 @@ public class ActionIntegrationTest {
         ActionHistoryRecord result = history.get(0);
         assertEquals(ActionType.CREATE_ALERT, result.getActionType());
         assertEquals("SUCCESS", result.getStatus().name());
+        // Tier 5D regression: a rule-triggered action must still persist its
+        // real match_id, exactly as before match_id became nullable.
+        org.junit.jupiter.api.Assertions.assertNotNull(result.getMatchId(),
+                "a rule-triggered action must retain its real, non-null match_id after Tier 5D's nullability change");
     }
 }

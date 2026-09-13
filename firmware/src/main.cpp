@@ -1,4 +1,5 @@
-// NEXUS Tier 5A/5B — ESP32 temperature sensor + connectivity firmware.
+// NEXUS Tier 5A/5B/5D — ESP32 temperature sensor + connectivity + command
+// firmware.
 //
 // Publishes a real DHT22/DHT11 temperature reading into the EXACT SAME
 // telemetry wire contract the Python simulator already uses
@@ -12,8 +13,17 @@
 // "offline", retained, if this device's connection is ever lost
 // ungracefully) and publishes a retained "online" birth message after every
 // successful connect - see nexus/devices/{deviceId}/status in the backend's
-// DeviceStatusMessageHandler for how this is consumed. No command
-// subscription, no actuator, no OTA, no device registration/discovery.
+// DeviceStatusMessageHandler for how this is consumed.
+//
+// Tier 5D additionally subscribes to nexus/devices/{deviceId}/commands and
+// supports exactly one command: {capability:"LED", command:"SET_STATE",
+// value:<boolean>}. This is a closed allowlist, not a generic passthrough -
+// any other capability/command, a stale timestamp, an unsynced clock, or a
+// malformed payload is logged and ignored, never partially applied. No
+// acknowledgement is published back (deferred to a later phase) - this
+// firmware can only ever act on a command, never confirm it did.
+//
+// No OTA, no device registration/discovery, no capability self-declaration.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -30,6 +40,7 @@ static DHT dht(DHT_PIN, DHT_TYPE);
 
 static String telemetryTopic;
 static String deviceStatusTopic;
+static String deviceCommandTopic;
 static String mqttClientId;
 
 static unsigned long lastPublishMillis = 0;
@@ -38,6 +49,12 @@ static const unsigned long PUBLISH_INTERVAL_MILLIS = (unsigned long) PUBLISH_INT
 static const unsigned long WIFI_CONNECT_TIMEOUT_MILLIS = 20000UL;
 static const unsigned long MQTT_CONNECT_TIMEOUT_MILLIS = 10000UL;
 static const unsigned long TIME_SYNC_TIMEOUT_MILLIS = 20000UL;
+
+// Tier 5D: a command whose timestamp differs from our own clock by more
+// than this is rejected as stale rather than blindly obeyed - guards
+// against an old/delayed/redelivered command being acted on long after it
+// was actually issued.
+static const long COMMAND_STALENESS_WINDOW_SECONDS = 30L;
 
 // A plausible NTP-synced epoch is well past this value (2024-01-01 UTC);
 // anything below it means time() has not been synchronized yet.
@@ -101,6 +118,61 @@ String currentIsoTimestampUtc() {
     return String(buffer);
 }
 
+// Tier 5D: the sole command handler. Validates every field before ever
+// calling digitalWrite() - a malformed, unsupported, or stale command is
+// logged and ignored, never partially applied. Never publishes anything
+// back (no acknowledgement exists yet).
+void onMqttMessage(String &topic, String &payload) {
+    if (topic != deviceCommandTopic) {
+        return; // we only ever subscribe to one topic, but stay defensive
+    }
+
+    Serial.printf("[Command] Received on %s: %s\n", topic.c_str(), payload.c_str());
+
+    if (!isTimeSynced()) {
+        Serial.println("[Command] Rejected: clock not yet NTP-synced, cannot validate command freshness.");
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) {
+        Serial.printf("[Command] Rejected: malformed JSON (%s).\n", err.c_str());
+        return;
+    }
+
+    if (!doc["capability"].is<const char*>() || !doc["command"].is<const char*>()
+            || !doc["value"].is<bool>() || !doc["timestamp"].is<long>()) {
+        Serial.println("[Command] Rejected: missing or wrong-typed field(s).");
+        return;
+    }
+
+    const char* capability = doc["capability"];
+    const char* command = doc["command"];
+    bool value = doc["value"];
+    long commandTimestamp = doc["timestamp"];
+
+    // Closed allowlist - exactly one supported (capability, command) pair.
+    // Never a generic passthrough.
+    if (strcmp(capability, "LED") != 0 || strcmp(command, "SET_STATE") != 0) {
+        Serial.printf("[Command] Rejected: unsupported capability=%s command=%s.\n", capability, command);
+        return;
+    }
+
+    long nowEpoch = (long) time(nullptr);
+    long age = nowEpoch - commandTimestamp;
+    if (age < 0) {
+        age = -age; // tolerate small clock skew in either direction
+    }
+    if (age > COMMAND_STALENESS_WINDOW_SECONDS) {
+        Serial.printf("[Command] Rejected: stale (age=%lds, window=%lds).\n", age, COMMAND_STALENESS_WINDOW_SECONDS);
+        return;
+    }
+
+    digitalWrite(LED_PIN, value ? HIGH : LOW);
+    Serial.printf("[Command] Applied: LED set to %s\n", value ? "ON" : "OFF");
+}
+
 void connectMqtt() {
     if (mqttClient.connected()) {
         return;
@@ -133,6 +205,17 @@ void connectMqtt() {
         Serial.printf("[MQTT] Published retained online status to %s\n", deviceStatusTopic.c_str());
     } else {
         Serial.printf("[MQTT] Failed to publish online status to %s\n", deviceStatusTopic.c_str());
+    }
+
+    // Tier 5D: subscribe to the command topic on every (re)connect, mirroring
+    // the same explicit re-subscribe-on-every-connect pattern already used
+    // for status (Tier 5B) - not a retained/queued concern here, since
+    // commands are never retained; this just ensures a fresh subscription
+    // exists after any reconnect.
+    if (mqttClient.subscribe(deviceCommandTopic, 1)) {
+        Serial.printf("[MQTT] Subscribed to command topic %s\n", deviceCommandTopic.c_str());
+    } else {
+        Serial.printf("[MQTT] Failed to subscribe to command topic %s\n", deviceCommandTopic.c_str());
     }
 }
 
@@ -180,8 +263,14 @@ void setup() {
 
     dht.begin();
 
+    // Tier 5D: safe default state (LED off) is established before anything
+    // else - Wi-Fi, MQTT, and any possible command are all still to come.
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
     telemetryTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/telemetry";
     deviceStatusTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/status";
+    deviceCommandTopic = String("nexus/devices/") + NEXUS_DEVICE_UUID + "/commands";
     // Client ID derived from the device UUID (not a fixed shared string) so
     // multiple real devices never collide, unlike the simulator's current
     // single hardcoded MQTT client ID. This same, stable client ID across
@@ -192,6 +281,7 @@ void setup() {
     Serial.printf("[Boot] Device UUID: %s\n", NEXUS_DEVICE_UUID);
     Serial.printf("[Boot] Telemetry topic: %s\n", telemetryTopic.c_str());
     Serial.printf("[Boot] Device status topic: %s\n", deviceStatusTopic.c_str());
+    Serial.printf("[Boot] Device command topic: %s\n", deviceCommandTopic.c_str());
 
     connectWiFi();
     syncTime();
@@ -202,6 +292,9 @@ void setup() {
     // attempt (reconnects included), so this is a one-time setup call, not
     // something repeated per reconnect.
     mqttClient.setWill(deviceStatusTopic.c_str(), "offline", /*retained=*/true, /*qos=*/1);
+    // Tier 5D: registered once - the client dispatches every subscribed
+    // topic's incoming message through this single callback.
+    mqttClient.onMessage(onMqttMessage);
     connectMqtt();
 }
 
