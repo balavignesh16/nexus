@@ -201,6 +201,24 @@ class RuleControllerTest {
     }
 
     @Test
+    void listRules_blankDeviceIdParam_rejectedAsInvalid() {
+        assertThrows(IllegalArgumentException.class, () -> controller.listRules("   "));
+    }
+
+    @Test
+    void listRules_deviceIdWithNoMatchingRules_returnsEmptyListNotError() {
+        String unknownDeviceId = UUID.randomUUID().toString();
+        Rule ruleForOtherDevice = ruleWithConditions("For Other", List.of(
+                new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, UUID.randomUUID().toString())));
+        when(ruleRegistry.list()).thenReturn(List.of(ruleForOtherDevice));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleResponse>> response = controller.listRules(unknownDeviceId);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody().isEmpty());
+    }
+
+    @Test
     void listRules_deviceIdFilter_matchesOnAnyOfMultipleConditions() {
         String deviceA = UUID.randomUUID().toString();
         Rule ruleForA = ruleWithConditions("Multi-condition", List.of(

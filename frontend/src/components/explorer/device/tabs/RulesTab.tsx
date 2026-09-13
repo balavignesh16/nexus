@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus } from 'lucide-react';
+import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '../../../ui/Skeleton';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
@@ -8,7 +8,7 @@ import { CreateRuleModal } from '../CreateRuleModal';
 
 export function RulesTab({ deviceId }: { deviceId: string }) {
   const { rules } = useRepositories();
-  const { data: deviceRules = [], isLoading, refetch } = usePolling(
+  const { data: deviceRules = [], isLoading, isError, error, refetch } = usePolling(
     ['rules', deviceId],
     () => rules.getRules(deviceId),
     { interval: 30000 }
@@ -16,6 +16,22 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
   const [modalOpen, setModalOpen] = useState(false);
 
   if (isLoading) return <Skeleton className="w-full h-full" />;
+
+  if (isError) {
+    return (
+      <div className="p-6 h-full flex flex-col items-center justify-center text-center gap-3">
+        <AlertTriangle size={40} className="text-destructive opacity-60" />
+        <div>
+          <p className="text-sm font-medium text-foreground uppercase tracking-wider mb-1" data-testid="rules-tab-error">
+            Rules Unavailable
+          </p>
+          <p className="text-xs text-muted-foreground max-w-sm">
+            {error instanceof Error ? error.message : 'Could not load rules for this device.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 h-full flex flex-col space-y-6 animate-in slide-in-from-bottom-2 fade-in duration-300">

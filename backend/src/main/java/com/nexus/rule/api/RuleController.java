@@ -76,6 +76,9 @@ public class RuleController {
     @GetMapping("/rules")
     public ResponseEntity<List<RuleResponse>> listRules(
             @RequestParam(name = "deviceId", required = false) String deviceId) {
+        if (deviceId != null && deviceId.isBlank()) {
+            throw new IllegalArgumentException("deviceId, if supplied, must not be blank");
+        }
         List<RuleResponse> rules = ruleRegistry.list().stream()
                 .filter(rule -> deviceId == null || belongsToDevice(rule, deviceId))
                 .map(RuleResponse::from)
