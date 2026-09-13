@@ -33,6 +33,7 @@
   --color-data-calculated: var(--data-calculated);
   --color-data-simulated: var(--data-simulated);
   --color-data-unavailable: var(--data-unavailable);
+  --color-data-ai: var(--data-ai);
 
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
@@ -78,6 +79,11 @@
     --data-calculated: #38bdf8;
     --data-simulated: #a855f7;
     --data-unavailable: #64748b;
+    /* AI-generated reasoning (provider-grounded, e.g. rule-match
+       explanations) - deliberately distinct from CALCULATED (sky) and
+       SIMULATED (purple) so an AI-authored claim is never mistaken for
+       either. */
+    --data-ai: #2dd4bf;
   }
 
   .dark {
@@ -105,6 +111,7 @@
     --data-calculated: #38bdf8;
     --data-simulated: #a855f7;
     --data-unavailable: #64748b;
+    --data-ai: #2dd4bf;
   }
 
   body {
