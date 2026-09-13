@@ -1,0 +1,9 @@
+# Real device configuration - contains Wi-Fi credentials, MQTT broker
+# address, and the NEXUS device UUID. Never commit this file. Copy
+# include/config.h.example to include/config.h and edit it locally instead.
+include/config.h
+
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/

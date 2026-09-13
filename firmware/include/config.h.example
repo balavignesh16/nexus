@@ -1,0 +1,27 @@
+// NEXUS Tier 5A — firmware configuration TEMPLATE.
+//
+// Copy this file to "config.h" in this same directory and fill in real
+// values there. "config.h" is listed in firmware/.gitignore and must NEVER
+// be committed - it is the only place real Wi-Fi/MQTT/device values live.
+#pragma once
+
+// ---- Wi-Fi ----
+#define WIFI_SSID       "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
+
+// ---- MQTT broker: the LAN IP of the machine running NEXUS backend + Mosquitto ----
+#define MQTT_BROKER_HOST "192.168.1.100"
+#define MQTT_BROKER_PORT 1883
+
+// ---- NEXUS device identity ----
+// Must be an existing Device UUID already registered in NEXUS
+// (POST /api/v1/devices) with status ACTIVE. Tier 5A does not implement
+// device registration/discovery - this UUID must already exist.
+#define NEXUS_DEVICE_UUID "00000000-0000-0000-0000-000000000000"
+
+// ---- Sensor wiring ----
+#define DHT_PIN  4
+#define DHT_TYPE DHT22   // change to DHT11 if using a DHT11 sensor instead
+
+// ---- Telemetry publish interval, in seconds (matches the Python simulator's default) ----
+#define PUBLISH_INTERVAL_SECONDS 5
