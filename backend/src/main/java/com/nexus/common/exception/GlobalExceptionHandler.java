@@ -94,6 +94,17 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(com.nexus.device.capability.DeviceCapabilityExistsException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceCapabilityExistsException(com.nexus.device.capability.DeviceCapabilityExistsException ex) {
+        ErrorResponse error = new ErrorResponse(
+            HttpStatus.CONFLICT.value(),
+            HttpStatus.CONFLICT.getReasonPhrase(),
+            ex.getMessage(),
+            Instant.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(SpaceHasDevicesException.class)
     public ResponseEntity<ErrorResponse> handleSpaceHasDevicesException(SpaceHasDevicesException ex) {
         ErrorResponse error = new ErrorResponse(

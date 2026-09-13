@@ -4,6 +4,9 @@ import com.nexus.device.api.dto.CreateDeviceRequest;
 import com.nexus.device.api.dto.DeviceResponse;
 import com.nexus.device.api.dto.UpdateDeviceRequest;
 import com.nexus.device.application.DeviceService;
+import com.nexus.device.capability.DeviceCapabilityService;
+import com.nexus.device.capability.api.dto.CreateDeviceCapabilityRequest;
+import com.nexus.device.capability.api.dto.DeviceCapabilityResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +19,11 @@ import java.util.UUID;
 public class DeviceController {
 
     private final DeviceService deviceService;
+    private final DeviceCapabilityService deviceCapabilityService;
 
-    public DeviceController(DeviceService deviceService) {
+    public DeviceController(DeviceService deviceService, DeviceCapabilityService deviceCapabilityService) {
         this.deviceService = deviceService;
+        this.deviceCapabilityService = deviceCapabilityService;
     }
 
     @GetMapping("/spaces/{spaceId}/devices")
@@ -62,5 +67,27 @@ public class DeviceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteDevice(@PathVariable UUID id) {
         deviceService.deleteDevice(id);
+    }
+
+    // ---------- Device capabilities (Tier 5C) ----------
+
+    @GetMapping("/devices/{deviceId}/capabilities")
+    public List<DeviceCapabilityResponse> getDeviceCapabilities(@PathVariable UUID deviceId) {
+        return deviceCapabilityService.getCapabilities(deviceId);
+    }
+
+    @PostMapping("/devices/{deviceId}/capabilities")
+    @ResponseStatus(HttpStatus.CREATED)
+    public DeviceCapabilityResponse addDeviceCapability(
+            @PathVariable UUID deviceId,
+            @Valid @RequestBody CreateDeviceCapabilityRequest request
+    ) {
+        return deviceCapabilityService.addCapability(deviceId, request);
+    }
+
+    @DeleteMapping("/devices/{deviceId}/capabilities/{capabilityId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteDeviceCapability(@PathVariable UUID deviceId, @PathVariable UUID capabilityId) {
+        deviceCapabilityService.deleteCapability(deviceId, capabilityId);
     }
 }

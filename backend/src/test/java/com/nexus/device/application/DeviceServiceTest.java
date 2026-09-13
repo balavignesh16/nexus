@@ -3,6 +3,7 @@ package com.nexus.device.application;
 import com.nexus.device.api.dto.CreateDeviceRequest;
 import com.nexus.device.api.dto.DeviceResponse;
 import com.nexus.device.api.dto.UpdateDeviceRequest;
+import com.nexus.device.capability.DeviceCapabilityService;
 import com.nexus.device.domain.Device;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.DeviceStatus;
@@ -36,11 +37,14 @@ class DeviceServiceTest {
     @Mock
     private SpaceRepository spaceRepository;
 
+    @Mock
+    private DeviceCapabilityService deviceCapabilityService;
+
     private DeviceService deviceService;
 
     @BeforeEach
     void setUp() {
-        deviceService = new DeviceService(deviceRepository, spaceRepository);
+        deviceService = new DeviceService(deviceRepository, spaceRepository, deviceCapabilityService);
     }
 
     @Test

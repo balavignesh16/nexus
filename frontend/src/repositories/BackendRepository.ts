@@ -25,7 +25,11 @@ export class BackendDeviceRepository implements IDeviceRepository {
       battery: null,
       temperature: null,
       humidity: null,
-      metrics: [] // We'll populate this if backend sends generic metrics, otherwise telemetry API handles it
+      metrics: [], // We'll populate this if backend sends generic metrics, otherwise telemetry API handles it
+      // Tier 5C: real, backend-provisioned capabilities - never fabricated,
+      // defaults to an empty (never null/undefined) array when the API
+      // reports none configured.
+      capabilities: data.capabilities || []
     };
   }
 
@@ -50,7 +54,8 @@ export class BackendDeviceRepository implements IDeviceRepository {
       battery: null,
       temperature: null,
       humidity: null,
-      metrics: []
+      metrics: [],
+      capabilities: d.capabilities || []
     }));
   }
 }

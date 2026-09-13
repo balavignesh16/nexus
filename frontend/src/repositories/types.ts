@@ -1,4 +1,4 @@
-import { DeviceStatus } from '../api/deviceApi';
+import { DeviceStatus, type DeviceCapability } from '../api/deviceApi';
 
 export interface TelemetryData {
   timestamp: number;
@@ -47,6 +47,10 @@ export interface DeviceState {
   temperature: number | null;
   humidity: number | null;
   metrics: Metric[];
+  // Tier 5C: NEXUS-authoritative device capabilities. Optional/undefined
+  // means "not provided by this data source" (e.g. the demo simulator) -
+  // never fabricated; callers must treat that the same as an empty list.
+  capabilities?: DeviceCapability[];
 }
 
 export interface IDeviceRepository {
