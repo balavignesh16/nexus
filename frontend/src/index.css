@@ -11,11 +11,35 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-destructive: var(--danger);
+  --color-info: var(--info);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
 
+  /* Surface scale - the app's existing hardcoded hex values (#0a0a0f,
+     #060b14, #12121a/#13131a, #1f1f28), promoted to named tokens so every
+     component draws from one scale instead of re-typing raw hex. Darkest
+     to lightest: canvas (page bg) -> sunken (recessed content wells) ->
+     surface (default card) -> raised (elevated/hover card). */
+  --color-canvas: var(--canvas);
+  --color-sunken: var(--sunken);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-surface-border: var(--surface-border);
+
+  /* Data-integrity classification (redesign requirement): every screen
+     must be able to label what kind of data it's showing. */
+  --color-data-live: var(--data-live);
+  --color-data-calculated: var(--data-calculated);
+  --color-data-simulated: var(--data-simulated);
+  --color-data-unavailable: var(--data-unavailable);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
   --animate-shimmer: shimmer 2s infinite linear;
-  
+
   @keyframes shimmer {
     100% {
       transform: translateX(100%);
@@ -25,7 +49,9 @@
 
 @layer base {
   :root {
-    /* Mission Control Dark Palette */
+    /* NEXUS Mission Control - industrial/AI-operations dark palette.
+       Deliberately restrained: one accent (blue), meaningful status
+       colors, no gradients/purple-SaaS decoration. */
     --background: #020617; /* slate-950 */
     --foreground: #f8fafc; /* slate-50 */
     --card: #0f172a; /* slate-900 */
@@ -38,6 +64,20 @@
     --success: #22c55e;
     --warning: #f59e0b;
     --danger: #ef4444;
+    --info: #38bdf8; /* sky-400 - distinct from primary blue, used for informational/neutral signal */
+
+    --canvas: #05070d;
+    --sunken: #0a0a0f;
+    --surface: #12131a;
+    --raised: #171820;
+    --surface-border: #20222c;
+
+    /* Data classification - never let simulated data look identical to
+       live data. */
+    --data-live: #22c55e;
+    --data-calculated: #38bdf8;
+    --data-simulated: #a855f7;
+    --data-unavailable: #64748b;
   }
 
   .dark {
@@ -53,10 +93,30 @@
     --success: #22c55e;
     --warning: #f59e0b;
     --danger: #ef4444;
+    --info: #38bdf8;
+
+    --canvas: #05070d;
+    --sunken: #0a0a0f;
+    --surface: #12131a;
+    --raised: #171820;
+    --surface-border: #20222c;
+
+    --data-live: #22c55e;
+    --data-calculated: #38bdf8;
+    --data-simulated: #a855f7;
+    --data-unavailable: #64748b;
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased overflow-x-hidden;
+  }
+
+  /* Visible focus states (accessibility requirement) - a single consistent
+     ring instead of relying on each component to remember one. */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 }
 
@@ -75,5 +135,3 @@
     @apply bg-muted-foreground/50;
   }
 }
-
-

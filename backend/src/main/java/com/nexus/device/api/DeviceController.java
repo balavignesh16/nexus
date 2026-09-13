@@ -10,6 +10,8 @@ import com.nexus.device.capability.api.dto.CreateDeviceCapabilityRequest;
 import com.nexus.device.capability.api.dto.DeviceCapabilityResponse;
 import com.nexus.device.command.DeviceCommandService;
 import com.nexus.device.command.api.dto.CreateDeviceCommandRequest;
+import com.nexus.device.connectivity.DeviceConnectivityRegistry;
+import com.nexus.device.connectivity.api.dto.DeviceConnectivityResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -24,12 +26,15 @@ public class DeviceController {
     private final DeviceService deviceService;
     private final DeviceCapabilityService deviceCapabilityService;
     private final DeviceCommandService deviceCommandService;
+    private final DeviceConnectivityRegistry deviceConnectivityRegistry;
 
     public DeviceController(DeviceService deviceService, DeviceCapabilityService deviceCapabilityService,
-                             DeviceCommandService deviceCommandService) {
+                             DeviceCommandService deviceCommandService,
+                             DeviceConnectivityRegistry deviceConnectivityRegistry) {
         this.deviceService = deviceService;
         this.deviceCapabilityService = deviceCapabilityService;
         this.deviceCommandService = deviceCommandService;
+        this.deviceConnectivityRegistry = deviceConnectivityRegistry;
     }
 
     @GetMapping("/spaces/{spaceId}/devices")
@@ -113,5 +118,21 @@ public class DeviceController {
             @Valid @RequestBody CreateDeviceCommandRequest request
     ) {
         return deviceCommandService.dispatchCommand(deviceId, request);
+    }
+
+    // ---------- Device connectivity (Tier 5B) ----------
+    //
+    // Truthful last-known status only - this reads the same durable registry
+    // TelemetryMQTTListener/DeviceStatusMessageHandler already populate from
+    // LWT/birth messages. It is NOT an active probe (no round-trip ping to
+    // the device exists) - "UNKNOWN" means no status has ever been observed,
+    // never a fabricated default.
+
+    @GetMapping("/devices/{deviceId}/connectivity")
+    public DeviceConnectivityResponse getDeviceConnectivity(@PathVariable UUID deviceId) {
+        deviceService.getDevice(deviceId); // throws DeviceNotFoundException if unknown
+        return deviceConnectivityRegistry.get(deviceId)
+                .map(DeviceConnectivityResponse::from)
+                .orElseGet(() -> DeviceConnectivityResponse.unknown(deviceId));
     }
 }

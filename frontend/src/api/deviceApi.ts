@@ -153,5 +153,19 @@ export const deviceApi = {
     apiClient.delete(`/devices/${deviceId}/capabilities/${capabilityId}`),
 
   sendDeviceCommand: (deviceId: string, data: CreateDeviceCommandRequest) =>
-    apiClient.post<DeviceCommandResult>(`/devices/${deviceId}/commands`, data)
+    apiClient.post<DeviceCommandResult>(`/devices/${deviceId}/commands`, data),
+
+  getDeviceConnectivity: (deviceId: string) =>
+    apiClient.get<DeviceConnectivityResult>(`/devices/${deviceId}/connectivity`)
 };
+
+/**
+ * Truthful last-known connectivity - NOT an active probe (no round-trip
+ * ping to the device exists). "UNKNOWN" means no status has ever been
+ * observed for this device; never a fabricated default.
+ */
+export interface DeviceConnectivityResult {
+  deviceId: string;
+  status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
+  lastChangedAt: string | null;
+}

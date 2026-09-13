@@ -104,8 +104,9 @@ export class BackendEventRepository implements IEventRepository {
 }
 
 export class BackendRuleRepository implements IRuleRepository {
-  async getRules(_deviceId?: string): Promise<any[]> {
-    const response = await fetch(`${API_BASE}/rules`);
+  async getRules(deviceId?: string): Promise<any[]> {
+    const url = deviceId ? `${API_BASE}/rules?deviceId=${encodeURIComponent(deviceId)}` : `${API_BASE}/rules`;
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch rules: ${response.status}`);
     }

@@ -7,6 +7,8 @@ import com.nexus.device.domain.Device;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.DeviceStatus;
 import com.nexus.device.domain.DeviceType;
+import com.nexus.device.connectivity.DeviceConnectivityRegistry;
+import com.nexus.device.connectivity.DeviceConnectivityStatus;
 import com.nexus.space.domain.Space;
 import com.nexus.space.persistence.SpaceRepository;
 import com.nexus.building.domain.Building;
@@ -70,6 +72,9 @@ class DeviceControllerIntegrationTest {
 
     @Autowired
     private SiteRepository siteRepository;
+
+    @Autowired
+    private DeviceConnectivityRegistry deviceConnectivityRegistry;
 
     private UUID spaceId;
 
@@ -233,5 +238,49 @@ class DeviceControllerIntegrationTest {
                         .content(body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("FAILURE"));
+    }
+
+    // ---------- Device connectivity ----------
+
+    @Test
+    void getDeviceConnectivity_neverObserved_returnsTruthfulUnknown_notFabricatedOnlineOrOffline() throws Exception {
+        CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-UNKNOWN", "Desc");
+        String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(deviceRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String deviceId = objectMapper.readTree(deviceResponse).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/devices/{deviceId}/connectivity", deviceId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.lastChangedAt").doesNotExist());
+    }
+
+    @Test
+    void getDeviceConnectivity_observedOnline_returnsTruthfulOnlineWithTimestamp() throws Exception {
+        CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-ONLINE", "Desc");
+        String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(deviceRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID deviceId = UUID.fromString(objectMapper.readTree(deviceResponse).get("id").asText());
+
+        deviceConnectivityRegistry.applyObservedStatus(deviceId, DeviceConnectivityStatus.ONLINE);
+
+        mockMvc.perform(get("/api/v1/devices/{deviceId}/connectivity", deviceId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ONLINE"))
+                .andExpect(jsonPath("$.lastChangedAt").exists());
+    }
+
+    @Test
+    void getDeviceConnectivity_unknownDevice_returns404() throws Exception {
+        mockMvc.perform(get("/api/v1/devices/{deviceId}/connectivity", UUID.randomUUID()))
+                .andExpect(status().isNotFound());
     }
 }

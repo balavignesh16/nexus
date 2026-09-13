@@ -4,6 +4,7 @@ import { SkeletonChart } from '../../../ui/Skeletons';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { DebugOverlay } from '../DebugOverlay';
+import { downloadCsv } from '../../../../utils/csv';
 
 export function TelemetryTab({ deviceId }: { deviceId: string }) {
   const { telemetry } = useRepositories();
@@ -21,6 +22,21 @@ export function TelemetryTab({ deviceId }: { deviceId: string }) {
   const availableKeys: string[] = Array.from(
     new Set(deviceTelemetry.flatMap((t: any) => Object.keys(t.payload || {})))
   ).filter(k => k !== 'timestamp');
+
+  const filteredTelemetry = searchTerm.trim() === ''
+    ? deviceTelemetry
+    : deviceTelemetry.filter((t: any) =>
+        JSON.stringify(t.payload || {}).toLowerCase().includes(searchTerm.trim().toLowerCase())
+      );
+
+  const exportCsv = () => {
+    const columns = ['timestamp', ...availableKeys];
+    const rows = filteredTelemetry.map((t: any) => [
+      new Date(t.timestamp).toISOString(),
+      ...availableKeys.map((k) => (t.payload[k] !== undefined ? String(t.payload[k]) : '')),
+    ]);
+    downloadCsv(`telemetry-${deviceId}-${Date.now()}.csv`, columns, rows);
+  };
 
   return (
     <div className="p-6 h-full flex flex-col space-y-6 animate-in slide-in-from-bottom-2 fade-in duration-300">
@@ -57,7 +73,11 @@ export function TelemetryTab({ deviceId }: { deviceId: string }) {
           <button className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 hover:bg-muted border border-border/50 rounded text-xs font-medium transition-colors text-muted-foreground hover:text-foreground">
             <Filter size={14} /> Filter
           </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-success/10 hover:bg-success/20 text-success rounded text-xs font-medium transition-colors">
+          <button
+            onClick={exportCsv}
+            disabled={filteredTelemetry.length === 0}
+            className="flex items-center gap-2 px-3 py-1.5 bg-success/10 hover:bg-success/20 text-success rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <Download size={14} /> Export CSV
           </button>
         </div>
@@ -85,24 +105,32 @@ export function TelemetryTab({ deviceId }: { deviceId: string }) {
               </tr>
             </thead>
             <tbody>
-              {deviceTelemetry.length === 0 ? (
+              {filteredTelemetry.length === 0 ? (
                 <tr>
                   <td colSpan={availableKeys.length + 2} className="px-6 py-20 text-center">
                     <div className="flex flex-col items-center justify-center text-muted-foreground gap-4">
                       <Signal size={48} className="opacity-20 animate-pulse" />
                       <div className="text-center">
-                        <p className="text-sm font-medium text-foreground uppercase tracking-wider mb-1">Awaiting Telemetry Packet</p>
-                        <p className="text-xs">Device is connected but no telemetry data has been received yet.</p>
+                        <p className="text-sm font-medium text-foreground uppercase tracking-wider mb-1">
+                          {deviceTelemetry.length === 0 ? 'Awaiting Telemetry Packet' : 'No matching records'}
+                        </p>
+                        <p className="text-xs">
+                          {deviceTelemetry.length === 0
+                            ? 'Device is connected but no telemetry data has been received yet.'
+                            : 'No telemetry payloads match your search.'}
+                        </p>
                       </div>
-                      <div className="flex gap-4 text-[10px] font-mono mt-2 bg-muted/20 px-3 py-1.5 rounded border border-border/50">
-                        <span>Status: CONNECTED</span>
-                        <span>Stream: ACTIVE</span>
-                      </div>
+                      {deviceTelemetry.length === 0 && (
+                        <div className="flex gap-4 text-[10px] font-mono mt-2 bg-muted/20 px-3 py-1.5 rounded border border-border/50">
+                          <span>Status: CONNECTED</span>
+                          <span>Stream: ACTIVE</span>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                deviceTelemetry.map((t: any, idx: number) => (
+                filteredTelemetry.map((t: any, idx: number) => (
                   <tr key={t.id || idx} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="px-6 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
                       {new Date(t.timestamp).toLocaleString()}
@@ -124,7 +152,7 @@ export function TelemetryTab({ deviceId }: { deviceId: string }) {
           </table>
         </div>
         <div className="bg-muted/30 border-t border-border/50 p-3 px-6 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Showing {deviceTelemetry.length} records</span>
+          <span>Showing {filteredTelemetry.length} of {deviceTelemetry.length} records</span>
           <div className="flex items-center gap-4">
             <button className="hover:text-foreground transition-colors disabled:opacity-50" disabled>Previous</button>
             <span className="font-medium text-foreground">Page 1 of 1</span>

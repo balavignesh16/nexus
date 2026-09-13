@@ -1,19 +1,48 @@
 import { useState, useEffect } from 'react';
-import { Play, Maximize2, RefreshCw, Download, FileJson, ArrowRight, Circle, AlertTriangle, TestTube, MoreHorizontal } from 'lucide-react';
+import { Play, Maximize2, RefreshCw, Download, FileJson, ArrowRight, Circle, AlertTriangle, TestTube, MoreHorizontal, ShieldCheck, ShieldAlert, ShieldQuestion, Sparkles } from 'lucide-react';
 import { useDevice } from '../../../../hooks/queries';
 import { SkeletonCard, SkeletonChart, SkeletonTimeline } from '../../../ui/Skeletons';
 import { ScenarioEngine } from '../../../../simulation/ScenarioEngine';
 import { DebugOverlay } from '../DebugOverlay';
 import { FEATURES } from '../../../../config/features';
+import { useRepositories } from '../../../../repositories/RepositoryProvider';
+import { usePolling } from '../../../../hooks/usePolling';
+import { deviceApi, type DeviceConnectivityResult } from '../../../../api/deviceApi';
+import { downloadCsv } from '../../../../utils/csv';
+import { DataSourceBadge } from '../../../ui/DataSourceBadge';
+import type { TabId } from '../DeviceWorkspace';
 
-// These quick actions have no real backend implementation yet - they only
-// ever did anything via the demo ScenarioEngine. In live mode they must be
-// visibly unavailable rather than silently no-op or fabricate demo events.
-const LIVE_MODE_UNAVAILABLE_ACTIONS = new Set(['Refresh Twin', 'Download Telemetry', 'Test Connection']);
+interface OverviewTabProps {
+  deviceId: string;
+  onNavigateToTab?: (tab: TabId) => void;
+}
 
-export function OverviewTab({ deviceId }: { deviceId: string }) {
-  const { data: device, isLoading } = useDevice(deviceId);
+export function OverviewTab({ deviceId, onNavigateToTab }: OverviewTabProps) {
+  const { data: device, isLoading, refetch } = useDevice(deviceId);
+  const { telemetry, events: eventsRepo } = useRepositories();
   const [events, setEvents] = useState<any[]>([]);
+  const [actionState, setActionState] = useState<{ label: string; message: string } | null>(null);
+
+  // System Health: real last-known connectivity (Tier 5B), not a fabricated
+  // ping - same source as the Test Connection quick action, polled quietly
+  // in the background so the health summary stays current without the user
+  // clicking anything. Disabled in demo mode - there is no live backend to
+  // query, matching Test Connection's own demo-mode branch.
+  const { data: connectivity } = usePolling<DeviceConnectivityResult>(
+    ['device-connectivity', deviceId],
+    () => deviceApi.getDeviceConnectivity(deviceId),
+    { interval: 10000, enabled: !FEATURES.DEMO_MODE }
+  );
+
+  // Active Events: real backend event history, filtered to what actually
+  // needs operator attention. Never demo/fabricated - this repository call
+  // already resolves to real backend data outside DEMO_MODE.
+  const { data: recentEvents = [] } = usePolling<any[]>(
+    ['overview-active-events', deviceId],
+    () => eventsRepo.getEvents(deviceId, 20),
+    { interval: 5000 }
+  );
+  const activeEvents = recentEvents.filter((e: any) => e.severity === 'CRITICAL' || e.severity === 'WARNING').slice(0, 4);
 
   useEffect(() => {
     // ScenarioEngine is a demo-only data source - never subscribe to it in
@@ -85,25 +114,86 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
     { label: 'Last Reboot', value: 'Unavailable', unavailable: true },
   ];
 
-  // 3. Quick Actions
-  // Refresh Twin / Test Connection / Download Telemetry have no real backend
-  // implementation - only ever simulated via the demo ScenarioEngine. This
-  // must never fire in live mode (see LIVE_MODE_UNAVAILABLE_ACTIONS below,
-  // which also disables the buttons in the UI).
-  const handleQuickAction = (label: string) => {
-    if (!FEATURES.DEMO_MODE) return;
-
-    if (label === 'Refresh Twin') {
-      ScenarioEngine.setScenario('Normal Operations');
-      // Hack to emit an event
-      // @ts-ignore
-      ScenarioEngine.emitEvent('Action Executed', 'Digital Twin refreshed manually', deviceId);
-    } else if (label === 'Test Connection') {
-      // @ts-ignore
-      ScenarioEngine.emitEvent('Diagnostic', 'Ping successful. Latency 24ms', deviceId);
-    } else if (label === 'Download Telemetry') {
-      // @ts-ignore
-      ScenarioEngine.emitEvent('Data Export', 'Telemetry downloaded as CSV', deviceId);
+  // 3. Quick Actions - every one of these now does something real:
+  // navigation actions switch tabs, Refresh Twin re-fetches the real device
+  // from the backend, Download Telemetry exports the real telemetry history
+  // already available to this device, and Test Connection reads the real
+  // last-known MQTT connectivity status (Tier 5B) - never a fabricated
+  // ping/latency number.
+  const handleQuickAction = async (label: string) => {
+    setActionState(null);
+    switch (label) {
+      case 'View Raw JSON':
+        onNavigateToTab?.('json');
+        return;
+      case 'Jump to Rules':
+        onNavigateToTab?.('rules');
+        return;
+      case 'Jump to Events':
+        onNavigateToTab?.('events');
+        return;
+      case 'Jump to Actions':
+        onNavigateToTab?.('actions');
+        return;
+      case 'More':
+        onNavigateToTab?.('diagnostics');
+        return;
+      case 'Refresh Twin': {
+        const result = await refetch();
+        setActionState({
+          label,
+          message: result.isSuccess ? 'Digital twin refreshed from the backend.' : 'Refresh failed.',
+        });
+        return;
+      }
+      case 'Download Telemetry': {
+        try {
+          const history = await telemetry.getTelemetryHistory(deviceId);
+          if (!history || history.length === 0) {
+            setActionState({ label, message: 'No telemetry history to export yet.' });
+            return;
+          }
+          const keys = Array.from(new Set(history.flatMap((t: any) => Object.keys(t.payload || {}))));
+          const columns = ['timestamp', ...keys];
+          const rows = history.map((t: any) => [
+            new Date(t.timestamp).toISOString(),
+            ...keys.map((k) => (t.payload[k] !== undefined ? String(t.payload[k]) : '')),
+          ]);
+          downloadCsv(`telemetry-${deviceId}-${Date.now()}.csv`, columns, rows);
+          setActionState({ label, message: `Exported ${history.length} record(s).` });
+        } catch {
+          setActionState({ label, message: 'Download failed.' });
+        }
+        return;
+      }
+      case 'Test Connection': {
+        if (FEATURES.DEMO_MODE) {
+          // Demo mode has no live backend to query - preserves the existing
+          // simulated diagnostic behavior rather than failing a real call.
+          // @ts-ignore
+          ScenarioEngine.emitEvent('Diagnostic', 'Ping successful. Latency 24ms', deviceId);
+          setActionState({ label, message: 'Ping successful. Latency 24ms (demo)' });
+          return;
+        }
+        try {
+          const connectivity = await deviceApi.getDeviceConnectivity(deviceId);
+          const humanStatus = connectivity.status === 'UNKNOWN'
+            ? 'No connectivity data has ever been received for this device.'
+            : `Last known status: ${connectivity.status}` + (connectivity.lastChangedAt
+                ? ` (since ${new Date(connectivity.lastChangedAt).toLocaleString()})`
+                : '');
+          setActionState({ label, message: humanStatus });
+        } catch {
+          setActionState({ label, message: 'Could not read connectivity status.' });
+        }
+        return;
+      }
+      default:
+        if (FEATURES.DEMO_MODE) {
+          // Demo-only fallback for any label not handled above.
+          // @ts-ignore
+          ScenarioEngine.emitEvent('Action Executed', `${label} (demo)`, deviceId);
+        }
     }
   };
 
@@ -118,9 +208,83 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
     { label: 'More', icon: MoreHorizontal },
   ];
 
+  const connectivityStatus = connectivity?.status ?? 'UNKNOWN';
+  const healthTone = connectivityStatus === 'ONLINE'
+    ? { icon: ShieldCheck, color: 'text-success', ring: 'border-success/30 bg-success/5' }
+    : connectivityStatus === 'OFFLINE'
+      ? { icon: ShieldAlert, color: 'text-destructive', ring: 'border-destructive/30 bg-destructive/5' }
+      : { icon: ShieldQuestion, color: 'text-[var(--data-unavailable)]', ring: 'border-surface-border bg-surface' };
+
   return (
     <div className="p-6 h-full flex flex-col space-y-6 animate-in slide-in-from-bottom-2 fade-in duration-300 max-w-[1600px] mx-auto overflow-y-auto custom-scrollbar">
-      
+
+      {/* SYSTEM HEALTH + AI INTELLIGENCE + ACTIVE EVENTS - answers
+          "what is happening right now, what matters, what should I do" -
+          before any raw metric grid. */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* A. System Health */}
+        <div className={`rounded-xl border p-5 flex flex-col gap-3 shadow-sm ${healthTone.ring}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">System Health</span>
+            <DataSourceBadge classification="LIVE" />
+          </div>
+          <div className="flex items-center gap-3">
+            <healthTone.icon size={28} className={healthTone.color} />
+            <div>
+              <div className={`text-lg font-bold ${healthTone.color}`}>{connectivityStatus}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {connectivityStatus === 'UNKNOWN'
+                  ? 'No connectivity ever observed'
+                  : `Since ${connectivity?.lastChangedAt ? new Date(connectivity.lastChangedAt).toLocaleString() : '—'}`}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between pt-3 border-t border-surface-border/60 text-xs">
+            <span className="text-muted-foreground">Lifecycle status</span>
+            <span className="font-medium text-foreground/90">{device.status}</span>
+          </div>
+        </div>
+
+        {/* C. AI Intelligence - honest placeholder: NEXUS's real AI capability
+            (Tier 4) explains rule matches with grounded evidence; it does not
+            yet perform standing anomaly detection on arbitrary devices. This
+            section must never fabricate an insight to look populated. */}
+        <div className="rounded-xl border border-surface-border bg-surface p-5 flex flex-col gap-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Sparkles size={13} className="text-primary" /> NEXUS Intelligence
+            </span>
+            <DataSourceBadge classification="UNAVAILABLE" />
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center text-center gap-2 py-4">
+            <p className="text-xs text-muted-foreground max-w-[220px]">
+              No standing anomaly analysis exists for this device yet. Evidence-grounded explanations are available for rule matches once one occurs.
+            </p>
+          </div>
+        </div>
+
+        {/* D. Active Events */}
+        <div className="rounded-xl border border-surface-border bg-surface p-5 flex flex-col gap-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Events</span>
+            <button onClick={() => onNavigateToTab?.('events')} className="text-[10px] text-primary hover:underline">View all</button>
+          </div>
+          {activeEvents.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground py-4">No critical or warning events</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {activeEvents.map((ev: any, i: number) => (
+                <div key={ev.id || i} className="flex items-center gap-2 text-xs">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ev.severity === 'CRITICAL' ? 'bg-destructive' : 'bg-warning'}`} />
+                  <span className="text-foreground/80 truncate flex-1">{ev.eventType || ev.type || 'Event'}</span>
+                  <span className="text-muted-foreground/60 shrink-0">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* ROW 1: LIVE READINGS */}
       <section>
         <h3 className="text-sm font-semibold text-foreground mb-4">Live Readings</h3>
@@ -254,31 +418,25 @@ export function OverviewTab({ deviceId }: { deviceId: string }) {
         <div className="col-span-12 lg:col-span-8 bg-[#12121a] border border-[#1f1f28] rounded-xl p-5 flex flex-col shadow-sm">
           <h3 className="text-sm font-semibold text-foreground mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
-            {actions.map((act, i) => {
-              const isUnavailableInLiveMode = !FEATURES.DEMO_MODE && LIVE_MODE_UNAVAILABLE_ACTIONS.has(act.label);
-              return (
-                <button
-                  key={i}
-                  onClick={() => handleQuickAction(act.label)}
-                  disabled={isUnavailableInLiveMode}
-                  title={isUnavailableInLiveMode ? 'Not available in live mode' : undefined}
-                  className={`bg-[#0a0a0f]/50 border rounded-xl p-4 flex flex-col items-center justify-center gap-3 transition-all group shadow-sm ${
-                    isUnavailableInLiveMode
-                      ? 'border-[#1f1f28] opacity-40 cursor-not-allowed'
-                      : 'border-[#1f1f28] hover:border-blue-500/40 hover:bg-blue-500/5 hover:shadow-[0_0_15px_rgba(59,130,246,0.1)] cursor-pointer'
-                  }`}
-                >
-                  <act.icon size={20} className={isUnavailableInLiveMode ? 'text-muted-foreground/50' : 'text-blue-500/80 group-hover:text-blue-400 group-hover:scale-110 transition-all'} />
-                  <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground text-center">
-                    {act.label}
-                  </span>
-                  {isUnavailableInLiveMode && (
-                    <span className="text-[9px] text-muted-foreground/70 -mt-1">Not available in live mode</span>
-                  )}
-                </button>
-              );
-            })}
+            {actions.map((act, i) => (
+              <button
+                key={i}
+                data-testid={`quick-action-${act.label}`}
+                onClick={() => handleQuickAction(act.label)}
+                className="bg-[#0a0a0f]/50 border border-[#1f1f28] rounded-xl p-4 flex flex-col items-center justify-center gap-3 transition-all group shadow-sm hover:border-blue-500/40 hover:bg-blue-500/5 hover:shadow-[0_0_15px_rgba(59,130,246,0.1)] cursor-pointer"
+              >
+                <act.icon size={20} className="text-blue-500/80 group-hover:text-blue-400 group-hover:scale-110 transition-all" />
+                <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground text-center">
+                  {act.label}
+                </span>
+              </button>
+            ))}
           </div>
+          {actionState && (
+            <div data-testid="quick-action-result" className="mt-4 text-xs text-muted-foreground border-t border-[#1f1f28] pt-3">
+              <span className="font-medium text-foreground/80">{actionState.label}:</span> {actionState.message}
+            </div>
+          )}
         </div>
 
         {/* Recent Activity Timeline */}

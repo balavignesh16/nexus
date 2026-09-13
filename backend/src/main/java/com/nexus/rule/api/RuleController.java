@@ -62,12 +62,30 @@ public class RuleController {
         return ResponseEntity.status(HttpStatus.CREATED).body(RuleResponse.from(rule));
     }
 
+    /**
+     * Optional {@code deviceId} filter: a device's Rules tab must only ever
+     * show rules that actually reference that device - never every rule in
+     * the system. "Belongs to" is defined as having at least one
+     * {@code RuleCondition} with {@code field == DEVICE_ID} and
+     * {@code expectedValue} equal to the given deviceId. Rules with no
+     * DEVICE_ID condition at all (genuinely platform-wide rules) are
+     * correctly excluded from every device-scoped view - filtering happens
+     * entirely in-memory against RuleRegistry's already-hydrated rule set,
+     * no schema change or query rewrite required.
+     */
     @GetMapping("/rules")
-    public ResponseEntity<List<RuleResponse>> listRules() {
+    public ResponseEntity<List<RuleResponse>> listRules(
+            @RequestParam(name = "deviceId", required = false) String deviceId) {
         List<RuleResponse> rules = ruleRegistry.list().stream()
+                .filter(rule -> deviceId == null || belongsToDevice(rule, deviceId))
                 .map(RuleResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(rules);
+    }
+
+    private boolean belongsToDevice(Rule rule, String deviceId) {
+        return rule.conditions().stream().anyMatch(c ->
+                c.field() == com.nexus.rule.domain.RuleField.DEVICE_ID && deviceId.equals(c.expectedValue()));
     }
 
     @GetMapping("/rules/{id}")

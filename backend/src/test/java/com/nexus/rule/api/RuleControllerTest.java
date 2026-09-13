@@ -1,5 +1,10 @@
 package com.nexus.rule.api;
 
+import com.nexus.rule.domain.Rule;
+import com.nexus.rule.domain.RuleCondition;
+import com.nexus.rule.domain.RuleField;
+import com.nexus.rule.domain.RuleOperator;
+import com.nexus.rule.domain.RuleAction;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
 import com.nexus.rule.persistence.RuleMatchEntity;
 import com.nexus.rule.persistence.RuleMatchRepository;
@@ -19,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -37,14 +43,20 @@ import static org.mockito.Mockito.when;
 class RuleControllerTest {
 
     private RuleMatchRepository ruleMatchRepository;
+    private RuleRegistry ruleRegistry;
     private RuleController controller;
 
     @BeforeEach
     void setUp() {
-        RuleRegistry ruleRegistry = mock(RuleRegistry.class);
+        ruleRegistry = mock(RuleRegistry.class);
         BoundedRuleMatchStore matchStore = mock(BoundedRuleMatchStore.class);
         ruleMatchRepository = mock(RuleMatchRepository.class);
         controller = new RuleController(ruleRegistry, matchStore, ruleMatchRepository);
+    }
+
+    private Rule ruleWithConditions(String name, List<RuleCondition> conditions) {
+        return new Rule(UUID.randomUUID(), name, true, 1, conditions,
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
     }
 
     private RuleMatchEntity sampleEntity(UUID matchId, UUID ruleId, Instant matchedAt, String correlationId) {
@@ -145,5 +157,59 @@ class RuleControllerTest {
         when(ruleMatchRepository.findById(matchId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> controller.getRuleMatchDetail(matchId));
+    }
+
+    // ---------- GET /rules device-scoping filter ----------
+
+    @Test
+    void listRules_noDeviceIdFilter_returnsEveryRule() {
+        String deviceA = UUID.randomUUID().toString();
+        Rule scoped = ruleWithConditions("Scoped", List.of(new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceA)));
+        Rule platformWide = ruleWithConditions("Platform-wide", List.of(new RuleCondition(RuleField.SEVERITY, RuleOperator.EQ, "CRITICAL")));
+        when(ruleRegistry.list()).thenReturn(List.of(scoped, platformWide));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleResponse>> response = controller.listRules(null);
+
+        assertEquals(2, response.getBody().size());
+    }
+
+    @Test
+    void listRules_deviceIdFilter_returnsOnlyRulesReferencingThatDevice() {
+        String deviceA = UUID.randomUUID().toString();
+        String deviceB = UUID.randomUUID().toString();
+        Rule ruleForA = ruleWithConditions("For A", List.of(new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceA)));
+        Rule ruleForB = ruleWithConditions("For B", List.of(new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceB)));
+        when(ruleRegistry.list()).thenReturn(List.of(ruleForA, ruleForB));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleResponse>> response = controller.listRules(deviceA);
+
+        assertEquals(1, response.getBody().size());
+        assertEquals("For A", response.getBody().get(0).name());
+    }
+
+    @Test
+    void listRules_deviceIdFilter_excludesPlatformWideRulesWithNoDeviceIdCondition() {
+        String deviceA = UUID.randomUUID().toString();
+        Rule ruleForA = ruleWithConditions("For A", List.of(new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceA)));
+        Rule platformWide = ruleWithConditions("Platform-wide", List.of(new RuleCondition(RuleField.SEVERITY, RuleOperator.EQ, "CRITICAL")));
+        when(ruleRegistry.list()).thenReturn(List.of(ruleForA, platformWide));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleResponse>> response = controller.listRules(deviceA);
+
+        assertEquals(1, response.getBody().size());
+        assertTrue(response.getBody().stream().noneMatch(r -> r.name().equals("Platform-wide")));
+    }
+
+    @Test
+    void listRules_deviceIdFilter_matchesOnAnyOfMultipleConditions() {
+        String deviceA = UUID.randomUUID().toString();
+        Rule ruleForA = ruleWithConditions("Multi-condition", List.of(
+                new RuleCondition(RuleField.SEVERITY, RuleOperator.EQ, "CRITICAL"),
+                new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceA)));
+        when(ruleRegistry.list()).thenReturn(List.of(ruleForA));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleResponse>> response = controller.listRules(deviceA);
+
+        assertEquals(1, response.getBody().size());
     }
 }

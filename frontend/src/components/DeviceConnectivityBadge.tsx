@@ -19,27 +19,23 @@ interface DeviceConnectivityBadgeProps {
  * is never defaulted to OFFLINE.
  */
 export const DeviceConnectivityBadge: React.FC<DeviceConnectivityBadgeProps> = ({ connectivity }) => {
-  let bgColor = 'bg-gray-100';
-  let textColor = 'text-gray-800';
+  let className = 'bg-[var(--data-unavailable)]/10 text-[var(--data-unavailable)] border-[var(--data-unavailable)]/30';
   let label: string = connectivity;
 
   switch (connectivity) {
     case 'ONLINE':
-      bgColor = 'bg-green-100';
-      textColor = 'text-green-800';
+      className = 'bg-success/10 text-success border-success/30';
       break;
     case 'OFFLINE':
-      bgColor = 'bg-red-100';
-      textColor = 'text-red-800';
+      className = 'bg-destructive/10 text-destructive border-destructive/30';
       break;
     case 'UNKNOWN':
-      bgColor = 'bg-gray-100';
-      textColor = 'text-gray-600';
+      className = 'bg-[var(--data-unavailable)]/10 text-[var(--data-unavailable)] border-[var(--data-unavailable)]/30';
       break;
   }
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bgColor} ${textColor}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-xs font-medium ${className}`}>
       {label}
     </span>
   );

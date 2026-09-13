@@ -24,7 +24,7 @@ interface DeviceWorkspaceProps {
   deviceId: string;
 }
 
-type TabId = 'overview' | 'telemetry' | 'twin' | 'events' | 'rules' | 'actions' | 'diagnostics' | 'json';
+export type TabId = 'overview' | 'telemetry' | 'twin' | 'events' | 'rules' | 'actions' | 'diagnostics' | 'json';
 
 export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
   const { data: device, isLoading, error } = useDevice(deviceId);
@@ -248,7 +248,7 @@ export function DeviceWorkspace({ deviceId }: DeviceWorkspaceProps) {
 
       {/* TAB CONTENT */}
       <div className="flex-1 overflow-y-auto relative bg-[#060b14]">
-        {activeTab === 'overview' && <OverviewTab deviceId={deviceId} />}
+        {activeTab === 'overview' && <OverviewTab deviceId={deviceId} onNavigateToTab={setActiveTab} />}
         {activeTab === 'telemetry' && <TelemetryTab deviceId={deviceId} />}
         {activeTab === 'twin' && <DigitalTwinTab deviceId={deviceId} />}
         {activeTab === 'events' && <EventsTab deviceId={deviceId} />}

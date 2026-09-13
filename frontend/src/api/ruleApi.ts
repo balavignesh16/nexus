@@ -25,7 +25,8 @@ export interface Rule {
 }
 
 export const ruleApi = {
-  getRules: () => apiClient.get<Rule[]>('/rules'),
+  getRules: (deviceId?: string) =>
+    apiClient.get<Rule[]>(deviceId ? `/rules?deviceId=${encodeURIComponent(deviceId)}` : '/rules'),
   getRule: (id: string) => apiClient.get<Rule>(`/rules/${id}`),
   createRule: (rule: Omit<Rule, 'ruleId'>) => apiClient.post<Rule>('/rules', rule),
   updateRule: (id: string, rule: Rule) => apiClient.put<Rule>(`/rules/${id}`, rule),

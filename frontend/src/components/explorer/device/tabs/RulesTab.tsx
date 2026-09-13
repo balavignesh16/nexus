@@ -1,17 +1,20 @@
-import { Server, Activity, ArrowRight, CheckCircle2, Circle } from 'lucide-react';
+import { useState } from 'react';
+import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus } from 'lucide-react';
 import { Skeleton } from '../../../ui/Skeleton';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { DebugOverlay } from '../DebugOverlay';
+import { CreateRuleModal } from '../CreateRuleModal';
 
 export function RulesTab({ deviceId }: { deviceId: string }) {
   const { rules } = useRepositories();
-  const { data: deviceRules = [], isLoading } = usePolling(
+  const { data: deviceRules = [], isLoading, refetch } = usePolling(
     ['rules', deviceId],
     () => rules.getRules(deviceId),
     { interval: 30000 }
   );
-  
+  const [modalOpen, setModalOpen] = useState(false);
+
   if (isLoading) return <Skeleton className="w-full h-full" />;
 
   return (
@@ -33,6 +36,12 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
             <p className="text-xs text-muted-foreground">Rules currently monitoring this device</p>
           </div>
         </div>
+        <button
+          onClick={() => setModalOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-xs font-medium transition-colors border border-primary/20"
+        >
+          <Plus size={14} /> Create Rule
+        </button>
       </div>
 
       {/* Rules Grid */}
@@ -44,7 +53,10 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
               <p className="text-sm font-medium text-foreground uppercase tracking-wider mb-1">No Automations Bound</p>
               <p className="text-xs">There are currently no active rules monitoring this device's telemetry stream.</p>
             </div>
-            <button className="mt-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-xs font-medium transition-colors border border-primary/20">
+            <button
+              onClick={() => setModalOpen(true)}
+              className="mt-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-xs font-medium transition-colors border border-primary/20"
+            >
               Create Rule
             </button>
           </div>
@@ -102,6 +114,13 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
           </div>
         )}
       </div>
+
+      <CreateRuleModal
+        deviceId={deviceId}
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreated={() => refetch()}
+      />
     </div>
   );
 }
