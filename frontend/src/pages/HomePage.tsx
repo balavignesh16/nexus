@@ -5,7 +5,7 @@ import { useSites, useActiveDevices, useEvents, useActionHistory } from '../hook
 import { useExplorerHierarchy } from '../hooks/useExplorerHierarchy';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { usePolling } from '../hooks/usePolling';
-import { analyticsApi } from '../api/analyticsApi';
+import { useRepositories } from '../repositories/RepositoryProvider';
 import { DeviceStatus } from '../api/deviceApi';
 import {
   Building2,
@@ -37,18 +37,27 @@ const DEVICE_STATUS_TONE: Record<string, StatusTone> = {
 export default function HomePage() {
   const { data: sites } = useSites();
   const { data: devices } = useActiveDevices();
-  const { data: events = [] } = useEvents(25);
-  const { data: actions = [] } = useActionHistory(25);
+  // Step 9B: 20 (not 25) is the established real limit - it's useEvents/
+  // useActionHistory's own default and the exact value
+  // RealtimeRepositorySync writes into ['events', 20]/['actions', 20].
+  // Requesting 25 silently missed every realtime push once the socket
+  // connected, since a differing query key never matches a synced one.
+  const { data: events = [] } = useEvents(20);
+  const { data: actions = [] } = useActionHistory(20);
   const { data: hierarchy } = useExplorerHierarchy();
   const connection = useConnectionStatus();
+  const { analytics } = useRepositories();
 
   // Real connectivity distribution (Phase 8) - reuses the same Analytics
   // aggregation already built and tested for the connectivity summary
   // (devices LEFT JOIN device_connectivity, COALESCE to UNKNOWN). UNKNOWN
   // is never counted as OFFLINE. No duplicate backend logic is introduced.
+  // Step 9D: routed through the same IAnalyticsRepository/DataSourceResolver
+  // AnalyticsPage uses (Step 8B) instead of calling analyticsApi directly -
+  // same '24h' range, same query key, same CALCULATED semantics.
   const { data: summary, isLoading: summaryLoading, error: summaryError } = usePolling(
     ['analytics-summary', '24h'],
-    () => analyticsApi.getSummary('24h'),
+    () => analytics.getAnalyticsSummary('24h'),
     { interval: 0 }
   );
   const offlineCount = summary?.connectivityDistribution?.OFFLINE ?? 0;

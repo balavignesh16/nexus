@@ -88,7 +88,7 @@ export function RulesPage() {
         </div>
 
         {/* STATISTICS - real counts from the loaded (possibly device-filtered) rule set */}
-        <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <MetricCard label="Total Rules" value={globalRules.length} icon={<FileJson size={18} />} />
           <MetricCard label="Enabled" value={enabledCount} icon={<CheckCircle2 size={18} />} />
           <MetricCard label="Disabled" value={disabledCount} icon={<XCircle size={18} />} />

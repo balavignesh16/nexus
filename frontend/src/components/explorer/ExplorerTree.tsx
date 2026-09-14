@@ -94,24 +94,36 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
           const isSelected = selectedNode?.id === node.id;
           const hasChildren = !!node.children && node.children.length > 0;
 
+          const activate = () => {
+            if (hasChildren) handleExpand(node.id);
+            else {
+              onSelect({
+                id: node.id,
+                name: node.name,
+                type: node.type as NodeType,
+                path: [...path, { id: node.id, name: node.name, type: node.type as NodeType }]
+              });
+            }
+          };
+
           return (
             <div
               className="px-2"
               style={{ paddingLeft: `${level * 14 + 8}px` }}
             >
               <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={hasChildren ? isExpanded : undefined}
+                aria-current={isSelected ? 'true' : undefined}
                 className="flex items-center w-full min-w-fit gap-2 pr-2 py-1.5 my-0.5 cursor-pointer rounded-[var(--radius-panel)] transition-colors"
                 style={isSelected ? { backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' } : undefined}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  if (hasChildren) handleExpand(node.id);
-                  else {
-                    onSelect({
-                      id: node.id,
-                      name: node.name,
-                      type: node.type as NodeType,
-                      path: [...path, { id: node.id, name: node.name, type: node.type as NodeType }]
-                    });
+                onClick={activate}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    activate();
                   }
                 }}
               >

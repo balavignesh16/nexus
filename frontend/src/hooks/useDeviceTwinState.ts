@@ -1,7 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useRepositories } from '../repositories/RepositoryProvider';
 import { usePolling } from './usePolling';
 import { deviceApi, type DeviceConnectivityResult } from '../api/deviceApi';
 import { FEATURES } from '../config/features';
+import { useDeviceConnectivityStream } from '../realtime/streams/useDeviceConnectivityStream';
 
 export interface DeviceTwinState {
   connectivity: DeviceConnectivityResult | undefined;
@@ -25,12 +27,30 @@ export interface DeviceTwinState {
  */
 export function useDeviceTwinState(deviceId: string): DeviceTwinState {
   const { telemetry } = useRepositories();
+  const queryClient = useQueryClient();
 
   const connectivityQuery = usePolling<DeviceConnectivityResult>(
     ['device-connectivity', deviceId],
     () => deviceApi.getDeviceConnectivity(deviceId),
     { interval: 10000, enabled: !FEATURES.DEMO_MODE }
   );
+
+  // Step 9C: usePolling above disables its own refetch once realtime is
+  // connected, which previously left every "LIVE" connectivity badge
+  // sourced from this hook (TwinsPage, DigitalTwinTab, OverviewTab) frozen
+  // at whatever value was fetched on mount - exactly when the connection
+  // is healthiest. A real DeviceOnline/DeviceOffline push (the same real
+  // stream DeviceWorkspace's own connectivity badge already uses) is
+  // written into the same ['device-connectivity', deviceId] cache entry,
+  // so every consumer of that query key sees the live value from then on.
+  // Only `status` is updated - `lastChangedAt` is never fabricated with a
+  // client-side timestamp; it keeps the last real value the backend
+  // reported, or `null` if none has been fetched yet.
+  useDeviceConnectivityStream(deviceId, (payload) => {
+    queryClient.setQueryData<DeviceConnectivityResult>(['device-connectivity', deviceId], (old) =>
+      old ? { ...old, status: payload.status } : { deviceId, status: payload.status, lastChangedAt: null }
+    );
+  });
 
   const telemetryQuery = usePolling<any[]>(
     ['device-twin-telemetry', deviceId],

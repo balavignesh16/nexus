@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeManager, TOPICS } from './RealtimeManager';
 import type { TelemetryPayload, TwinUpdatedPayload, DomainEventPayload, ActionExecutedPayload, PipelineTracePayload, RuleMatchedPayload } from './RealtimeEvents';
+import { normalizeRealtimePipelineTrace } from './normalizePipelineTrace';
+import type { PipelineTracePayload as CanonicalPipelineTracePayload } from '../repositories/types';
 
 export function RealtimeRepositorySync() {
   const queryClient = useQueryClient();
@@ -120,12 +122,19 @@ export function RealtimeRepositorySync() {
       });
     });
 
-    // 5b. Sync Rule Matches -> Annotate matching rule in the rules list
+    // 5b. Sync Rule Matches -> Annotate matching rule in every cached
+    // rules list, regardless of its device-filter param. RulesPage
+    // queries ['global-rules', deviceFilter] while DiagnosticsTab queries
+    // the bare ['global-rules'] - both are real, independently-cached
+    // views of the same real rule set, so `exact: false` annotates
+    // whichever of them is currently in the cache rather than only the
+    // one exact key, without duplicating or inventing any rule data.
     const unsubRules = RealtimeManager.subscribe<RuleMatchedPayload>(TOPICS.RULES, (msg) => {
       const payload = msg.payload;
       if (!payload || !payload.ruleId) return;
 
-      queryClient.setQueryData<any[]>(['global-rules'], (old = []) => {
+      queryClient.setQueriesData<any[]>({ queryKey: ['global-rules'], exact: false }, (old) => {
+        if (!old) return old;
         return old.map(rule =>
           (rule.ruleId === payload.ruleId || rule.id === payload.ruleId)
             ? { ...rule, lastMatchedAt: msg.serverTimestamp, lastMatchReason: payload.reason }
@@ -135,12 +144,17 @@ export function RealtimeRepositorySync() {
     });
 
     // 5. Sync Pipeline Traces -> Prepend
+    // The realtime PipelineTrace payload and the REST-seeded canonical
+    // shape are different DTOs for the same real concept - normalize
+    // before writing into the shared cache so every consumer of
+    // ['global-pipeline-traces'] only ever sees one coherent shape.
     const unsubPipeline = RealtimeManager.subscribe<PipelineTracePayload>(TOPICS.PIPELINE, (msg) => {
       const payload = msg.payload;
       if (!payload) return;
-      
-      queryClient.setQueryData<PipelineTracePayload[]>(['global-pipeline-traces'], (old = []) => {
-        return [payload, ...old].slice(0, 10000); // UI buffers up to 10k traces
+
+      const trace = normalizeRealtimePipelineTrace(payload);
+      queryClient.setQueryData<CanonicalPipelineTracePayload[]>(['global-pipeline-traces'], (old = []) => {
+        return [trace, ...old].slice(0, 10000); // UI buffers up to 10k traces
       });
     });
 

@@ -10,8 +10,13 @@ const mockUseActionHistory = vi.fn();
 vi.mock('../hooks/queries', () => ({
   useSites: () => mockUseSites(),
   useActiveDevices: () => mockUseActiveDevices(),
-  useEvents: () => mockUseEvents(),
-  useActionHistory: () => mockUseActionHistory(),
+  useEvents: (...args: any[]) => mockUseEvents(...args),
+  useActionHistory: (...args: any[]) => mockUseActionHistory(...args),
+}));
+
+const mockGetAnalyticsSummary = vi.fn();
+vi.mock('../repositories/RepositoryProvider', () => ({
+  useRepositories: () => ({ analytics: { getAnalyticsSummary: mockGetAnalyticsSummary } }),
 }));
 
 const mockUseExplorerHierarchy = vi.fn();
@@ -158,6 +163,22 @@ describe('HomePage - real module composition, no fabricated content', () => {
 
     expect(screen.getByText('No intelligence summary surfaced here.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Go to Intelligence/ })).toHaveAttribute('href', '/ai');
+  });
+
+  it('requests events/actions with the real limit (20) that RealtimeRepositorySync actually keeps synced, never 25', () => {
+    renderPage();
+
+    expect(mockUseEvents).toHaveBeenCalledWith(20);
+    expect(mockUseActionHistory).toHaveBeenCalledWith(20);
+  });
+
+  it('requests the real 24h analytics summary through the IAnalyticsRepository, not a direct analyticsApi call', () => {
+    renderPage();
+
+    const summaryCall = mockUsePolling.mock.calls.find((c: any[]) => Array.isArray(c[0]) && c[0][0] === 'analytics-summary');
+    expect(summaryCall).toBeDefined();
+    summaryCall![1]();
+    expect(mockGetAnalyticsSummary).toHaveBeenCalledWith('24h');
   });
 
   it('reflects real platform health signals, not a hardcoded status', () => {

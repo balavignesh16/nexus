@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { RealtimeMessage, RuleMatchedPayload, TwinUpdatedPayload } from './RealtimeEvents';
+import type { RealtimeMessage, RuleMatchedPayload, TwinUpdatedPayload, PipelineTracePayload } from './RealtimeEvents';
 
 // Mock RealtimeManager so tests can synthesize a message on any topic
 // without a real STOMP/SockJS connection.
@@ -49,6 +49,31 @@ function ruleMatchMessage(overrides: Partial<RuleMatchedPayload> = {}): Realtime
       ruleName: 'High Temperature',
       reason: 'value exceeded threshold',
       deviceId: 'device-1',
+      ...overrides,
+    },
+  };
+}
+
+function pipelineTraceMessage(overrides: Partial<PipelineTracePayload> = {}): RealtimeMessage<PipelineTracePayload> {
+  return {
+    eventId: 'evt-pipe-1',
+    eventType: 'PipelineTrace',
+    deviceId: 'dev-1',
+    correlationId: 'corr-pipe-1',
+    sequenceNumber: 1,
+    serverTimestamp: 1700000000000,
+    source: 'BACKEND',
+    version: 1,
+    payload: {
+      traceId: 'trace-1',
+      correlationId: 'corr-pipe-1',
+      stage: 'TELEMETRY',
+      deviceId: 'dev-1',
+      enteredAt: 1700000000000,
+      exitedAt: 1700000000123,
+      latencyMs: 123,
+      succeeded: true,
+      stagePayload: { sensorType: 'TEMPERATURE_SENSOR', value: 21.5 },
       ...overrides,
     },
   };
@@ -297,5 +322,126 @@ describe('RealtimeRepositorySync - RULES topic', () => {
 
     const rules = queryClient.getQueryData<any[]>(['global-rules'])!;
     expect(rules[0].lastMatchedAt).toBeUndefined();
+  });
+
+  // Step 9B regression: RulesPage queries ['global-rules', deviceFilter]
+  // (a device-filtered cache entry) while DiagnosticsTab queries the bare
+  // ['global-rules']. Before this fix, only the exact bare key ever got
+  // annotated - a filtered RulesPage instance never received the
+  // realtime match annotation at all.
+  it('annotates the matching rule in a device-filtered ["global-rules", deviceId] cache entry (unfiltered RulesPage)', () => {
+    queryClient.setQueryData(['global-rules', ''], [
+      { ruleId: 'rule-abc', name: 'High Temperature', enabled: true, priority: 1 },
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.RULES, ruleMatchMessage());
+
+    const rules = queryClient.getQueryData<any[]>(['global-rules', ''])!;
+    expect(rules[0].lastMatchedAt).toBe(1700000000000);
+    expect(rules[0].lastMatchReason).toBe('value exceeded threshold');
+  });
+
+  it('annotates the matching rule in a real device-scoped ["global-rules", "dev-1"] cache entry (filtered RulesPage)', () => {
+    queryClient.setQueryData(['global-rules', 'dev-1'], [
+      { ruleId: 'rule-abc', name: 'High Temperature', enabled: true, priority: 1 },
+    ]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.RULES, ruleMatchMessage());
+
+    const rules = queryClient.getQueryData<any[]>(['global-rules', 'dev-1'])!;
+    expect(rules[0].lastMatchedAt).toBe(1700000000000);
+  });
+
+  it('annotates every currently-cached rules view at once - bare, unfiltered, and filtered - without duplicating data', () => {
+    queryClient.setQueryData(['global-rules'], [{ ruleId: 'rule-abc', name: 'High Temperature', enabled: true, priority: 1 }]);
+    queryClient.setQueryData(['global-rules', ''], [{ ruleId: 'rule-abc', name: 'High Temperature', enabled: true, priority: 1 }]);
+    queryClient.setQueryData(['global-rules', 'dev-1'], [{ ruleId: 'rule-abc', name: 'High Temperature', enabled: true, priority: 1 }]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.RULES, ruleMatchMessage());
+
+    expect(queryClient.getQueryData<any[]>(['global-rules'])![0].lastMatchedAt).toBe(1700000000000);
+    expect(queryClient.getQueryData<any[]>(['global-rules', ''])![0].lastMatchedAt).toBe(1700000000000);
+    expect(queryClient.getQueryData<any[]>(['global-rules', 'dev-1'])![0].lastMatchedAt).toBe(1700000000000);
+  });
+
+  it('does not create a cache entry for a rules view that was never fetched', () => {
+    renderSync();
+
+    expect(() => (RealtimeManager as any).__emit(TOPICS.RULES, ruleMatchMessage())).not.toThrow();
+    expect(queryClient.getQueryData(['global-rules', 'never-fetched'])).toBeUndefined();
+  });
+});
+
+describe('RealtimeRepositorySync - PIPELINE topic (realtime trace normalization)', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  function renderSync() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeRepositorySync />
+      </QueryClientProvider>
+    );
+  }
+
+  it('normalizes a realtime pipeline trace into the canonical REST shape before it enters the shared cache', () => {
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({ stage: 'TWIN' }));
+
+    const traces = queryClient.getQueryData<any[]>(['global-pipeline-traces'])!;
+    expect(traces).toHaveLength(1);
+
+    const trace = traces[0];
+    expect(trace.stageIndex).toBe(1);
+    expect(trace.previousStage).toBe('TELEMETRY');
+    expect(trace.nextStage).toBe('ACTION');
+    expect(trace.startTimestamp).toBe(1700000000000);
+    expect(trace.endTimestamp).toBe(1700000000123);
+    expect(trace.durationMs).toBe(123);
+    expect(trace.status).toBe('SUCCESS');
+    expect(typeof trace.payloadSize).toBe('number');
+    expect(Number.isNaN(trace.payloadSize)).toBe(false);
+    expect(trace.metadata).toEqual({ sensorType: 'TEMPERATURE_SENSOR', value: 21.5 });
+  });
+
+  it('prepends a normalized trace onto real REST-seeded traces without breaking their existing shape', () => {
+    const restTrace = {
+      traceId: 'rest-trace-1',
+      correlationId: 'corr-rest-1',
+      deviceId: 'dev-2',
+      stage: 'ACTION',
+      stageIndex: 2,
+      previousStage: 'TWIN',
+      nextStage: null,
+      startTimestamp: 1600000000000,
+      endTimestamp: 1600000000050,
+      durationMs: 50,
+      status: 'SUCCESS',
+      payloadSize: 42,
+      metadata: { foo: 'bar' },
+    };
+    queryClient.setQueryData(['global-pipeline-traces'], [restTrace]);
+
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage());
+
+    const traces = queryClient.getQueryData<any[]>(['global-pipeline-traces'])!;
+    expect(traces).toHaveLength(2);
+    expect(traces[0].traceId).toBe('trace-1'); // the new realtime trace, prepended
+    expect(traces[1]).toEqual(restTrace); // the real REST trace, untouched
+  });
+
+  it('a FAILURE trace (succeeded: false) never renders as SUCCESS, undefined, or NaN', () => {
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({ succeeded: false }));
+
+    const trace = queryClient.getQueryData<any[]>(['global-pipeline-traces'])![0];
+    expect(trace.status).toBe('FAILURE');
   });
 });

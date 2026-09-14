@@ -263,12 +263,17 @@ export function OverviewTab({ deviceId, onNavigateToTab }: OverviewTabProps) {
           rather than a fabricated trend chart; a link to the full history
           on Telemetry instead of inventing a time-series visualization. */}
       <section className="grid grid-cols-12 gap-6">
+        {/* Step 9C: "Latest Reading" is twinState.lastTelemetryAt - a 10s
+            REST poll of telemetry history, not a realtime push.
+            DigitalTwinTab already labels the identical underlying value
+            CALCULATED; this badge was the one place still mislabeling it
+            LIVE. */}
         <Card
           level="glass"
           padding="lg"
           icon={<Signal size={16} />}
           title="Latest Reading"
-          action={<DataSourceBadge classification="LIVE" variant="foundation" />}
+          action={<DataSourceBadge classification="CALCULATED" variant="foundation" />}
           className="col-span-12 lg:col-span-8"
         >
           {twinState.telemetryLoading ? (

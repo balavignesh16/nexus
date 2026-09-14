@@ -35,6 +35,14 @@ vi.mock('../../../../utils/csv', () => ({
   downloadCsv: vi.fn(),
 }));
 
+// Step 9C: OverviewTab now transitively renders the real
+// useDeviceTwinState hook's connectivity realtime overlay (useDeviceConnectivityStream)
+// - stubbed the same way DeviceWorkspace.test.tsx already stubs it, since
+// no <RealtimeProvider> is set up in this test's render tree.
+vi.mock('../../../../realtime/streams/useDeviceConnectivityStream', () => ({
+  useDeviceConnectivityStream: () => undefined,
+}));
+
 function device(overrides: Record<string, any> = {}) {
   return {
     id: 'dev-1',
