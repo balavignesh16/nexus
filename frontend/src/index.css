@@ -35,9 +35,64 @@
   --color-data-unavailable: var(--data-unavailable);
   --color-data-ai: var(--data-ai);
 
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  /* Reference-driven secondary accent family (third correction): a small,
+     fixed set of soft pastel tones for category/type distinction (e.g. a
+     device-type icon chip) - distinct from --accent (the one restrained
+     lavender used for active/selected state) and distinct from the
+     semantic success/warning/danger/info tokens (which mean a specific
+     operational condition, not a category). Used sparingly, never as a
+     loud gradient wash. */
+  --color-accent-green: var(--accent-green);
+  --color-accent-yellow: var(--accent-yellow);
+  --color-accent-orange: var(--accent-orange);
+  --color-foundation-bg: var(--foundation-bg);
+  --color-foundation-surface: var(--foundation-surface);
+  --color-foundation-border: var(--foundation-border);
+  /* Foundation-scoped text tokens (light-theme correction): the global
+     --foreground/--muted-foreground are near-white, tuned for the app's
+     existing dark production pages - unusable on the foundation's new
+     white/light-neutral background. Every foundation component uses
+     these instead of text-foreground/text-muted-foreground. */
+  --color-foundation-fg: var(--foundation-fg);
+  --color-foundation-muted-fg: var(--foundation-muted-fg);
+  --color-foundation-tertiary-fg: var(--foundation-tertiary-fg);
+
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
+
+  /* Foundation Step 1 (Premium Industrial Glass Control Plane) - a new,
+     additive scale. Deliberately NOT reusing radius-sm/md/lg above: those
+     values are already load-bearing for every existing production page's
+     Tailwind rounded-sm/md/lg classes, and changing their numeric meaning
+     would silently reskin pages this phase is explicitly forbidden from
+     touching. New foundation components use --radius-panel/-panel-lg/-pill
+     exclusively. */
+  /* Reference-driven correction: larger, softer rounding - the reference
+     images' cards read noticeably more rounded than the original 14/20px. */
+  --radius-panel: 1.125rem;   /* 18px - card/panel default */
+  --radius-panel-lg: 1.5rem;  /* 24px - larger glass panels, modals */
+  --radius-pill: 9999px;      /* toggles, pills, segmented controls, icon buttons */
+
+  /* Static values (identical in light/dark today) - defined once here
+     rather than through :root/.dark indirection, unlike the color tokens
+     above which genuinely need that indirection for theme-switching.
+     LIGHT-THEME CORRECTION: these were tuned for a dark background
+     (near-black, high opacity) - on the foundation's new white/light
+     surface that reads as a heavy, muddy shadow. Replaced with soft,
+     diffuse, low-opacity shadows appropriate for light surfaces.
+     REFERENCE-DRIVEN CORRECTION: re-tinted cool (lavender-black) instead
+     of warm, to match the reference images' cool lavender/blue-gray
+     environment rather than the previous warm stone tone. */
+  --shadow-glass-sm: 0 2px 8px rgba(35, 32, 58, 0.05);
+  --shadow-glass-md: 0 8px 24px rgba(35, 32, 58, 0.07);
+  --shadow-glass-lg: 0 16px 48px rgba(35, 32, 58, 0.10);
+  /* PALETTE CORRECTION: was a diffuse cyan color-blur glow - replaced with
+     a crisp 1px accent ring over the normal neutral ambient shadow.
+     Hierarchy comes from lighting/surface contrast, not a colored glow. */
+  --shadow-selected: 0 0 0 1px var(--accent), 0 8px 24px rgba(35, 32, 58, 0.07);
 
   --animate-shimmer: shimmer 2s infinite linear;
 
@@ -84,6 +139,54 @@
        SIMULATED (purple) so an AI-authored claim is never mistaken for
        either. */
     --data-ai: #2dd4bf;
+
+    /* ---- Foundation Step 1: Premium Industrial Glass Control Plane ----
+       REFERENCE-DRIVEN CORRECTION (third correction): moved from a warm
+       stone/bronze palette to a cool light lavender/blue-gray environment
+       matching the approved reference images - white/translucent-white
+       glass, near-black/charcoal text, extremely subtle cool-gray
+       borders, soft diffuse shadows, restrained lavender accent plus a
+       small pastel accent family (green/yellow/orange) for category use.
+       The existing --primary (blue) and the whole dark
+       --background/--canvas/--surface scale above are left completely
+       untouched for legacy production components; the new foundation
+       still does not build its identity around either. */
+    --accent: #8b7fc9;
+    --accent-foreground: #ffffff;
+    /* Secondary pastel accent family - category/type distinction only,
+       never a semantic replacement for success/warning/danger/info. */
+    --accent-green: #7fc99a;
+    --accent-yellow: #e8c368;
+    --accent-orange: #e8a06b;
+
+    /* Foundation-only neutral surface + text tokens - deliberately NOT
+       the same as --canvas/--surface/--foreground above (those remain
+       the app's existing dark palette, load-bearing for every current
+       production page). Nothing production-facing consumes GlassPanel
+       yet, so the foundation can carry its own light identity safely. */
+    --foundation-bg: #f1eff8;          /* very light cool lavender/blue-gray page background */
+    --foundation-surface: #ffffff;     /* soft near-white elevated card */
+    --foundation-border: #e4e1ef;      /* extremely subtle cool lavender-gray */
+    --foundation-fg: #1c1b26;          /* near-black / charcoal, cool-tinted */
+    --foundation-muted-fg: #6b6a7c;    /* muted cool-gray - secondary text */
+    --foundation-tertiary-fg: #9d9cad; /* restrained tertiary text */
+
+    /* Glass surface scale (5 levels): translucent white (very subtly
+       lavender-tinted, not pure clinical white) over the light
+       background, backdrop-blur, subtle cool dark-on-light borders, and
+       a bright top highlight simulating light catching a glass edge.
+       Levels 3-5 are translucent, paired with backdrop-filter blur
+       applied by the GlassPanel primitive, never by raw utility classes,
+       so blur/opacity/border/shadow always travel together. */
+    --glass-bg: rgba(248, 247, 252, 0.6);              /* level 3: glass surface */
+    --glass-border: rgba(35, 32, 58, 0.06);
+    --glass-strong-bg: rgba(250, 249, 253, 0.82);      /* level 4: modal / strong glass */
+    --glass-strong-border: rgba(35, 32, 58, 0.08);
+    --glass-float-bg: rgba(249, 248, 253, 0.7);        /* level 5: floating control layer */
+    --glass-float-border: rgba(35, 32, 58, 0.07);      /* neutral edge - no accent-color tint/glow */
+    --glass-highlight: rgba(255, 255, 255, 0.9);       /* bright inset top highlight - light catching the glass edge */
+    /* Shadows are theme-static - defined once in the @theme block above,
+       not repeated here. */
   }
 
   .dark {
@@ -112,6 +215,25 @@
     --data-simulated: #a855f7;
     --data-unavailable: #64748b;
     --data-ai: #2dd4bf;
+
+    --accent: #8b7fc9;
+    --accent-foreground: #ffffff;
+    --accent-green: #7fc99a;
+    --accent-yellow: #e8c368;
+    --accent-orange: #e8a06b;
+    --foundation-bg: #f1eff8;
+    --foundation-surface: #ffffff;
+    --foundation-border: #e4e1ef;
+    --foundation-fg: #1c1b26;
+    --foundation-muted-fg: #6b6a7c;
+    --foundation-tertiary-fg: #9d9cad;
+    --glass-bg: rgba(248, 247, 252, 0.6);
+    --glass-border: rgba(35, 32, 58, 0.06);
+    --glass-strong-bg: rgba(250, 249, 253, 0.82);
+    --glass-strong-border: rgba(35, 32, 58, 0.08);
+    --glass-float-bg: rgba(249, 248, 253, 0.7);
+    --glass-float-border: rgba(35, 32, 58, 0.07);
+    --glass-highlight: rgba(255, 255, 255, 0.9);
   }
 
   body {
@@ -140,5 +262,25 @@
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/50;
+  }
+}
+
+/* Foundation Step 1 - GlassPanel backdrop-filter fallback. Without this,
+   a browser lacking backdrop-filter support would render the translucent
+   glass levels (glass / glass-strong / float) as plain semi-transparent
+   panels with NO blur - text and controls behind them would show through
+   unobscured, hurting readability. GlassPanel emits data-glass-level on
+   its root element specifically so this CSS-only fallback can target it;
+   when backdrop-filter is genuinely unsupported, the same three levels
+   fall back to a near-opaque fill instead, staying legible without blur. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass-level="glass"] {
+    background-color: rgba(248, 247, 252, 0.94) !important;
+  }
+  [data-glass-level="glass-strong"] {
+    background-color: rgba(250, 249, 253, 0.97) !important;
+  }
+  [data-glass-level="float"] {
+    background-color: rgba(249, 248, 253, 0.95) !important;
   }
 }
