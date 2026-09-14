@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useRepositories } from '../repositories/RepositoryProvider';
 import { usePolling } from '../hooks/usePolling';
 import { Zap, Search, Filter, AlertTriangle, AlertCircle, Info, Hash } from 'lucide-react';
@@ -17,6 +18,7 @@ export default function EventsPage() {
   const [search, setSearch] = useState('');
   const [filterSeverity, setFilterSeverity] = useState('ALL');
   const { openInspector } = useInspector();
+  const navigate = useNavigate();
 
   const filteredEvents = useMemo(() => {
     return [...globalEvents].filter((e: any) => {
@@ -123,11 +125,11 @@ export default function EventsPage() {
                         },
                         rawJson: event,
                         correlationId: event.correlationId,
-                        history: event.correlationId ? [
-                          { time: 'T-0s', action: 'Rule Triggered', details: 'Threshold exceeded' },
-                          { time: 'T+50ms', action: 'Action Dispatched', details: 'Sent to target node' },
-                          { time: 'T+150ms', action: 'Twin Updated', details: 'State synchronized' }
-                        ] : undefined
+                        // No real per-event history source exists (Phase 3) -
+                        // omitted rather than fabricated. The real
+                        // correlation/pipeline trace is reachable via the
+                        // "View Trace" link below, when a correlationId
+                        // actually exists.
                       })}
                       className={`relative pl-8 pb-8 group cursor-pointer`}
                     >
@@ -157,7 +159,15 @@ export default function EventsPage() {
                           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#1f1f28]/50 text-xs font-mono text-muted-foreground">
                             <Hash size={12} className="text-purple-400" />
                             {event.correlationId}
-                            <span className="ml-auto text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">View Trace &rarr;</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/pipeline?correlationId=${encodeURIComponent(event.correlationId)}`);
+                              }}
+                              className="ml-auto text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
+                            >
+                              View Trace &rarr;
+                            </button>
                           </div>
                         )}
                       </div>

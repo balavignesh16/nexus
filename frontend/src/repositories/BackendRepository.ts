@@ -132,7 +132,7 @@ export class BackendActionRepository implements IActionRepository {
   async getActions(deviceId?: string, limit: number = 50): Promise<any[]> {
     let url = `${API_BASE}/actions/history?limit=${limit}`;
     if (deviceId) url += `&deviceId=${deviceId}`;
-    
+
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch actions: ${response.status}`);
@@ -140,12 +140,23 @@ export class BackendActionRepository implements IActionRepository {
     const data = await response.json();
     return data.content || data || [];
   }
+
+  async getActionsByMatchId(matchId: string): Promise<any[]> {
+    const response = await fetch(`${API_BASE}/actions/history?matchId=${encodeURIComponent(matchId)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch actions for match: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.content || data || [];
+  }
 }
 
 export class BackendPipelineRepository implements IPipelineRepository {
-  async getPipelineHistory(limit?: number): Promise<PipelineTracePayload[]> {
+  async getPipelineHistory(limit?: number, deviceId?: string): Promise<PipelineTracePayload[]> {
     try {
-      const response = await fetch(`${API_BASE}/pipeline/history?limit=${limit || 100}`);
+      let url = `${API_BASE}/pipeline/history?limit=${limit || 100}`;
+      if (deviceId) url += `&deviceId=${encodeURIComponent(deviceId)}`;
+      const response = await fetch(url);
       if (!response.ok) return [];
       return await response.json();
     } catch (e) {

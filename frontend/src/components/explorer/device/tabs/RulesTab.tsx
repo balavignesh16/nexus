@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus, AlertTriangle, Sparkles, Clock } from 'lucide-react';
 import { Skeleton } from '../../../ui/Skeleton';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { DebugOverlay } from '../DebugOverlay';
 import { CreateRuleModal } from '../CreateRuleModal';
+import { aiApi } from '../../../../api/aiApi';
 
 export function RulesTab({ deviceId }: { deviceId: string }) {
   const { rules } = useRepositories();
@@ -14,6 +16,16 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
     { interval: 30000 }
   );
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Phase 3: this device's real recent rule-match history, via the
+  // persisted eventId -> DomainEvent.deviceId relationship
+  // (RuleMatchRepository#findByDeviceId) - the rule *definitions* above
+  // show what could match; this shows what actually did.
+  const { data: recentMatches = [], isLoading: matchesLoading, isError: matchesError } = usePolling(
+    ['rule-matches', 'device', deviceId],
+    () => aiApi.getRuleMatchHistory(20, undefined, undefined, deviceId),
+    { interval: 30000 }
+  );
 
   if (isLoading) return <Skeleton className="w-full h-full" />;
 
@@ -129,6 +141,47 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Recent Matches - real, device-scoped rule-match history (Phase 3):
+          what actually fired against this device, distinct from the rule
+          definitions above. Links to the same real, evidence-grounded AI
+          explanation experience (never a second investigation page). */}
+      <div className="shrink-0 bg-card/50 backdrop-blur border border-border/50 rounded-xl shadow-sm max-h-64 flex flex-col">
+        <div className="p-4 pb-2 flex items-center gap-3 shrink-0">
+          <div className="p-2 bg-primary/10 rounded-lg">
+            <Sparkles size={18} className="text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Recent Matches</h3>
+            <p className="text-xs text-muted-foreground">What actually fired against this device</p>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 pb-4">
+          {matchesLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : matchesError ? (
+            <p data-testid="recent-matches-error" className="text-xs text-destructive py-2">Could not load recent matches for this device.</p>
+          ) : recentMatches.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2">No rule matches recorded for this device yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {recentMatches.map((m: any) => (
+                <Link
+                  key={m.matchId}
+                  to={`/ai?matchId=${m.matchId}`}
+                  className="flex items-center justify-between gap-3 bg-surface border border-surface-border rounded-lg px-3 py-2 text-xs hover:border-primary/30 transition-colors group"
+                >
+                  <span className="font-medium text-foreground truncate group-hover:text-primary transition-colors">{m.ruleName ?? 'Unnamed rule'}</span>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+                    <Clock size={10} />
+                    {new Date(m.matchedAt).toLocaleString()}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <CreateRuleModal

@@ -1,12 +1,22 @@
 package com.nexus.rule.persistence;
 
+import com.nexus.building.domain.Building;
+import com.nexus.building.persistence.BuildingRepository;
+import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceRepository;
+import com.nexus.device.domain.DeviceType;
 import com.nexus.event.domain.DomainEvent;
 import com.nexus.event.domain.DomainEventRepository;
 import com.nexus.event.domain.EventType;
+import com.nexus.site.domain.Site;
+import com.nexus.site.persistence.SiteRepository;
+import com.nexus.space.domain.Space;
+import com.nexus.space.persistence.SpaceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -59,11 +69,34 @@ class RuleMatchRepositoryIntegrationTest {
     private DomainEventRepository domainEventRepository;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private SiteRepository siteRepository;
+    @Autowired
+    private BuildingRepository buildingRepository;
+    @Autowired
+    private SpaceRepository spaceRepository;
+    @Autowired
+    private DeviceRepository deviceRepository;
 
     @BeforeEach
     void setUp() {
         ruleMatchRepository.deleteAll();
         domainEventRepository.deleteAll();
+        deviceRepository.deleteAll();
+        spaceRepository.deleteAll();
+        buildingRepository.deleteAll();
+        siteRepository.deleteAll();
+    }
+
+    /** A real, persisted device (Phase 3) - domain_events.device_id has a real FK to devices. */
+    private UUID persistedDevice(String serialSuffix) {
+        Instant now = Instant.now();
+        Site site = siteRepository.save(new Site(UUID.randomUUID(), "Rule Match Site", "d", now, now));
+        Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "B1", "d", now, now));
+        Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "S1", "d", now, now));
+        Device device = deviceRepository.save(new Device(UUID.randomUUID(), space, "Device " + serialSuffix,
+                DeviceType.TEMPERATURE_SENSOR, "Acme", "T1", "SN-RULEMATCH-" + serialSuffix, "d"));
+        return device.getId();
     }
 
     private Map<String, Object> richRuleSnapshot(String name) {
@@ -101,8 +134,15 @@ class RuleMatchRepositoryIntegrationTest {
         // durable domain_events row to reference by event_id, not a real
         // device row (out of scope for this phase, and devices is not
         // otherwise touched by this test).
+        return persistedDomainEvent(null);
+    }
+
+    private DomainEvent persistedDomainEvent(UUID deviceId) {
+        // device_id has no FK constraint to devices (Phase 3's findByDeviceId
+        // test below only needs a real, durable domain_events row carrying a
+        // real device_id value to join against - not a real devices row).
         DomainEvent event = new DomainEvent(
-                UUID.randomUUID(), EventType.TWIN_UPDATED, null, Instant.now(),
+                UUID.randomUUID(), EventType.TWIN_UPDATED, deviceId, Instant.now(),
                 "test", Map.of("value", 34.7), "INFO", "corr-" + UUID.randomUUID());
         return domainEventRepository.save(event);
     }
@@ -292,5 +332,48 @@ class RuleMatchRepositoryIntegrationTest {
 
         assertEquals(4, ruleMatchRepository.count());
         assertFalse(ruleMatchRepository.findAll().isEmpty());
+    }
+
+    // ---------- Device-scoped rule-match history (Phase 3) ----------
+    // Real evidence: RuleMatchEntity has no deviceId column of its own -
+    // findByDeviceId joins through the real, persisted eventId -> DomainEvent
+    // relationship, never an invented/duplicated field.
+
+    @Test
+    void findByDeviceId_returnsOnlyMatchesTriggeredByThatDevicesEvents() {
+        UUID deviceA = persistedDevice("A");
+        UUID deviceB = persistedDevice("B");
+        DomainEvent eventFromA = persistedDomainEvent(deviceA);
+        DomainEvent eventFromB = persistedDomainEvent(deviceB);
+        ruleMatchRepository.save(richMatch(UUID.randomUUID(), eventFromA.eventId(), "corr-device-a"));
+        ruleMatchRepository.save(richMatch(UUID.randomUUID(), eventFromB.eventId(), "corr-device-b"));
+
+        var page = ruleMatchRepository.findByDeviceId(deviceA, PageRequest.of(0, 100));
+
+        assertEquals(1, page.getContent().size());
+        assertEquals(eventFromA.eventId(), page.getContent().get(0).getEventId());
+    }
+
+    @Test
+    void findByDeviceId_deviceWithNoMatches_returnsEmptyNotError() {
+        UUID deviceWithNoMatches = persistedDevice("C");
+        UUID otherDevice = persistedDevice("D");
+        DomainEvent eventFromOther = persistedDomainEvent(otherDevice);
+        ruleMatchRepository.save(richMatch(UUID.randomUUID(), eventFromOther.eventId(), "corr-other"));
+
+        var page = ruleMatchRepository.findByDeviceId(deviceWithNoMatches, PageRequest.of(0, 100));
+
+        assertTrue(page.getContent().isEmpty());
+    }
+
+    @Test
+    void findByDeviceId_matchFromEventWithNullDeviceId_neverMatchesARealDevice() {
+        DomainEvent systemEvent = persistedDomainEvent();
+        ruleMatchRepository.save(richMatch(UUID.randomUUID(), systemEvent.eventId(), "corr-system"));
+        UUID realDevice = persistedDevice("E");
+
+        var page = ruleMatchRepository.findByDeviceId(realDevice, PageRequest.of(0, 100));
+
+        assertTrue(page.getContent().isEmpty());
     }
 }

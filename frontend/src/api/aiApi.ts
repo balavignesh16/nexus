@@ -48,10 +48,39 @@ export interface RuleMatchSummary {
   message: string | null;
 }
 
+/**
+ * Mirrors com.nexus.action.api.dto.ActionHistoryResponse - the real action
+ * triggered by a rule match (Phase 3), via the already-persisted
+ * ActionHistoryRecord.matchId FK. ackStatus is null for NO_ACK_YET, never
+ * a synthesized value.
+ */
+export interface MatchAction {
+  executionId: string;
+  requestId: string;
+  matchId: string | null;
+  deviceId: string | null;
+  actionType: string;
+  status: string;
+  timestamp: string;
+  message: string | null;
+  ackStatus: 'ACCEPTED' | 'REJECTED' | null;
+  ackReceivedAt: string | null;
+  ackMessage: string | null;
+}
+
 export const aiApi = {
-  getRuleMatchHistory: (limit = 50) =>
-    apiClient.get<RuleMatchSummary[]>(`/rule-matches/history?limit=${limit}`),
+  getRuleMatchHistory: (limit = 50, ruleId?: string, correlationId?: string, deviceId?: string) => {
+    let url = `/rule-matches/history?limit=${limit}`;
+    if (ruleId) url += `&ruleId=${encodeURIComponent(ruleId)}`;
+    if (correlationId) url += `&correlationId=${encodeURIComponent(correlationId)}`;
+    if (deviceId) url += `&deviceId=${encodeURIComponent(deviceId)}`;
+    return apiClient.get<RuleMatchSummary[]>(url);
+  },
 
   explainRuleMatch: (matchId: string) =>
     apiClient.get<RuleMatchExplanation>(`/ai/explanations/rule-match/${matchId}`),
+
+  // Phase 3: the real actions this rule match actually triggered.
+  getActionsForMatch: (matchId: string) =>
+    apiClient.get<MatchAction[]>(`/actions/history?matchId=${encodeURIComponent(matchId)}`),
 };

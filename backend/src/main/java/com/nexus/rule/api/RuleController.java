@@ -149,12 +149,20 @@ public class RuleController {
      * not the volatile BoundedRuleMatchStore above, so results survive a
      * restart. Ordered matchedAt DESC with matchId DESC as a stable
      * tie-break for matches sharing a timestamp.
+     *
+     * Optional {@code deviceId} filter (Phase 3): a device's real recent
+     * rule-match history, via the persisted eventId -> DomainEvent.deviceId
+     * relationship (see RuleMatchRepository#findByDeviceId) - never a
+     * fabricated correlation. At most one of ruleId/correlationId/deviceId
+     * may be supplied at a time; omitted, all preserve the unfiltered
+     * default for existing callers.
      */
     @GetMapping("/rule-matches/history")
     public ResponseEntity<List<RuleMatchSummaryResponse>> getRuleMatchHistory(
             @RequestParam(name = "limit", defaultValue = "100") int limit,
             @RequestParam(name = "ruleId", required = false) UUID ruleId,
-            @RequestParam(name = "correlationId", required = false) String correlationId) {
+            @RequestParam(name = "correlationId", required = false) String correlationId,
+            @RequestParam(name = "deviceId", required = false) UUID deviceId) {
         if (limit <= 0 || limit > MAX_HISTORY_LIMIT) {
             throw new IllegalArgumentException("limit must be between 1 and " + MAX_HISTORY_LIMIT);
         }
@@ -166,6 +174,8 @@ public class RuleController {
             page = ruleMatchRepository.findByRuleId(ruleId, pageable);
         } else if (correlationId != null) {
             page = ruleMatchRepository.findByCorrelationId(correlationId, pageable);
+        } else if (deviceId != null) {
+            page = ruleMatchRepository.findByDeviceId(deviceId, pageable);
         } else {
             page = ruleMatchRepository.findAll(pageable);
         }

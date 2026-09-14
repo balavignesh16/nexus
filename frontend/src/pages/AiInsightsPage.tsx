@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Sparkles, Hash, Clock, CheckCircle2, HelpCircle, Lightbulb } from 'lucide-react';
-import { aiApi, type RuleMatchExplanation, type Claim } from '../api/aiApi';
+import { useSearchParams } from 'react-router-dom';
+import { Sparkles, Hash, Clock, CheckCircle2, HelpCircle, Lightbulb, Zap } from 'lucide-react';
+import { aiApi, type RuleMatchExplanation, type Claim, type MatchAction } from '../api/aiApi';
 import { ApiError } from '../api/apiClient';
 import { DataSourceBadge } from '../components/ui/DataSourceBadge';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -16,7 +17,10 @@ import { usePolling } from '../hooks/usePolling';
  * classifications.
  */
 export default function AiInsightsPage() {
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  // Phase 3: deep-linked investigation entry point - e.g. from a device's
+  // real "Recent Matches" list (RulesTab.tsx).
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() => searchParams.get('matchId'));
 
   const { data: matches = [], isLoading: matchesLoading } = usePolling(
     ['rule-match-history'],
@@ -31,6 +35,16 @@ export default function AiInsightsPage() {
   } = usePolling<RuleMatchExplanation, ApiError>(
     ['rule-match-explanation', selectedMatchId],
     () => aiApi.explainRuleMatch(selectedMatchId as string),
+    { interval: 0, enabled: selectedMatchId !== null, retry: false }
+  );
+
+  // Phase 3: the real actions this rule match triggered, via the
+  // already-persisted ActionHistoryRecord.matchId FK - independent of
+  // whether the AI explanation itself loaded successfully, so it remains
+  // usable even when AI is disabled/unavailable.
+  const { data: matchActions, isLoading: actionsLoading, error: actionsError } = usePolling<MatchAction[]>(
+    ['rule-match-actions', selectedMatchId],
+    () => aiApi.getActionsForMatch(selectedMatchId as string),
     { interval: 0, enabled: selectedMatchId !== null, retry: false }
   );
 
@@ -87,33 +101,41 @@ export default function AiInsightsPage() {
         </div>
       </div>
 
-      {/* RIGHT: EXPLANATION */}
+      {/* RIGHT: EXPLANATION + RESULTING ACTIONS */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {selectedMatchId === null ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 text-muted-foreground">
             <Sparkles size={32} className="opacity-20" />
             <p className="text-sm">Select a rule match to view its evidence-grounded explanation.</p>
           </div>
-        ) : explanationLoading ? (
-          <div className="flex-1 p-8 space-y-4">
-            <Skeleton className="h-8 w-1/3" />
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
+        ) : (
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-6 max-w-3xl">
+            {/* Explanation - independent of the Resulting Actions section
+                below: an AI-unavailable/explanation error never hides the
+                real action evidence, and vice versa (Phase 3). */}
+            {explanationLoading ? (
+              <div className="space-y-4">
+                <Skeleton className="h-8 w-1/3" />
+                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : explanationError ? (
+              <div className="py-4">
+                {explanationError.status === 404 ? (
+                  <p data-testid="explanation-error" className="text-sm text-muted-foreground">This rule match no longer exists.</p>
+                ) : explanationError.status === 429 ? (
+                  <p data-testid="explanation-error" className="text-sm text-muted-foreground">Too many explanation requests — try again in a moment.</p>
+                ) : (
+                  <p data-testid="explanation-error" className="text-sm text-destructive">{explanationError.message}</p>
+                )}
+              </div>
+            ) : explanation ? (
+              <ExplanationView explanation={explanation} />
+            ) : null}
+
+            <ResultingActionsSection actions={matchActions} isLoading={actionsLoading} error={actionsError} />
           </div>
-        ) : explanationError ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 px-8">
-            {explanationError.status === 404 ? (
-              <p data-testid="explanation-error" className="text-sm text-muted-foreground">This rule match no longer exists.</p>
-            ) : explanationError.status === 429 ? (
-              <p data-testid="explanation-error" className="text-sm text-muted-foreground">Too many explanation requests — try again in a moment.</p>
-            ) : (
-              <p data-testid="explanation-error" className="text-sm text-destructive">{explanationError.message}</p>
-            )}
-          </div>
-        ) : explanation ? (
-          <ExplanationView explanation={explanation} />
-        ) : null}
+        )}
       </div>
     </div>
   );
@@ -121,7 +143,7 @@ export default function AiInsightsPage() {
 
 function ExplanationView({ explanation }: { explanation: RuleMatchExplanation }) {
   return (
-    <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-6 max-w-3xl">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Explanation</h2>
         <DataSourceBadge
@@ -141,6 +163,59 @@ function ExplanationView({ explanation }: { explanation: RuleMatchExplanation })
       {explanation.actionNote && (
         <div className="bg-surface border border-surface-border rounded-lg p-4 text-xs text-muted-foreground">
           {explanation.actionNote}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The real actions this rule match triggered (Phase 3) - via the
+ * already-persisted ActionHistoryRecord.matchId FK, never a fabricated
+ * relationship. Reuses the exact ACCEPTED/REJECTED/NO_ACK_YET semantics
+ * and coloring already established on Analytics/ActionsTab: an absent
+ * ackStatus is NO_ACK_YET, never rendered as a failure.
+ */
+function ResultingActionsSection({ actions, isLoading, error }: { actions: MatchAction[] | undefined; isLoading: boolean; error: unknown }) {
+  const ackLabel = (ackStatus: MatchAction['ackStatus']) => {
+    if (ackStatus === 'ACCEPTED') return { label: 'ACCEPTED', className: 'bg-success/10 text-success' };
+    if (ackStatus === 'REJECTED') return { label: 'REJECTED', className: 'bg-destructive/10 text-destructive' };
+    return { label: 'NO ACK YET', className: 'bg-muted/30 text-muted-foreground' };
+  };
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-surface-border">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+        <Zap size={12} /> Resulting Actions
+      </h3>
+      {isLoading ? (
+        <Skeleton className="h-16 w-full" />
+      ) : error ? (
+        <p data-testid="match-actions-error" className="text-xs text-destructive">Could not load actions for this match.</p>
+      ) : !actions || actions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No actions were recorded for this rule match.</p>
+      ) : (
+        <div className="space-y-2">
+          {actions.map((action) => (
+            <div key={action.executionId} className="bg-surface border border-surface-border rounded-lg p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-foreground truncate">{action.actionType}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">{new Date(action.timestamp).toLocaleString()}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                  action.status === 'FAILURE' ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success'
+                }`}>
+                  {action.status}
+                </span>
+                {action.actionType === 'SEND_COMMAND' && (
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${ackLabel(action.ackStatus).className}`}>
+                    {ackLabel(action.ackStatus).label}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -167,17 +167,30 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
     return this.demoAction.getActions(deviceId, limit);
   }
 
-  async getPipelineHistory(limit?: number): Promise<PipelineTracePayload[]> {
+  async getActionsByMatchId(matchId: string): Promise<any[]> {
     if (!FEATURES.DEMO_MODE) {
-      return this.backendPipeline.getPipelineHistory(limit);
+      return this.backendAction.getActionsByMatchId(matchId);
     }
     try {
-      const data = await this.backendPipeline.getPipelineHistory(limit);
+      const data = await this.backendAction.getActionsByMatchId(matchId);
       if (data && data.length > 0) return data;
     } catch (e) {
       // Fallback
     }
-    return this.demoPipeline.getPipelineHistory(limit);
+    return this.demoAction.getActionsByMatchId(matchId);
+  }
+
+  async getPipelineHistory(limit?: number, deviceId?: string): Promise<PipelineTracePayload[]> {
+    if (!FEATURES.DEMO_MODE) {
+      return this.backendPipeline.getPipelineHistory(limit, deviceId);
+    }
+    try {
+      const data = await this.backendPipeline.getPipelineHistory(limit, deviceId);
+      if (data && data.length > 0) return data;
+    } catch (e) {
+      // Fallback
+    }
+    return this.demoPipeline.getPipelineHistory(limit, deviceId);
   }
 
   async getPipelineByCorrelationId(correlationId: string): Promise<PipelineTracePayload[]> {

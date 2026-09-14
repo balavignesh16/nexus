@@ -75,7 +75,7 @@ class RuleControllerTest {
         when(ruleMatchRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(entity)));
 
         ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchSummaryResponse>> response =
-                controller.getRuleMatchHistory(100, null, null);
+                controller.getRuleMatchHistory(100, null, null, null);
 
         assertEquals(1, response.getBody().size());
         assertEquals(entity.getMatchId(), response.getBody().get(0).matchId());
@@ -89,7 +89,7 @@ class RuleControllerTest {
         when(ruleMatchRepository.findByRuleId(eq(ruleId), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(entity)));
 
         ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchSummaryResponse>> response =
-                controller.getRuleMatchHistory(100, ruleId, null);
+                controller.getRuleMatchHistory(100, ruleId, null, null);
 
         assertEquals(1, response.getBody().size());
         verify(ruleMatchRepository).findByRuleId(eq(ruleId), any(Pageable.class));
@@ -101,7 +101,7 @@ class RuleControllerTest {
         when(ruleMatchRepository.findByCorrelationId(eq("corr-3"), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(entity)));
 
         ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchSummaryResponse>> response =
-                controller.getRuleMatchHistory(100, null, "corr-3");
+                controller.getRuleMatchHistory(100, null, "corr-3", null);
 
         assertEquals(1, response.getBody().size());
         verify(ruleMatchRepository).findByCorrelationId(eq("corr-3"), any(Pageable.class));
@@ -109,24 +109,50 @@ class RuleControllerTest {
 
     @Test
     void getRuleMatchHistory_zeroLimit_rejected() {
-        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(0, null, null));
+        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(0, null, null, null));
     }
 
     @Test
     void getRuleMatchHistory_negativeLimit_rejected() {
-        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(-1, null, null));
+        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(-1, null, null, null));
     }
 
     @Test
     void getRuleMatchHistory_limitOverMax_rejected() {
-        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(501, null, null));
+        assertThrows(IllegalArgumentException.class, () -> controller.getRuleMatchHistory(501, null, null, null));
     }
 
     @Test
     void getRuleMatchHistory_limitAtMax_accepted() {
         when(ruleMatchRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
-        assertEquals(200, controller.getRuleMatchHistory(500, null, null).getStatusCode().value());
+        assertEquals(200, controller.getRuleMatchHistory(500, null, null, null).getStatusCode().value());
+    }
+
+    @Test
+    void getRuleMatchHistory_deviceIdFilter_usesFindByDeviceId() {
+        UUID deviceA = UUID.randomUUID();
+        RuleMatchEntity entity = sampleEntity(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), "corr-4");
+        when(ruleMatchRepository.findByDeviceId(eq(deviceA), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(entity)));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchSummaryResponse>> response =
+                controller.getRuleMatchHistory(100, null, null, deviceA);
+
+        assertEquals(1, response.getBody().size());
+        verify(ruleMatchRepository).findByDeviceId(eq(deviceA), any(Pageable.class));
+        verify(ruleMatchRepository, org.mockito.Mockito.never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void getRuleMatchHistory_deviceIdWithNoMatches_returnsEmptyListNotError() {
+        UUID unknownDevice = UUID.randomUUID();
+        when(ruleMatchRepository.findByDeviceId(eq(unknownDevice), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        ResponseEntity<List<com.nexus.rule.api.dto.RuleMatchSummaryResponse>> response =
+                controller.getRuleMatchHistory(100, null, null, unknownDevice);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(0, response.getBody().size());
     }
 
     @Test

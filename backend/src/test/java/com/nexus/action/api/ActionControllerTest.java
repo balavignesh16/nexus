@@ -57,7 +57,7 @@ class ActionControllerTest {
         when(historyRepository.findAllByOrderByTimestampDesc(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(record(UUID.randomUUID(), null))));
 
-        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, null);
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, null, null);
 
         assertEquals(1, response.getBody().size());
         verify(historyRepository).findAllByOrderByTimestampDesc(any(Pageable.class));
@@ -69,7 +69,7 @@ class ActionControllerTest {
         when(historyRepository.findByDeviceIdOrderByTimestampDesc(eq(deviceA), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(record(deviceA, AcknowledgementStatus.ACCEPTED))));
 
-        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA);
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA, null);
 
         assertEquals(1, response.getBody().size());
         assertEquals(deviceA, response.getBody().get(0).deviceId());
@@ -82,7 +82,7 @@ class ActionControllerTest {
         when(historyRepository.findByDeviceIdOrderByTimestampDesc(eq(deviceA), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
 
-        controller.getActionHistory(100, deviceA);
+        controller.getActionHistory(100, deviceA, null);
 
         verify(historyRepository, org.mockito.Mockito.never()).findAllByOrderByTimestampDesc(any(Pageable.class));
     }
@@ -93,7 +93,7 @@ class ActionControllerTest {
         when(historyRepository.findByDeviceIdOrderByTimestampDesc(eq(deviceA), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(record(deviceA, null))));
 
-        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA);
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA, null);
 
         ActionHistoryResponse action = response.getBody().get(0);
         assertEquals(ExecutionStatus.SUCCESS, action.status());
@@ -106,8 +106,44 @@ class ActionControllerTest {
         when(historyRepository.findByDeviceIdOrderByTimestampDesc(eq(deviceA), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(record(deviceA, AcknowledgementStatus.ACCEPTED))));
 
-        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA);
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, deviceA, null);
 
         assertEquals(AcknowledgementStatus.ACCEPTED, response.getBody().get(0).ackStatus());
+    }
+
+    @Test
+    void getActionHistory_matchIdFilter_returnsOnlyActionsFromThatMatch() {
+        UUID matchId = UUID.randomUUID();
+        when(historyRepository.findByMatchId(matchId))
+                .thenReturn(List.of(record(UUID.randomUUID(), AcknowledgementStatus.ACCEPTED)));
+
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, null, matchId);
+
+        assertEquals(1, response.getBody().size());
+        verify(historyRepository).findByMatchId(matchId);
+        verify(historyRepository, org.mockito.Mockito.never()).findAllByOrderByTimestampDesc(any(Pageable.class));
+    }
+
+    @Test
+    void getActionHistory_matchIdTakesPrecedenceOverDeviceId() {
+        UUID matchId = UUID.randomUUID();
+        UUID deviceA = UUID.randomUUID();
+        when(historyRepository.findByMatchId(matchId)).thenReturn(List.of());
+
+        controller.getActionHistory(100, deviceA, matchId);
+
+        verify(historyRepository).findByMatchId(matchId);
+        verify(historyRepository, org.mockito.Mockito.never()).findByDeviceIdOrderByTimestampDesc(any(UUID.class), any(Pageable.class));
+    }
+
+    @Test
+    void getActionHistory_matchIdWithNoActions_returnsEmptyListNotError() {
+        UUID matchId = UUID.randomUUID();
+        when(historyRepository.findByMatchId(matchId)).thenReturn(List.of());
+
+        ResponseEntity<List<ActionHistoryResponse>> response = controller.getActionHistory(100, null, matchId);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(0, response.getBody().size());
     }
 }

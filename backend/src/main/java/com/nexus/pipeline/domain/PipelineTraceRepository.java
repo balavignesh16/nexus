@@ -11,4 +11,9 @@ import java.util.List;
 public interface PipelineTraceRepository extends JpaRepository<PipelineTrace, PipelineTraceId> {
     Page<PipelineTrace> findAllByOrderByStartTimestampDesc(Pageable pageable);
     List<PipelineTrace> findByCorrelationIdOrderByStartTimestampAsc(String correlationId);
+
+    // Phase 3: device-scoped pipeline history, mirroring the same
+    // device-isolation pattern already established for /rules, /events,
+    // and /actions/history.
+    Page<PipelineTrace> findByDeviceIdOrderByStartTimestampDesc(String deviceId, Pageable pageable);
 }

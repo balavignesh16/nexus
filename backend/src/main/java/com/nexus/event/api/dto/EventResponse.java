@@ -13,7 +13,8 @@ public record EventResponse(
     Instant timestamp,
     String source,
     Map<String, Object> payload,
-    String severity
+    String severity,
+    String correlationId
 ) {
     public static EventResponse from(DomainEvent event) {
         return new EventResponse(
@@ -23,7 +24,8 @@ public record EventResponse(
                 event.timestamp(),
                 event.source(),
                 event.payload(),
-                event.severity()
+                event.severity(),
+                event.correlationId()
         );
     }
 }

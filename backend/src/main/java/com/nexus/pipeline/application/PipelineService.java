@@ -33,6 +33,11 @@ public class PipelineService {
         return repository.findAllByOrderByStartTimestampDesc(PageRequest.of(0, limit)).getContent();
     }
 
+    /** Device-scoped pipeline history (Phase 3) - real deviceId column, no invented relationship. */
+    public List<PipelineTrace> getHistoryForDevice(String deviceId, int limit) {
+        return repository.findByDeviceIdOrderByStartTimestampDesc(deviceId, PageRequest.of(0, limit)).getContent();
+    }
+
     public List<PipelineTrace> getByCorrelationId(String correlationId) {
         return repository.findByCorrelationIdOrderByStartTimestampAsc(correlationId);
     }

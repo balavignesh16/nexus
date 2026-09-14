@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import AiInsightsPage from './AiInsightsPage';
 import { aiApi } from '../api/aiApi';
 import { ApiError } from '../api/apiClient';
@@ -12,15 +13,18 @@ vi.mock('../api/aiApi', async () => {
     aiApi: {
       getRuleMatchHistory: vi.fn(),
       explainRuleMatch: vi.fn(),
+      getActionsForMatch: vi.fn(),
     },
   };
 });
 
-function renderPage() {
+function renderPage(initialPath = '/ai') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <AiInsightsPage />
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AiInsightsPage />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -37,9 +41,27 @@ function match(overrides: Partial<{ matchId: string; ruleId: string; ruleName: s
   };
 }
 
+function matchAction(overrides: Partial<{ executionId: string; actionType: string; status: string; timestamp: string; ackStatus: 'ACCEPTED' | 'REJECTED' | null }> = {}) {
+  return {
+    executionId: 'exec-1',
+    requestId: 'exec-1',
+    matchId: 'match-1',
+    deviceId: 'device-1',
+    actionType: 'SEND_COMMAND',
+    status: 'SUCCESS',
+    timestamp: '2026-01-01T00:05:00Z',
+    message: 'Published',
+    ackStatus: null,
+    ackReceivedAt: null,
+    ackMessage: null,
+    ...overrides,
+  };
+}
+
 describe('AiInsightsPage - evidence-grounded rule-match explanations, never a chatbot', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(aiApi.getActionsForMatch).mockResolvedValue([]);
   });
 
   it('renders no chat input, no send button, no fabricated sample content', async () => {
@@ -138,5 +160,73 @@ describe('AiInsightsPage - evidence-grounded rule-match explanations, never a ch
     fireEvent.click(screen.getByTestId('rule-match-match-1'));
 
     await waitFor(() => expect(screen.getByTestId('explanation-error')).toHaveTextContent('Internal Server Error'));
+  });
+
+  it('shows an honest empty state when the match triggered no actions', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
+      matchId: 'match-1', summary: 'x', claims: [], actionNote: null, generatedBy: 'DETERMINISTIC_FALLBACK',
+    });
+    vi.mocked(aiApi.getActionsForMatch).mockResolvedValue([]);
+    renderPage();
+
+    await waitFor(() => screen.getByText('High Temperature Alert'));
+    fireEvent.click(screen.getByTestId('rule-match-match-1'));
+
+    await waitFor(() => expect(screen.getByText('No actions were recorded for this rule match.')).toBeInTheDocument());
+  });
+
+  it('renders real resulting actions with correct execution status and ack status', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
+      matchId: 'match-1', summary: 'x', claims: [], actionNote: null, generatedBy: 'DETERMINISTIC_FALLBACK',
+    });
+    vi.mocked(aiApi.getActionsForMatch).mockResolvedValue([matchAction({ ackStatus: 'ACCEPTED' })]);
+    renderPage();
+
+    await waitFor(() => screen.getByText('High Temperature Alert'));
+    fireEvent.click(screen.getByTestId('rule-match-match-1'));
+
+    await waitFor(() => expect(screen.getByText('SEND_COMMAND')).toBeInTheDocument());
+    expect(screen.getByText('ACCEPTED')).toBeInTheDocument();
+  });
+
+  it('shows NO ACK YET (never FAILURE) when a resulting action has no ack yet', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
+      matchId: 'match-1', summary: 'x', claims: [], actionNote: null, generatedBy: 'DETERMINISTIC_FALLBACK',
+    });
+    vi.mocked(aiApi.getActionsForMatch).mockResolvedValue([matchAction({ ackStatus: null })]);
+    renderPage();
+
+    await waitFor(() => screen.getByText('High Temperature Alert'));
+    fireEvent.click(screen.getByTestId('rule-match-match-1'));
+
+    await waitFor(() => expect(screen.getByText('NO ACK YET')).toBeInTheDocument());
+    expect(screen.queryByText('FAILURE')).not.toBeInTheDocument();
+  });
+
+  it('still shows resulting actions when the AI explanation itself errors - investigation UI stays usable', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockRejectedValue(new ApiError(500, 'NIM unavailable'));
+    vi.mocked(aiApi.getActionsForMatch).mockResolvedValue([matchAction({ ackStatus: 'REJECTED' })]);
+    renderPage();
+
+    await waitFor(() => screen.getByText('High Temperature Alert'));
+    fireEvent.click(screen.getByTestId('rule-match-match-1'));
+
+    await waitFor(() => expect(screen.getByTestId('explanation-error')).toBeInTheDocument());
+    expect(screen.getByText('REJECTED')).toBeInTheDocument();
+  });
+
+  it('deep-links directly to a match via ?matchId= in the URL (from RulesTab "Recent Matches")', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
+      matchId: 'match-1', summary: 'Deep-linked explanation.', claims: [], actionNote: null, generatedBy: 'DETERMINISTIC_FALLBACK',
+    });
+    renderPage('/ai?matchId=match-1');
+
+    await waitFor(() => expect(aiApi.explainRuleMatch).toHaveBeenCalledWith('match-1'));
+    await waitFor(() => expect(screen.getByText('Deep-linked explanation.')).toBeInTheDocument());
   });
 });

@@ -406,7 +406,7 @@ class RuleRegistryPersistenceIntegrationTest {
         registry.register(rule);
         triggerRealMatch(registry, rule, 34.7, "corr-list-api");
 
-        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, null);
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, null, null);
 
         assertTrue(response.getBody().stream().anyMatch(m -> "History List Rule".equals(m.ruleName())));
     }
@@ -421,7 +421,7 @@ class RuleRegistryPersistenceIntegrationTest {
         triggerRealMatch(registry, rule, 31.0, "corr-order-1");
         triggerRealMatch(registry, rule, 32.0, "corr-order-2");
 
-        var response = ruleMatchHistoryController().getRuleMatchHistory(100, rule.ruleId(), null);
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, rule.ruleId(), null, null);
 
         List<Instant> timestamps = response.getBody().stream().map(m -> m.matchedAt()).toList();
         assertTrue(timestamps.size() >= 2);
@@ -444,7 +444,7 @@ class RuleRegistryPersistenceIntegrationTest {
         triggerRealMatch(registry, ruleA, 35.0, "corr-filter-a");
         triggerRealMatch(registry, ruleB, 36.0, "corr-filter-b");
 
-        var response = ruleMatchHistoryController().getRuleMatchHistory(100, ruleA.ruleId(), null);
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, ruleA.ruleId(), null, null);
 
         assertTrue(response.getBody().stream().allMatch(m -> m.ruleId().equals(ruleA.ruleId())));
         assertTrue(response.getBody().stream().anyMatch(m -> "Filter Rule A".equals(m.ruleName())));
@@ -459,7 +459,7 @@ class RuleRegistryPersistenceIntegrationTest {
         registry.register(rule);
         triggerRealMatch(registry, rule, 33.0, "corr-unique-xyz");
 
-        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, "corr-unique-xyz");
+        var response = ruleMatchHistoryController().getRuleMatchHistory(100, null, "corr-unique-xyz", null);
 
         assertEquals(1, response.getBody().size());
         assertEquals("corr-unique-xyz", response.getBody().get(0).correlationId());
@@ -522,7 +522,7 @@ class RuleRegistryPersistenceIntegrationTest {
                 "a fresh BoundedRuleMatchStore must start empty, exactly as it would after a real restart");
 
         // ...but the durable history endpoint still returns the match.
-        var historyResponse = freshController.getRuleMatchHistory(100, null, "corr-restart");
+        var historyResponse = freshController.getRuleMatchHistory(100, null, "corr-restart", null);
         assertEquals(1, historyResponse.getBody().size());
 
         var detailResponse = freshController.getRuleMatchDetail(match.matchId());

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useRepositories } from '../repositories/RepositoryProvider';
 import { useConnectionStatus } from '../services/ConnectionManager';
@@ -10,10 +11,31 @@ import { CorrelationInspector } from '../components/pipeline/CorrelationInspecto
 export default function PipelinePage() {
   const { pipeline } = useRepositories();
   const connection = useConnectionStatus();
-  
-  const [selectedCorrelationId, setSelectedCorrelationId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Phase 3: deep-linked investigation entry point - e.g. from a real
+  // event's "View Trace" link (EventsPage.tsx). Opens the same real
+  // CorrelationInspector a user would reach by clicking a live trace; if
+  // the correlationId turns out not to exist, CorrelationInspector's own
+  // real empty state ("No trace details found.") is shown - never fabricated.
+  const [selectedCorrelationId, setSelectedCorrelationId] = useState<string | null>(
+    () => searchParams.get('correlationId')
+  );
   const [isPaused, setIsPaused] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState<number>(1);
+
+  const selectCorrelation = (correlationId: string | null) => {
+    setSelectedCorrelationId(correlationId);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (correlationId) next.set('correlationId', correlationId);
+        else next.delete('correlationId');
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   // Fetch initial history or metrics
   const { data: metrics } = useQuery({
@@ -39,19 +61,19 @@ export default function PipelinePage() {
 
       {/* Center: Live Pipeline Canvas */}
       <div className="flex-1 relative overflow-hidden">
-        <PipelineCanvas 
-          isPaused={isPaused} 
+        <PipelineCanvas
+          isPaused={isPaused}
           replaySpeed={replaySpeed}
-          onSelectCorrelation={setSelectedCorrelationId} 
+          onSelectCorrelation={selectCorrelation}
           selectedCorrelationId={selectedCorrelationId}
         />
-        
+
         {/* Right Sidebar: Correlation Inspector */}
         {selectedCorrelationId && (
           <div className="absolute top-0 right-0 bottom-0 w-80 bg-[#13131a] border-l border-[#1f1f28] shadow-2xl z-10">
-            <CorrelationInspector 
-              correlationId={selectedCorrelationId} 
-              onClose={() => setSelectedCorrelationId(null)} 
+            <CorrelationInspector
+              correlationId={selectedCorrelationId}
+              onClose={() => selectCorrelation(null)}
             />
           </div>
         )}
@@ -59,7 +81,7 @@ export default function PipelinePage() {
 
       {/* Bottom: Timeline */}
       <div className="h-64 shrink-0 border-t border-[#1f1f28] bg-[#0a0a0f]">
-        <PipelineTimeline onSelectCorrelation={setSelectedCorrelationId} />
+        <PipelineTimeline onSelectCorrelation={selectCorrelation} />
       </div>
       
     </div>

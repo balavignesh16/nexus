@@ -1,7 +1,7 @@
 package com.nexus.pipeline.api;
 
+import com.nexus.pipeline.api.dto.PipelineTraceResponse;
 import com.nexus.pipeline.application.PipelineService;
-import com.nexus.pipeline.domain.PipelineTrace;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,14 +17,27 @@ public class PipelineController {
         this.pipelineService = pipelineService;
     }
 
+    /**
+     * Optional {@code deviceId} filter (Phase 3): real, persisted
+     * PipelineTrace.deviceId column - never every trace in the system.
+     * Returns a purpose-built DTO, not the raw JPA entity.
+     */
     @GetMapping("/history")
-    public List<PipelineTrace> getHistory(@RequestParam(defaultValue = "100") int limit) {
-        return pipelineService.getHistory(limit);
+    public List<PipelineTraceResponse> getHistory(
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(name = "deviceId", required = false) String deviceId) {
+        if (deviceId != null && deviceId.isBlank()) {
+            throw new IllegalArgumentException("deviceId, if supplied, must not be blank");
+        }
+        var traces = deviceId != null
+                ? pipelineService.getHistoryForDevice(deviceId, limit)
+                : pipelineService.getHistory(limit);
+        return traces.stream().map(PipelineTraceResponse::from).toList();
     }
 
     @GetMapping("/{correlationId}")
-    public List<PipelineTrace> getByCorrelationId(@PathVariable String correlationId) {
-        return pipelineService.getByCorrelationId(correlationId);
+    public List<PipelineTraceResponse> getByCorrelationId(@PathVariable String correlationId) {
+        return pipelineService.getByCorrelationId(correlationId).stream().map(PipelineTraceResponse::from).toList();
     }
 
     @GetMapping("/metrics")

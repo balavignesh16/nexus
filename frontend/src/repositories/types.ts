@@ -74,10 +74,13 @@ export interface IRuleRepository {
 
 export interface IActionRepository {
   getActions(deviceId?: string, limit?: number): Promise<any[]>;
+  // Phase 3: the real actions triggered by one specific rule match, via the
+  // already-persisted ActionHistoryRecord.matchId FK.
+  getActionsByMatchId(matchId: string): Promise<any[]>;
 }
 
 export interface IPipelineRepository {
-  getPipelineHistory(limit?: number): Promise<PipelineTracePayload[]>;
+  getPipelineHistory(limit?: number, deviceId?: string): Promise<PipelineTracePayload[]>;
   getPipelineByCorrelationId(correlationId: string): Promise<PipelineTracePayload[]>;
   getPipelineMetrics(): Promise<any>;
 }

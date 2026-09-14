@@ -89,10 +89,16 @@ export class DemoActionRepository implements IActionRepository {
     
     return actions.slice(0, limit);
   }
+
+  async getActionsByMatchId(_matchId: string): Promise<any[]> {
+    // Demo mode has no real RuleMatch/Action correlation - honestly empty
+    // rather than fabricating a match-to-action relationship.
+    return [];
+  }
 }
 
 export class DemoPipelineRepository implements IPipelineRepository {
-  async getPipelineHistory(_limit?: number): Promise<PipelineTracePayload[]> {
+  async getPipelineHistory(_limit?: number, _deviceId?: string): Promise<PipelineTracePayload[]> {
     return []; // Start empty in demo, scenario engine will populate it live
   }
 

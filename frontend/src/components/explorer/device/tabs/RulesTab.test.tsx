@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 const mockGetRules = vi.fn();
 vi.mock('../../../../repositories/RepositoryProvider', () => ({
@@ -14,6 +15,11 @@ vi.mock('../../../../hooks/usePolling', () => ({
 const mockCreateRule = vi.fn();
 vi.mock('../../../../api/ruleApi', () => ({
   ruleApi: { createRule: (...args: any[]) => mockCreateRule(...args) },
+}));
+
+const mockGetRuleMatchHistory = vi.fn();
+vi.mock('../../../../api/aiApi', () => ({
+  aiApi: { getRuleMatchHistory: (...args: any[]) => mockGetRuleMatchHistory(...args) },
 }));
 
 import { RulesTab } from './RulesTab';
@@ -32,53 +38,82 @@ function rule(overrides: Record<string, any> = {}) {
   };
 }
 
+function match(overrides: Record<string, any> = {}) {
+  return {
+    matchId: 'match-1',
+    ruleId: 'r1',
+    ruleName: 'High Temp Alert',
+    matchedAt: '2026-01-01T00:00:00Z',
+    correlationId: 'corr-1',
+    message: 'All conditions met',
+    ...overrides,
+  };
+}
+
+const emptyMatchesPolling = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
+
+/** Sets the rules-query result; the rule-matches query defaults to a real, honest empty result unless overridden. */
+function mockPolling(rulesResult: any, matchesResult: any = emptyMatchesPolling) {
+  mockUsePolling.mockImplementation((key: any) => {
+    if (Array.isArray(key) && key[0] === 'rule-matches') return matchesResult;
+    return rulesResult;
+  });
+}
+
+function renderTab(deviceId = 'device-a') {
+  return render(
+    <MemoryRouter>
+      <RulesTab deviceId={deviceId} />
+    </MemoryRouter>
+  );
+}
+
 describe('RulesTab - device-scoped rules', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('requests rules scoped to the current device, not the global rule set', () => {
-    mockUsePolling.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+    mockPolling({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     expect(mockUsePolling).toHaveBeenCalledWith(
       ['rules', 'device-a'],
       expect.any(Function),
       expect.anything()
     );
-    // The queryFn passed to usePolling must call getRules with this device's id.
-    const queryFn = mockUsePolling.mock.calls[0][1];
-    queryFn();
+    const rulesCall = mockUsePolling.mock.calls.find((c) => c[0][0] === 'rules');
+    rulesCall![1]();
     expect(mockGetRules).toHaveBeenCalledWith('device-a');
   });
 
   it('renders rules returned for this device', () => {
-    mockUsePolling.mockReturnValue({ data: [rule()], isLoading: false, isError: false, refetch: vi.fn() });
+    mockPolling({ data: [rule()], isLoading: false, isError: false, refetch: vi.fn() });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     expect(screen.getByText('High Temp Alert')).toBeInTheDocument();
   });
 
   it('shows an honest empty state when this device genuinely has no rules', () => {
-    mockUsePolling.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+    mockPolling({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     expect(screen.getByText('No Automations Bound')).toBeInTheDocument();
   });
 
   it('shows a distinct loading state, never an empty state mistaken for zero rules', () => {
-    mockUsePolling.mockReturnValue({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() });
+    mockPolling({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     expect(screen.queryByText('No Automations Bound')).not.toBeInTheDocument();
   });
 
   it('shows a distinct error state, never silently falling back to the empty state', () => {
-    mockUsePolling.mockReturnValue({
+    mockPolling({
       data: [],
       isLoading: false,
       isError: true,
@@ -86,7 +121,7 @@ describe('RulesTab - device-scoped rules', () => {
       refetch: vi.fn(),
     });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     expect(screen.getByTestId('rules-tab-error')).toBeInTheDocument();
     expect(screen.queryByText('No Automations Bound')).not.toBeInTheDocument();
@@ -94,10 +129,10 @@ describe('RulesTab - device-scoped rules', () => {
 
   it('refetches after a rule is successfully created, so it appears in this device scope', async () => {
     const refetch = vi.fn();
-    mockUsePolling.mockReturnValue({ data: [], isLoading: false, isError: false, refetch });
+    mockPolling({ data: [], isLoading: false, isError: false, refetch });
     mockCreateRule.mockResolvedValue({ ruleId: 'new-rule' });
 
-    render(<RulesTab deviceId="device-a" />);
+    renderTab();
 
     fireEvent.click(screen.getAllByRole('button', { name: /create rule/i })[0]);
     const nameInput = screen.getByPlaceholderText('e.g. High Temperature Alert');
@@ -108,5 +143,63 @@ describe('RulesTab - device-scoped rules', () => {
 
     await vi.waitFor(() => expect(mockCreateRule).toHaveBeenCalled());
     await vi.waitFor(() => expect(refetch).toHaveBeenCalled());
+  });
+
+  // ---------- Recent Matches (Phase 3) ----------
+
+  it('requests rule matches scoped to this device', () => {
+    mockPolling({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    const matchesCall = mockUsePolling.mock.calls.find((c) => c[0][0] === 'rule-matches');
+    expect(matchesCall).toBeDefined();
+    matchesCall![1]();
+    expect(mockGetRuleMatchHistory).toHaveBeenCalledWith(20, undefined, undefined, 'device-a');
+  });
+
+  it('renders real recent matches for this device', () => {
+    mockPolling(
+      { data: [], isLoading: false, isError: false, refetch: vi.fn() },
+      { data: [match({ ruleName: 'Gas Leak Detector' })], isLoading: false, isError: false }
+    );
+
+    renderTab();
+
+    expect(screen.getByText('Gas Leak Detector')).toBeInTheDocument();
+    expect(screen.queryByText('No rule matches recorded for this device yet.')).not.toBeInTheDocument();
+  });
+
+  it('shows an honest empty state when this device has no recent matches', () => {
+    mockPolling({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    expect(screen.getByText('No rule matches recorded for this device yet.')).toBeInTheDocument();
+  });
+
+  it('shows a distinct error state for the matches section, independent of the rules section', () => {
+    mockPolling(
+      { data: [rule()], isLoading: false, isError: false, refetch: vi.fn() },
+      { data: [], isLoading: false, isError: true }
+    );
+
+    renderTab();
+
+    expect(screen.getByTestId('recent-matches-error')).toBeInTheDocument();
+    // The rules section itself must still render fine.
+    expect(screen.getByText('High Temp Alert')).toBeInTheDocument();
+  });
+
+  it('links each recent match to the real AI explanation experience via matchId', () => {
+    mockPolling(
+      { data: [], isLoading: false, isError: false, refetch: vi.fn() },
+      { data: [match({ matchId: 'match-xyz' })], isLoading: false, isError: false }
+    );
+
+    renderTab();
+
+    const link = screen.getByText('High Temp Alert').closest('a');
+    expect(link).toHaveAttribute('href', '/ai?matchId=match-xyz');
   });
 });
