@@ -48,10 +48,13 @@ export class DemoTelemetryRepository implements ITelemetryRepository {
 }
 
 export class DemoEventRepository implements IEventRepository {
-  async getEvents(deviceId?: string, limit: number = 50): Promise<any[]> {
+  async getEvents(deviceId?: string, limit: number = 50, correlationId?: string): Promise<any[]> {
     let events = ScenarioEngine.getEvents();
     if (deviceId) {
       events = events.filter(e => e.deviceId === deviceId);
+    }
+    if (correlationId) {
+      events = events.filter((e: any) => e.correlationId === correlationId);
     }
     return events.slice(0, limit);
   }

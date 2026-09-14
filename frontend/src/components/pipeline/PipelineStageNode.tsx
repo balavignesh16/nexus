@@ -1,79 +1,81 @@
 import { useState } from 'react';
-import { Activity, Zap, Box, FileJson, AlertTriangle } from 'lucide-react';
+import { Signal, Box, Zap } from 'lucide-react';
 import type { PipelineTracePayload } from '../../repositories/types';
 
+// Real, DB-verified stage vocabulary (Step 6 audit): pipeline_traces has
+// only ever recorded these three stages, exhaustively confirmed against
+// the full persisted table. No other stage is ever fabricated here.
 interface PipelineStageNodeProps {
-  stage: { id: string; label: string; x: string };
+  stage: { id: string; label: string };
   traces: PipelineTracePayload[];
 }
 
+const STAGE_ICON: Record<string, typeof Signal> = {
+  TELEMETRY: Signal,
+  TWIN: Box,
+  ACTION: Zap,
+};
+
 export function PipelineStageNode({ stage, traces }: PipelineStageNodeProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const Icon = STAGE_ICON[stage.id] ?? Signal;
 
-  // Calculate metrics for this stage
+  // Real per-stage metrics, computed only from real trace rows for this
+  // exact stage - never a fabricated placeholder count.
   const stageTraces = traces.filter(t => t.stage === stage.id);
   const errorCount = stageTraces.filter(t => t.status === 'ERROR' || t.status === 'FAILURE').length;
-  const isBroken = errorCount > 0 && stageTraces[0]?.status === 'ERROR';
-
-  const getIcon = () => {
-    switch (stage.id) {
-      case 'TELEMETRY': return <SignalIcon />;
-      case 'TWIN': return <Box size={24} className={isBroken ? 'text-red-400' : 'text-green-400'} />;
-      case 'RULE': return <FileJson size={24} className={isBroken ? 'text-red-400' : 'text-orange-400'} />;
-      case 'ACTION': return <Zap size={24} className={isBroken ? 'text-red-400' : 'text-purple-400'} />;
-      case 'ALERT': return <AlertTriangle size={24} className={isBroken ? 'text-red-400' : 'text-red-500'} />;
-      default: return <Activity size={24} className={isBroken ? 'text-red-400' : 'text-blue-400'} />;
-    }
-  };
+  const hasError = errorCount > 0;
+  const avgLatency = stageTraces.length > 0
+    ? Math.round(stageTraces.reduce((a, b) => a + b.durationMs, 0) / stageTraces.length)
+    : null;
+  const avgPayloadSize = stageTraces.some(t => typeof t.payloadSize === 'number')
+    ? Math.round(stageTraces.reduce((a, b) => a + (b.payloadSize || 0), 0) / stageTraces.length)
+    : null;
 
   return (
-    <div 
-      className="absolute flex flex-col items-center justify-center -translate-x-1/2 -translate-y-1/2 cursor-pointer group"
-      style={{ left: stage.x, top: '50%' }}
+    <div
+      className="relative flex flex-col items-center gap-2"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className={`w-16 h-16 rounded-xl flex items-center justify-center border-2 transition-all duration-300 ${
-        isBroken 
-          ? 'bg-red-500/10 border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.3)]' 
-          : 'bg-[#13131a] border-[#2d2d3d] group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.2)]'
-      }`}>
-        {getIcon()}
+      <div
+        className="w-16 h-16 rounded-[var(--radius-panel-lg)] flex items-center justify-center transition-shadow"
+        style={hasError
+          ? { backgroundColor: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '2px solid color-mix(in srgb, var(--danger) 40%, transparent)' }
+          : { backgroundColor: 'var(--foundation-surface)', border: '2px solid var(--foundation-border)' }}
+      >
+        <Icon size={24} style={{ color: hasError ? 'var(--danger)' : 'var(--accent)' }} />
       </div>
-      <span className={`mt-3 text-xs font-bold uppercase tracking-wider transition-colors ${
-        isBroken ? 'text-red-400' : 'text-muted-foreground group-hover:text-white'
-      }`}>
+      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: hasError ? 'var(--danger)' : 'var(--foundation-muted-fg)' }}>
         {stage.label}
       </span>
 
-      {/* Inspector Tooltip */}
       {isHovered && (
-        <div className="absolute top-24 w-48 bg-[#0a0a0f] border border-[#1f1f28] rounded-xl p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200">
-          <h4 className="text-xs font-bold text-white mb-2">{stage.label} Inspector</h4>
+        <div
+          className="absolute top-full mt-2 w-52 rounded-[var(--radius-panel)] p-3 z-50"
+          style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)', boxShadow: 'var(--shadow-glass-lg)' }}
+        >
+          <h4 className="text-xs font-bold text-foundation-fg mb-2">{stage.label}</h4>
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-muted-foreground">Processed:</span>
-            <span className="font-mono text-white">{stageTraces.length}</span>
+            <span className="text-foundation-muted-fg">Recorded (loaded window):</span>
+            <span className="font-mono text-foundation-fg">{stageTraces.length}</span>
           </div>
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-muted-foreground">Errors:</span>
-            <span className={`font-mono ${errorCount > 0 ? 'text-red-400' : 'text-success'}`}>{errorCount}</span>
+            <span className="text-foundation-muted-fg">Errors:</span>
+            <span className="font-mono" style={{ color: hasError ? 'var(--danger)' : 'var(--success)' }}>{errorCount}</span>
           </div>
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-muted-foreground">Avg Latency:</span>
-            <span className="font-mono text-white">
-              {stageTraces.length > 0 ? Math.round(stageTraces.reduce((a, b) => a + b.durationMs, 0) / stageTraces.length) : 0}ms
-            </span>
+            <span className="text-foundation-muted-fg">Avg Duration:</span>
+            <span className="font-mono text-foundation-fg">{avgLatency !== null ? `${avgLatency}ms` : 'Unavailable'}</span>
           </div>
+          {avgPayloadSize !== null && (
+            <div className="flex justify-between text-xs">
+              <span className="text-foundation-muted-fg">Avg Payload Size:</span>
+              <span className="font-mono text-foundation-fg">{avgPayloadSize}B</span>
+            </div>
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-function SignalIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400">
-      <path d="M2 20h.01"/><path d="M7 20v-4"/><path d="M12 20v-8"/><path d="M17 20V8"/><path d="M22 4v16"/>
-    </svg>
   );
 }

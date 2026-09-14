@@ -1,11 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const mockGetPipelineMetrics = vi.fn();
+const mockGetPipelineHistory = vi.fn();
 vi.mock('../repositories/RepositoryProvider', () => ({
-  useRepositories: () => ({ pipeline: { getPipelineMetrics: mockGetPipelineMetrics } }),
+  useRepositories: () => ({ pipeline: { getPipelineMetrics: mockGetPipelineMetrics, getPipelineHistory: mockGetPipelineHistory } }),
 }));
 
 vi.mock('../services/ConnectionManager', () => ({
@@ -17,8 +18,12 @@ vi.mock('../components/pipeline/PlatformObservability', () => ({
 }));
 
 vi.mock('../components/pipeline/PipelineTimeline', () => ({
-  PipelineTimeline: ({ onSelectCorrelation }: any) => (
-    <button onClick={() => onSelectCorrelation('corr-from-timeline')}>Select from timeline</button>
+  PipelineTimeline: ({ onSelectCorrelation, isLoading, error }: any) => (
+    <div>
+      <button onClick={() => onSelectCorrelation('corr-from-timeline')}>Select from timeline</button>
+      <span data-testid="timeline-loading">{String(!!isLoading)}</span>
+      <span data-testid="timeline-error">{String(!!error)}</span>
+    </div>
   ),
 }));
 
@@ -51,8 +56,13 @@ function renderPage(initialPath: string) {
 }
 
 describe('PipelinePage - real correlationId deep-linking', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPipelineMetrics.mockResolvedValue({ totalStored: 100, averageLatencyMs: 3.2, recentErrorCount: 0 });
+    mockGetPipelineHistory.mockResolvedValue([]);
+  });
+
   it('opens the real CorrelationInspector for a correlationId deep-linked via URL', () => {
-    mockGetPipelineMetrics.mockResolvedValue({});
     renderPage('/pipeline?correlationId=corr-real-123');
 
     expect(screen.getByTestId('inspector-correlation-id')).toHaveTextContent('corr-real-123');
@@ -60,7 +70,6 @@ describe('PipelinePage - real correlationId deep-linking', () => {
   });
 
   it('shows no inspector when no correlationId is present in the URL', () => {
-    mockGetPipelineMetrics.mockResolvedValue({});
     renderPage('/pipeline');
 
     expect(screen.queryByTestId('inspector-correlation-id')).not.toBeInTheDocument();
@@ -68,7 +77,6 @@ describe('PipelinePage - real correlationId deep-linking', () => {
   });
 
   it('closing the inspector clears the selection', () => {
-    mockGetPipelineMetrics.mockResolvedValue({});
     renderPage('/pipeline?correlationId=corr-real-123');
 
     fireEvent.click(screen.getByText('Close'));
@@ -77,11 +85,31 @@ describe('PipelinePage - real correlationId deep-linking', () => {
   });
 
   it('selecting a trace from the timeline opens the inspector for that real correlationId', () => {
-    mockGetPipelineMetrics.mockResolvedValue({});
     renderPage('/pipeline');
 
     fireEvent.click(screen.getByText('Select from timeline'));
 
     expect(screen.getByTestId('inspector-correlation-id')).toHaveTextContent('corr-from-timeline');
+  });
+
+  it('seeds the real history via getPipelineHistory(100) on mount - a single bounded fetch, not unbounded', async () => {
+    renderPage('/pipeline');
+
+    await vi.waitFor(() => expect(mockGetPipelineHistory).toHaveBeenCalledWith(100));
+    expect(mockGetPipelineHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards real loading state to the timeline while history is being fetched', () => {
+    mockGetPipelineHistory.mockReturnValue(new Promise(() => {})); // never resolves
+    renderPage('/pipeline');
+
+    expect(screen.getByTestId('timeline-loading')).toHaveTextContent('true');
+  });
+
+  it('forwards a real error state to the timeline when the history fetch fails', async () => {
+    mockGetPipelineHistory.mockRejectedValue(new Error('failed'));
+    renderPage('/pipeline');
+
+    await vi.waitFor(() => expect(screen.getByTestId('timeline-error')).toHaveTextContent('true'));
   });
 });

@@ -125,18 +125,18 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
     return this.demoTelemetry.getTelemetryHistory(deviceId);
   }
 
-  async getEvents(deviceId?: string, limit?: number): Promise<any[]> {
+  async getEvents(deviceId?: string, limit?: number, correlationId?: string): Promise<any[]> {
     const backendId = deviceId ? (ID_MAP[deviceId] || deviceId) : undefined;
     if (!FEATURES.DEMO_MODE) {
-      return this.backendEvent.getEvents(backendId, limit);
+      return this.backendEvent.getEvents(backendId, limit, correlationId);
     }
     try {
-      const data = await this.backendEvent.getEvents(backendId, limit);
+      const data = await this.backendEvent.getEvents(backendId, limit, correlationId);
       if (data && data.length > 0) return data;
     } catch (e) {
       // Fallback
     }
-    return this.demoEvent.getEvents(deviceId, limit);
+    return this.demoEvent.getEvents(deviceId, limit, correlationId);
   }
 
   async getRules(deviceId?: string): Promise<any[]> {

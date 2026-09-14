@@ -65,7 +65,12 @@ export interface ITelemetryRepository {
 }
 
 export interface IEventRepository {
-  getEvents(deviceId?: string, limit?: number): Promise<any[]>;
+  // correlationId (Step 6): the real backend already supports
+  // GET /events?correlationId= (Phase 3) - added here so the Pipeline
+  // investigation surface can request events scoped to one correlation
+  // directly, rather than fetching the whole event history and filtering
+  // client-side. Optional and additive - every existing caller is unaffected.
+  getEvents(deviceId?: string, limit?: number, correlationId?: string): Promise<any[]>;
 }
 
 export interface IRuleRepository {

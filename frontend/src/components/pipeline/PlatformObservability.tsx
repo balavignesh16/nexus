@@ -1,85 +1,66 @@
 import { Play, Pause, Activity } from 'lucide-react';
+import { GlassPanel } from '../foundation/GlassPanel';
+import { MetricCard } from '../foundation/MetricCard';
+import { Button } from '../foundation/Button';
+import { DataSourceBadge } from '../ui/DataSourceBadge';
 
 interface PlatformObservabilityProps {
-  metrics: any;
+  metrics: { totalStored?: number; averageLatencyMs?: number; recentErrorCount?: number } | undefined;
   connection: any;
   isPaused: boolean;
   setIsPaused: (val: boolean) => void;
-  replaySpeed: number;
-  setReplaySpeed: (val: number) => void;
 }
 
-export function PlatformObservability({ 
-  metrics, connection, isPaused, setIsPaused, replaySpeed, setReplaySpeed 
-}: PlatformObservabilityProps) {
-  
+// Real pipeline metrics only (Step 6 audit, confirmed live against
+// GET /pipeline/metrics): totalStored, averageLatencyMs, recentErrorCount.
+// "Active Devices", "Slowest Stage", and "Platform Health" have been
+// removed entirely - none exist in the real contract, and no replacement
+// fabricated metric was introduced in their place.
+export function PlatformObservability({ metrics, connection, isPaused, setIsPaused }: PlatformObservabilityProps) {
   return (
-    <div className="border-b border-[#1f1f28] bg-[#0a0a0f] p-4 flex flex-col gap-4">
-      
-      {/* Top Row: Title & Controls */}
-      <div className="flex items-center justify-between">
+    <GlassPanel level="glass" className="p-4 flex flex-col gap-4 shrink-0">
+      {/* Top Row: Title & Live/Paused (real, not "replay") */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
-            <Activity className="text-blue-400" size={18} />
+          <div
+            className="w-9 h-9 rounded-[var(--radius-panel)] flex items-center justify-center"
+            style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}
+          >
+            <Activity size={18} />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">Platform Observability</h1>
-            <p className="text-xs text-muted-foreground">Real-time enterprise pipeline monitoring</p>
+            <h1 className="text-lg font-bold text-foundation-fg tracking-tight">Pipeline Observability</h1>
+            <p className="text-xs text-foundation-muted-fg">Real-time trace stream monitoring</p>
           </div>
         </div>
-        
-        {/* Replay Controls */}
-        <div className="flex items-center gap-2 bg-[#13131a] p-1 rounded-md border border-[#1f1f28]">
-          <button 
-            onClick={() => setIsPaused(!isPaused)}
-            className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-colors ${
-              isPaused ? 'bg-amber-500/20 text-amber-400' : 'hover:bg-[#1f1f28] text-muted-foreground hover:text-white'
-            }`}
-          >
-            {isPaused ? <Play size={14} /> : <Pause size={14} />}
-            {isPaused ? 'Paused' : 'Live'}
-          </button>
-          <div className="w-px h-4 bg-[#1f1f28] mx-1"></div>
-          {[0.5, 1, 2, 4].map(speed => (
-            <button
-              key={speed}
-              onClick={() => { setReplaySpeed(speed); setIsPaused(false); }}
-              className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
-                replaySpeed === speed && !isPaused ? 'bg-[#1f1f28] text-white' : 'text-muted-foreground hover:text-white'
-              }`}
-            >
-              {speed}x
-            </button>
-          ))}
-        </div>
+
+        <Button variant={isPaused ? 'outline' : 'secondary'} size="sm" onClick={() => setIsPaused(!isPaused)}>
+          {isPaused ? <Play size={14} /> : <Pause size={14} />}
+          {isPaused ? 'Paused' : 'Live'}
+        </Button>
       </div>
 
-      {/* Bottom Row: Metrics Cards */}
-      <div className="grid grid-cols-4 md:grid-cols-8 gap-4">
-        <MetricCard label="Throughput" value={`${connection.messagesPerSec}/s`} />
-        <MetricCard label="Avg Latency" value={`${Math.round(metrics?.averageLatencyMs || connection.latencyMs || 0)}ms`} />
-        <MetricCard label="Error Rate" value={`${metrics?.recentErrorCount || 0}`} trend={metrics?.recentErrorCount > 0 ? 'bad' : 'good'} />
-        <MetricCard label="Active Devices" value="42" />
-        <MetricCard label="Slowest Stage" value="Rules Engine" valueClass="text-amber-400" />
-        <MetricCard label="Dropped Packets" value={connection.droppedMessages.toString()} />
-        <MetricCard label="Platform Health" value="100%" valueClass="text-success" />
-        <MetricCard label="Total Stored" value={metrics?.totalStored?.toLocaleString() || '0'} />
+      {/* Real metrics only */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <MetricCard label="Throughput" value={connection.messagesPerSec} unit="msg/s" badge={<DataSourceBadge classification="LIVE" variant="foundation" />} />
+        <MetricCard
+          label="Avg Latency"
+          value={metrics?.averageLatencyMs !== undefined ? metrics.averageLatencyMs.toFixed(1) : '—'}
+          unit={metrics?.averageLatencyMs !== undefined ? 'ms' : undefined}
+          badge={<DataSourceBadge classification={metrics?.averageLatencyMs !== undefined ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+        />
+        <MetricCard
+          label="Recent Errors"
+          value={metrics?.recentErrorCount ?? '—'}
+          badge={<DataSourceBadge classification={metrics?.recentErrorCount !== undefined ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+        />
+        <MetricCard label="Dropped Packets" value={connection.droppedMessages} badge={<DataSourceBadge classification="LIVE" variant="foundation" />} />
+        <MetricCard
+          label="Total Stored"
+          value={metrics?.totalStored !== undefined ? metrics.totalStored.toLocaleString() : '—'}
+          badge={<DataSourceBadge classification={metrics?.totalStored !== undefined ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+        />
       </div>
-
-    </div>
-  );
-}
-
-function MetricCard({ label, value, trend, valueClass }: { label: string, value: string, trend?: 'good'|'bad', valueClass?: string }) {
-  return (
-    <div className="flex flex-col gap-1 border-r border-[#1f1f28] last:border-0 pr-4">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className={`text-lg font-mono font-bold ${valueClass || 'text-white'}`}>
-          {value}
-        </span>
-        {trend === 'bad' && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>}
-      </div>
-    </div>
+    </GlassPanel>
   );
 }

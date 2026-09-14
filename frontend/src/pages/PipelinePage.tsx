@@ -7,22 +7,20 @@ import { PipelineCanvas } from '../components/pipeline/PipelineCanvas';
 import { PlatformObservability } from '../components/pipeline/PlatformObservability';
 import { PipelineTimeline } from '../components/pipeline/PipelineTimeline';
 import { CorrelationInspector } from '../components/pipeline/CorrelationInspector';
+import type { PipelineTracePayload } from '../repositories/types';
 
 export default function PipelinePage() {
   const { pipeline } = useRepositories();
   const connection = useConnectionStatus();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Phase 3: deep-linked investigation entry point - e.g. from a real
-  // event's "View Trace" link (EventsPage.tsx). Opens the same real
-  // CorrelationInspector a user would reach by clicking a live trace; if
-  // the correlationId turns out not to exist, CorrelationInspector's own
-  // real empty state ("No trace details found.") is shown - never fabricated.
+  // Phase 3 (preserved): deep-linked investigation entry point from a real
+  // event's "View Trace" link. If the correlationId turns out not to
+  // exist, CorrelationInspector's own real empty state is shown.
   const [selectedCorrelationId, setSelectedCorrelationId] = useState<string | null>(
     () => searchParams.get('correlationId')
   );
   const [isPaused, setIsPaused] = useState(false);
-  const [replaySpeed, setReplaySpeed] = useState<number>(1);
 
   const selectCorrelation = (correlationId: string | null) => {
     setSelectedCorrelationId(correlationId);
@@ -37,53 +35,76 @@ export default function PipelinePage() {
     );
   };
 
-  // Fetch initial history or metrics
+  // Real observability metrics (Step 6: only real fields are ever passed
+  // to PlatformObservability - see that component for the exact contract).
   const { data: metrics } = useQuery({
     queryKey: ['pipeline-metrics'],
     queryFn: () => pipeline.getPipelineMetrics(),
     refetchInterval: connection.realtimeStatus === 'connected' ? false : 5000,
   });
 
+  // Step 6C - historical backfill: a real, one-time fetch into the exact
+  // same 'global-pipeline-traces' cache key RealtimeRepositorySync (owned
+  // elsewhere, unmodified) already writes into via setQueryData. Once
+  // seeded, RealtimeRepositorySync's prepend logic naturally continues
+  // from this real starting point - no second state system, no new
+  // polling (staleTime: Infinity means React Query fetches this exactly
+  // once per mount and never again on its own).
+  const {
+    isLoading: historyLoading,
+    error: historyError,
+  } = useQuery<PipelineTracePayload[]>({
+    queryKey: ['global-pipeline-traces'],
+    queryFn: () => pipeline.getPipelineHistory(100),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
   return (
-    <div className="flex flex-col h-full w-full bg-[#0a0a0f] text-foreground overflow-hidden">
-      
-      {/* Top: Observability Dashboard */}
-      <div className="shrink-0">
-        <PlatformObservability 
-          metrics={metrics} 
+    <div className="flex flex-col h-full overflow-hidden" style={{ backgroundColor: 'var(--foundation-bg)' }}>
+      <div className="flex flex-col gap-4 p-4 sm:p-6 h-full overflow-hidden max-w-[1800px] w-full mx-auto">
+
+        {/* Top: Observability */}
+        <PlatformObservability
+          metrics={metrics}
           connection={connection}
           isPaused={isPaused}
           setIsPaused={setIsPaused}
-          replaySpeed={replaySpeed}
-          setReplaySpeed={setReplaySpeed}
-        />
-      </div>
-
-      {/* Center: Live Pipeline Canvas */}
-      <div className="flex-1 relative overflow-hidden">
-        <PipelineCanvas
-          isPaused={isPaused}
-          replaySpeed={replaySpeed}
-          onSelectCorrelation={selectCorrelation}
-          selectedCorrelationId={selectedCorrelationId}
         />
 
-        {/* Right Sidebar: Correlation Inspector */}
-        {selectedCorrelationId && (
-          <div className="absolute top-0 right-0 bottom-0 w-80 bg-[#13131a] border-l border-[#1f1f28] shadow-2xl z-10">
-            <CorrelationInspector
-              correlationId={selectedCorrelationId}
-              onClose={() => selectCorrelation(null)}
-            />
+        {/* Main investigation workspace */}
+        <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
+          <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+            {/* Live Pipeline Canvas - real 3-stage visualization */}
+            <div className="relative rounded-[var(--radius-panel-lg)] overflow-hidden shrink-0 h-[220px]" style={{ border: '1px solid var(--foundation-border)' }}>
+              <PipelineCanvas
+                isPaused={isPaused}
+                onSelectCorrelation={selectCorrelation}
+                selectedCorrelationId={selectedCorrelationId}
+              />
+            </div>
+
+            {/* Recent traces */}
+            <div className="flex-1 min-h-0">
+              <PipelineTimeline
+                onSelectCorrelation={selectCorrelation}
+                isLoading={historyLoading}
+                error={historyError}
+              />
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Bottom: Timeline */}
-      <div className="h-64 shrink-0 border-t border-[#1f1f28] bg-[#0a0a0f]">
-        <PipelineTimeline onSelectCorrelation={selectCorrelation} />
+          {/* Investigation detail - full-width below lg, fixed sidebar above */}
+          {selectedCorrelationId && (
+            <div className="w-full lg:w-[380px] shrink-0 min-h-0" style={{ maxHeight: '100%' }}>
+              <CorrelationInspector
+                correlationId={selectedCorrelationId}
+                onClose={() => selectCorrelation(null)}
+              />
+            </div>
+          )}
+        </div>
       </div>
-      
     </div>
   );
 }

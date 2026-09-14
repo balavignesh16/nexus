@@ -103,10 +103,11 @@ export class BackendTelemetryRepository implements ITelemetryRepository {
 }
 
 export class BackendEventRepository implements IEventRepository {
-  async getEvents(deviceId?: string, limit: number = 50): Promise<any[]> {
+  async getEvents(deviceId?: string, limit: number = 50, correlationId?: string): Promise<any[]> {
     let url = `${API_BASE}/events?limit=${limit}`;
     if (deviceId) url += `&deviceId=${deviceId}`;
-    
+    if (correlationId) url += `&correlationId=${encodeURIComponent(correlationId)}`;
+
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch events: ${response.status}`);
