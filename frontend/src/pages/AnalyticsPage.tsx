@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { BarChart3, Cpu, Bell, Sparkles } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
-import { analyticsApi, type AnalyticsRangeParam } from '../api/analyticsApi';
+import type { AnalyticsRangeParam } from '../api/analyticsApi';
+import { useRepositories } from '../repositories/RepositoryProvider';
 import { TimeRangeSelector } from '../components/analytics/TimeRangeSelector';
 import { AnalyticsSection } from '../components/analytics/AnalyticsSection';
 import { DistributionBar } from '../components/analytics/DistributionBar';
@@ -39,35 +40,36 @@ function paletteColor(index: number, palette: string[]): string {
 
 export default function AnalyticsPage() {
   const [range, setRange] = useState<AnalyticsRangeParam>('24h');
+  const { analytics } = useRepositories();
 
   const summaryQuery = usePolling(
     ['analytics-summary', range],
-    () => analyticsApi.getSummary(range),
+    () => analytics.getAnalyticsSummary(range),
     { interval: 0 }
   );
   const telemetrySeries = usePolling(
     ['analytics-timeseries', 'telemetry', range],
-    () => analyticsApi.getTimeSeries('telemetry', range),
+    () => analytics.getAnalyticsTimeSeries('telemetry', range),
     { interval: 0 }
   );
   const eventsSeries = usePolling(
     ['analytics-timeseries', 'events', range],
-    () => analyticsApi.getTimeSeries('events', range),
+    () => analytics.getAnalyticsTimeSeries('events', range),
     { interval: 0 }
   );
   const ruleMatchesSeries = usePolling(
     ['analytics-timeseries', 'rule-matches', range],
-    () => analyticsApi.getTimeSeries('rule-matches', range),
+    () => analytics.getAnalyticsTimeSeries('rule-matches', range),
     { interval: 0 }
   );
   const actionsSeries = usePolling(
     ['analytics-timeseries', 'actions', range],
-    () => analyticsApi.getTimeSeries('actions', range),
+    () => analytics.getAnalyticsTimeSeries('actions', range),
     { interval: 0 }
   );
   const pipelineSeries = usePolling(
     ['analytics-timeseries', 'pipeline', range],
-    () => analyticsApi.getTimeSeries('pipeline', range),
+    () => analytics.getAnalyticsTimeSeries('pipeline', range),
     { interval: 0 }
   );
 

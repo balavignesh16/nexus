@@ -1,4 +1,5 @@
 import { DeviceStatus, type DeviceCapability } from '../api/deviceApi';
+import type { AnalyticsSummary, AnalyticsTimeSeries, AnalyticsRangeParam, AnalyticsMetricParam, AnalyticsBucketParam } from '../api/analyticsApi';
 
 export interface TelemetryData {
   timestamp: number;
@@ -90,6 +91,11 @@ export interface IPipelineRepository {
   getPipelineMetrics(): Promise<any>;
 }
 
+export interface IAnalyticsRepository {
+  getAnalyticsSummary(range: AnalyticsRangeParam): Promise<AnalyticsSummary>;
+  getAnalyticsTimeSeries(metric: AnalyticsMetricParam, range: AnalyticsRangeParam, bucket?: AnalyticsBucketParam): Promise<AnalyticsTimeSeries>;
+}
+
 export interface IRepositoryFactory {
   device: IDeviceRepository;
   telemetry: ITelemetryRepository;
@@ -97,5 +103,6 @@ export interface IRepositoryFactory {
   rules: IRuleRepository;
   actions: IActionRepository;
   pipeline: IPipelineRepository;
+  analytics: IAnalyticsRepository;
   // twin: ITwinRepository;
 }

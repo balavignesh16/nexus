@@ -3,20 +3,23 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import AnalyticsPage from './AnalyticsPage';
-import { analyticsApi } from '../api/analyticsApi';
+import type { AnalyticsSummary } from '../api/analyticsApi';
 
-vi.mock('../api/analyticsApi', async () => {
-  const actual = await vi.importActual<typeof import('../api/analyticsApi')>('../api/analyticsApi');
-  return {
-    ...actual,
-    analyticsApi: {
-      getSummary: vi.fn(),
-      getTimeSeries: vi.fn(),
+// AnalyticsPage now reads through the repository/data-source architecture
+// (Step 8B) instead of calling analyticsApi directly - mock the repository
+// the same way every other migrated page's tests do (see ActionsPage.test.tsx).
+const mockGetAnalyticsSummary = vi.fn();
+const mockGetAnalyticsTimeSeries = vi.fn();
+vi.mock('../repositories/RepositoryProvider', () => ({
+  useRepositories: () => ({
+    analytics: {
+      getAnalyticsSummary: mockGetAnalyticsSummary,
+      getAnalyticsTimeSeries: mockGetAnalyticsTimeSeries,
     },
-  };
-});
+  }),
+}));
 
-function emptySummary(overrides: Partial<Awaited<ReturnType<typeof analyticsApi.getSummary>>> = {}) {
+function emptySummary(overrides: Partial<AnalyticsSummary> = {}) {
   return {
     range: '24h',
     from: '2026-01-01T00:00:00Z',
@@ -53,8 +56,8 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('shows honest empty states when there is no activity - never a fake zero-filled chart', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary());
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary());
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
 
     renderPage();
 
@@ -64,8 +67,8 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('regression: zero devices renders 0, never the old fabricated fallback 1248', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary({ totalDeviceCount: 0 }));
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary({ totalDeviceCount: 0 }));
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
 
     renderPage();
 
@@ -73,14 +76,14 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('renders real device/connectivity/action/ack distributions from the summary response', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary({
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary({
       totalDeviceCount: 3,
       deviceCountByType: { TEMPERATURE_SENSOR: 2, GAS_SENSOR: 1 },
       connectivityDistribution: { ONLINE: 2, UNKNOWN: 1 },
       actionStatusDistribution: { SUCCESS: 5, FAILURE: 1 },
       commandAckDistribution: { ACCEPTED: 2, NO_ACK_YET: 1 },
     }));
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
 
     renderPage();
 
@@ -93,8 +96,8 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('every section shows the CALCULATED data-source badge, never LIVE', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary());
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary());
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
 
     renderPage();
 
@@ -103,20 +106,20 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('changing the time range triggers a real refetch with the new range param', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary());
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary());
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => Promise.resolve(emptySeries(metric)));
 
     renderPage();
-    await waitFor(() => expect(analyticsApi.getSummary).toHaveBeenCalledWith('24h'));
+    await waitFor(() => expect(mockGetAnalyticsSummary).toHaveBeenCalledWith('24h'));
 
     fireEvent.click(screen.getByRole('button', { name: '7d' }));
 
-    await waitFor(() => expect(analyticsApi.getSummary).toHaveBeenCalledWith('7d'));
+    await waitFor(() => expect(mockGetAnalyticsSummary).toHaveBeenCalledWith('7d'));
   });
 
   it('a failing section shows an error, while other sections still render (partial failure)', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary());
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => {
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary());
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => {
       if (metric === 'telemetry') {
         return Promise.reject(new Error('Telemetry query failed'));
       }
@@ -131,8 +134,8 @@ describe('AnalyticsPage - real operational analytics, no fabricated data', () =>
   });
 
   it('pipeline section communicates its real 7-day retention window explicitly', async () => {
-    vi.mocked(analyticsApi.getSummary).mockResolvedValue(emptySummary());
-    vi.mocked(analyticsApi.getTimeSeries).mockImplementation((metric) => {
+    mockGetAnalyticsSummary.mockResolvedValue(emptySummary());
+    mockGetAnalyticsTimeSeries.mockImplementation((metric) => {
       if (metric === 'pipeline') {
         return Promise.resolve({
           metric: 'pipeline',

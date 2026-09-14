@@ -1,4 +1,5 @@
-import type { IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, DeviceState, TelemetryData, PipelineTracePayload } from './types';
+import type { IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, IAnalyticsRepository, DeviceState, TelemetryData, PipelineTracePayload } from './types';
+import { analyticsApi, type AnalyticsRangeParam, type AnalyticsMetricParam, type AnalyticsBucketParam, type AnalyticsSummary, type AnalyticsTimeSeries } from '../api/analyticsApi';
 const API_BASE = 'http://localhost:8080/api/v1';
 
 export class BackendDeviceRepository implements IDeviceRepository {
@@ -183,5 +184,24 @@ export class BackendPipelineRepository implements IPipelineRepository {
     } catch (e) {
       return null;
     }
+  }
+}
+
+/**
+ * Delegates to the existing analyticsApi module rather than re-implementing
+ * URL construction - the real /analytics/summary and /analytics/timeseries
+ * contracts (range/metric/bucket params, response shapes) stay defined in
+ * exactly one place. A real backend error (network failure, 4xx/5xx)
+ * propagates as a thrown error, never swallowed to null/empty - the
+ * resolver's live-mode branch relies on that to avoid silently masking a
+ * real failure as a fabricated empty result.
+ */
+export class BackendAnalyticsRepository implements IAnalyticsRepository {
+  async getAnalyticsSummary(range: AnalyticsRangeParam): Promise<AnalyticsSummary> {
+    return analyticsApi.getSummary(range);
+  }
+
+  async getAnalyticsTimeSeries(metric: AnalyticsMetricParam, range: AnalyticsRangeParam, bucket?: AnalyticsBucketParam): Promise<AnalyticsTimeSeries> {
+    return analyticsApi.getTimeSeries(metric, range, bucket);
   }
 }

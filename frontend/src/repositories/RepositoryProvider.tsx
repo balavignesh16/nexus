@@ -15,6 +15,7 @@ const RepositoryContext = createContext<IRepositoryFactory>({
   rules: defaultResolver,
   actions: defaultResolver,
   pipeline: defaultResolver,
+  analytics: defaultResolver,
 });
 
 export function RepositoryProvider({ children }: { children: ReactNode }) {
@@ -43,6 +44,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       rules: r,
       actions: r,
       pipeline: r,
+      analytics: r,
     };
   }, []);
 

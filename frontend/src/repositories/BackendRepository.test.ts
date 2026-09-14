@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BackendDeviceRepository, BackendTelemetryRepository } from './BackendRepository';
+import { BackendDeviceRepository, BackendTelemetryRepository, BackendAnalyticsRepository } from './BackendRepository';
+import { apiClient } from '../api/apiClient';
+
+vi.mock('../api/apiClient', async () => {
+  const actual = await vi.importActual<typeof import('../api/apiClient')>('../api/apiClient');
+  return {
+    ...actual,
+    apiClient: { ...actual.apiClient, get: vi.fn() },
+  };
+});
 
 function jsonResponse(body: unknown, ok = true) {
   return { ok, status: ok ? 200 : 500, json: async () => body } as Response;
@@ -114,5 +123,42 @@ describe('BackendTelemetryRepository - parses the real backend response shape', 
     const history = await repo.getTelemetryHistory('d1');
 
     expect(history).toEqual([]);
+  });
+});
+
+/**
+ * Step 8B: BackendAnalyticsRepository is a thin delegate to the existing
+ * analyticsApi module (not a reimplementation) - these tests confirm the
+ * real endpoint/params still get called through the repository layer, and
+ * that a real backend error propagates rather than being swallowed.
+ */
+describe('BackendAnalyticsRepository - delegates to analyticsApi, preserving the real contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getAnalyticsSummary calls the real bounded-range summary endpoint', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ range: '24h' } as any);
+    const repo = new BackendAnalyticsRepository();
+
+    await repo.getAnalyticsSummary('24h');
+
+    expect(apiClient.get).toHaveBeenCalledWith('/analytics/summary?range=24h');
+  });
+
+  it('getAnalyticsTimeSeries preserves metric, range and bucket exactly', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ metric: 'telemetry', points: [] } as any);
+    const repo = new BackendAnalyticsRepository();
+
+    await repo.getAnalyticsTimeSeries('telemetry', '7d', 'hour');
+
+    expect(apiClient.get).toHaveBeenCalledWith('/analytics/timeseries?metric=telemetry&range=7d&bucket=hour');
+  });
+
+  it('propagates a real backend error rather than swallowing it to null/empty', async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('Backend fetch failed: 500'));
+    const repo = new BackendAnalyticsRepository();
+
+    await expect(repo.getAnalyticsSummary('24h')).rejects.toThrow('Backend fetch failed: 500');
   });
 });

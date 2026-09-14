@@ -1,7 +1,8 @@
-import type { IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, DeviceState, TelemetryData, PipelineTracePayload } from './types';
-import { DemoDeviceRepository, DemoTelemetryRepository, DemoEventRepository, DemoRuleRepository, DemoActionRepository, DemoPipelineRepository } from './DemoRepository';
-import { BackendDeviceRepository, BackendTelemetryRepository, BackendEventRepository, BackendRuleRepository, BackendActionRepository, BackendPipelineRepository } from './BackendRepository';
+import type { IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, IAnalyticsRepository, DeviceState, TelemetryData, PipelineTracePayload } from './types';
+import { DemoDeviceRepository, DemoTelemetryRepository, DemoEventRepository, DemoRuleRepository, DemoActionRepository, DemoPipelineRepository, DemoAnalyticsRepository } from './DemoRepository';
+import { BackendDeviceRepository, BackendTelemetryRepository, BackendEventRepository, BackendRuleRepository, BackendActionRepository, BackendPipelineRepository, BackendAnalyticsRepository } from './BackendRepository';
 import { FEATURES } from '../config/features';
+import type { AnalyticsRangeParam, AnalyticsMetricParam, AnalyticsBucketParam, AnalyticsSummary, AnalyticsTimeSeries } from '../api/analyticsApi';
 
 /**
  * Maps frontend simulator string IDs to Backend UUIDs.
@@ -26,7 +27,7 @@ const ID_MAP: Record<string, string> = {
  *   than being silently replaced with demo fixtures. Demo data must never
  *   appear in live mode.
  */
-export class DataSourceResolver implements IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository {
+export class DataSourceResolver implements IDeviceRepository, ITelemetryRepository, IEventRepository, IRuleRepository, IActionRepository, IPipelineRepository, IAnalyticsRepository {
   private backendDevice = new BackendDeviceRepository();
   private demoDevice = new DemoDeviceRepository();
 
@@ -44,6 +45,9 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
 
   private backendPipeline = new BackendPipelineRepository();
   private demoPipeline = new DemoPipelineRepository();
+
+  private backendAnalytics = new BackendAnalyticsRepository();
+  private demoAnalytics = new DemoAnalyticsRepository();
 
   async getDevice(id: string): Promise<DeviceState> {
     const backendId = ID_MAP[id] || id;
@@ -217,5 +221,38 @@ export class DataSourceResolver implements IDeviceRepository, ITelemetryReposito
       // Fallback
     }
     return this.demoPipeline.getPipelineMetrics();
+  }
+
+  // Analytics summary/timeseries are always a single, structurally-valid
+  // object on success - a real 0-count or an empty points[] array is a
+  // truthy, honest answer (never confused with a failed/falsy result), so
+  // the same truthy-check pattern used for getPipelineMetrics() applies
+  // here without risk of masking a genuine empty analytics response.
+  async getAnalyticsSummary(range: AnalyticsRangeParam): Promise<AnalyticsSummary> {
+    if (!FEATURES.DEMO_MODE) {
+      // LIVE MODE: a real backend failure propagates as a real error -
+      // never silently replaced with demo data.
+      return this.backendAnalytics.getAnalyticsSummary(range);
+    }
+    try {
+      const data = await this.backendAnalytics.getAnalyticsSummary(range);
+      if (data) return data;
+    } catch (e) {
+      // Fallback
+    }
+    return this.demoAnalytics.getAnalyticsSummary(range);
+  }
+
+  async getAnalyticsTimeSeries(metric: AnalyticsMetricParam, range: AnalyticsRangeParam, bucket?: AnalyticsBucketParam): Promise<AnalyticsTimeSeries> {
+    if (!FEATURES.DEMO_MODE) {
+      return this.backendAnalytics.getAnalyticsTimeSeries(metric, range, bucket);
+    }
+    try {
+      const data = await this.backendAnalytics.getAnalyticsTimeSeries(metric, range, bucket);
+      if (data) return data;
+    } catch (e) {
+      // Fallback
+    }
+    return this.demoAnalytics.getAnalyticsTimeSeries(metric, range, bucket);
   }
 }
