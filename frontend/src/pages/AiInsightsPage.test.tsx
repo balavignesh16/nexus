@@ -111,6 +111,31 @@ describe('AiInsightsPage - evidence-grounded rule-match explanations, never a ch
     expect(screen.queryByText('Calculated')).not.toBeInTheDocument();
   });
 
+  // Step 10B: the classification badge now renders on the light/glass
+  // foundation (variant="foundation") instead of the legacy dark chip -
+  // the classification LOGIC (generatedBy === 'AI' ? 'AI' : 'CALCULATED')
+  // is unchanged and covered by the two tests above; this only protects
+  // that the visual migration actually switched the badge's variant.
+  it('renders the classification badge on the light/glass foundation, not the legacy dark chip', async () => {
+    vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
+    vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
+      matchId: 'match-1',
+      summary: 'The rule matched because temperature exceeded the threshold.',
+      claims: [],
+      actionNote: null,
+      generatedBy: 'AI',
+    });
+    renderPage();
+
+    await waitFor(() => screen.getByText('High Temperature Alert'));
+    fireEvent.click(screen.getByTestId('rule-match-match-1'));
+
+    const badge = await waitFor(() => screen.getByText('AI-Generated'));
+    // The legacy dark variant renders on a bg-raised chip; the foundation
+    // variant does not use that class at all.
+    expect(badge.closest('span')).not.toHaveClass('bg-raised');
+  });
+
   it('renders a deterministic-fallback explanation labeled Calculated, never as AI', async () => {
     vi.mocked(aiApi.getRuleMatchHistory).mockResolvedValue([match()]);
     vi.mocked(aiApi.explainRuleMatch).mockResolvedValue({
