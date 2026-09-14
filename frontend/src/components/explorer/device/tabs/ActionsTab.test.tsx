@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 const mockGetActions = vi.fn();
 vi.mock('../../../../repositories/RepositoryProvider', () => ({
@@ -53,16 +53,28 @@ describe('ActionsTab - real execution status + device acknowledgement', () => {
     expect(screen.getAllByText('SUCCESS').length).toBeGreaterThan(0);
   });
 
-  it('shows NO ACK YET (not FAILED) when ackStatus is absent - never a fabricated failure', () => {
+  it('shows NO ACK YET (not FAILURE) when ackStatus is absent - never a fabricated failure', () => {
     mockUsePolling.mockReturnValue({ data: [action({ ackStatus: null })], isLoading: false });
 
     render(<ActionsTab deviceId="device-a" />);
 
     expect(screen.getByText('NO ACK YET')).toBeInTheDocument();
-    // The only "status pill" shown for this action must be SUCCESS - FAILED
+    // The only "status pill" shown for this action must be SUCCESS - FAILURE
     // only appears as the unrelated header filter button.
-    expect(screen.getByRole('button', { name: 'FAILED' })).toBeInTheDocument();
-    expect(screen.queryAllByText('FAILED', { selector: 'span' }).length).toBe(0);
+    expect(screen.getByRole('button', { name: 'FAILURE' })).toBeInTheDocument();
+    expect(screen.queryAllByText('FAILURE', { selector: 'span' }).length).toBe(0);
+  });
+
+  it('recognizes the real backend FAILURE status (not the old FAILED), including the icon and filter', () => {
+    mockUsePolling.mockReturnValue({ data: [action({ status: 'FAILURE', ackStatus: null })], isLoading: false });
+
+    render(<ActionsTab deviceId="device-a" />);
+
+    expect(screen.getAllByText('FAILURE').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'FAILED' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'FAILURE' }));
+    expect(screen.getAllByText('FAILURE').length).toBeGreaterThan(0);
   });
 
   it('renders a real ACCEPTED acknowledgement distinctly from NO ACK YET', () => {

@@ -116,4 +116,14 @@ describe('DiagnosticsTab - truthful checks', () => {
     expect(screen.queryByText(/responded 2 seconds ago/i)).not.toBeInTheDocument();
     expect(screen.getByText((_, el) => el?.textContent === '> Device status is ACTIVE.')).toBeInTheDocument();
   });
+
+  it('never shows the dead "Run Full Diagnostic" control', () => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', status: 'ACTIVE' }, isLoading: false });
+    mockUseConnectionStatus.mockReturnValue(baseConnection());
+    mockUsePolling.mockReturnValue({ data: [], isError: false });
+
+    render(<DiagnosticsTab deviceId="dev-1" />);
+
+    expect(screen.queryByText('Run Full Diagnostic')).not.toBeInTheDocument();
+  });
 });

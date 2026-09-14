@@ -117,6 +117,24 @@ describe('DeviceWorkspace - real hierarchy breadcrumb, no fabricated Health/Twin
     render(<DeviceWorkspace deviceId="dev-1" />);
 
     expect(screen.getByText('12s ago')).toBeInTheDocument();
-    expect(screen.getByText('1 field(s) reporting')).toBeInTheDocument();
+    expect(screen.getByText('1 field(s)')).toBeInTheDocument();
+  });
+
+  it('never renders nonexistent Device fields (signalStrength, lastSeen, mqttTopic, live value)', () => {
+    mockUseDevice.mockReturnValue({
+      data: device({ signalStrength: 42, lastSeen: 'Never', mqttTopic: 'sensors/floor-1/dev-1', value: 99 } as any),
+      isLoading: false,
+      error: null,
+    });
+    mockUseDeviceLocationPath.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<DeviceWorkspace deviceId="dev-1" />);
+
+    expect(screen.queryByText('Signal Strength')).not.toBeInTheDocument();
+    expect(screen.queryByText('Last Seen')).not.toBeInTheDocument();
+    expect(screen.queryByText(/MQTT:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live Value/)).not.toBeInTheDocument();
+    expect(screen.queryByText('dBm')).not.toBeInTheDocument();
+    expect(screen.queryByText('Never')).not.toBeInTheDocument();
   });
 });

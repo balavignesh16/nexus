@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Folder, Building2, Box, ChevronRight, ChevronDown, MoreVertical, Loader2 } from 'lucide-react';
+import { Folder, Building2, Box, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import type { SelectedNode, NodeType } from '../../pages/ExplorerPage';
 import { useExplorerHierarchy, type HierarchyNode } from '../../hooks/useExplorerHierarchy';
+import { EmptyState } from '../foundation/EmptyState';
 
 interface ExplorerTreeProps {
   selectedNode: SelectedNode | null;
@@ -48,24 +49,23 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
         }
       });
     };
-    // Auto-expand the first site by default so the tree isn't collapsed-empty on load.
     flatten(tree, 0, []);
     return flat;
   }, [tree, expandedIds]);
 
-  const getIcon = (type: string, isExpanded: boolean) => {
+  const getIcon = (type: string) => {
     switch (type) {
-      case 'SITE': return <Folder size={14} className={isExpanded ? 'text-blue-400' : 'text-blue-500/70'} />;
-      case 'BUILDING': return <Building2 size={14} className={isExpanded ? 'text-indigo-400' : 'text-indigo-500/70'} />;
-      case 'SPACE': return <Folder size={14} className={isExpanded ? 'text-cyan-400' : 'text-cyan-500/70'} />;
-      case 'DEVICE': return <Box size={14} className="text-emerald-500" />;
+      case 'SITE': return <Folder size={14} />;
+      case 'BUILDING': return <Building2 size={14} />;
+      case 'SPACE': return <Folder size={14} />;
+      case 'DEVICE': return <Box size={14} />;
       default: return <Folder size={14} />;
     }
   };
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] items-center justify-center gap-2 text-muted-foreground">
+      <div className="flex flex-col h-full items-center justify-center gap-2 text-foundation-muted-fg">
         <Loader2 size={16} className="animate-spin" />
         <span className="text-xs">Loading infrastructure...</span>
       </div>
@@ -74,30 +74,35 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
 
   if (tree.length === 0) {
     return (
-      <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] items-center justify-center gap-1 text-muted-foreground px-4 text-center">
-        <span className="text-xs">No sites yet.</span>
-        <span className="text-[11px] text-muted-foreground/70">Add a site to start building your infrastructure hierarchy.</span>
+      <div className="h-full flex items-center justify-center px-4">
+        <EmptyState
+          icon={<Folder size={28} />}
+          title="No sites yet."
+          description="Add a site to start building your infrastructure hierarchy."
+        />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0f1d] border-r border-[#1f1f28] shadow-xl z-20">
-      <div className="flex-1 overflow-hidden relative">
-        <Virtuoso
-          className="h-full w-full custom-scrollbar py-2"
-          data={flattenedNodes}
-          itemContent={(_, { node, level, path }) => {
-            const isExpanded = expandedIds.has(node.id);
-            const isSelected = selectedNode?.id === node.id;
-            const hasChildren = !!node.children && node.children.length > 0;
+    <div className="flex flex-col h-full">
+      <Virtuoso
+        className="h-full w-full custom-scrollbar py-2"
+        data={flattenedNodes}
+        itemContent={(_, { node, level, path }) => {
+          const isExpanded = expandedIds.has(node.id);
+          const isSelected = selectedNode?.id === node.id;
+          const hasChildren = !!node.children && node.children.length > 0;
 
-            return (
+          return (
+            <div
+              className="px-2"
+              style={{ paddingLeft: `${level * 14 + 8}px` }}
+            >
               <div
-                className={`flex items-center w-full min-w-fit pr-2 py-1 cursor-pointer transition-colors group relative
-                  ${isSelected ? 'bg-blue-600/15 border-l-2 border-blue-500' : 'border-l-2 border-transparent hover:bg-[#13131a]'}
-                `}
-                style={{ paddingLeft: `${level * 16 + 8}px` }}
+                className="flex items-center w-full min-w-fit gap-2 pr-2 py-1.5 my-0.5 cursor-pointer rounded-[var(--radius-panel)] transition-colors"
+                style={isSelected ? { backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' } : undefined}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (hasChildren) handleExpand(node.id);
                   else {
@@ -110,36 +115,28 @@ export function ExplorerTree({ selectedNode, onSelect }: ExplorerTreeProps) {
                   }
                 }}
               >
-                <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                <div className="w-4 h-4 flex items-center justify-center shrink-0">
                   {hasChildren ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleExpand(node.id); }}
-                      className="p-0.5 hover:bg-muted/50 rounded text-muted-foreground hover:text-foreground"
+                      className={isSelected ? 'text-[var(--accent-foreground)]/80' : 'text-foundation-muted-fg'}
                     >
-                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     </button>
-                  ) : (
-                    <div className="w-4" />
-                  )}
+                  ) : null}
                 </div>
 
-                <div className="flex items-center gap-2 overflow-hidden flex-1 py-0.5">
-                  <div className="shrink-0 flex items-center justify-center w-5 h-5 relative">
-                    {getIcon(node.type, isExpanded)}
-                  </div>
-                  <span className={`text-[13px] truncate select-none ${isSelected ? 'text-blue-400 font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}>
-                    {node.name}
-                  </span>
+                <div className={`shrink-0 flex items-center justify-center ${isSelected ? '' : 'text-foundation-muted-fg'}`}>
+                  {getIcon(node.type)}
                 </div>
-
-                <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
-                  <MoreVertical size={14} className="text-muted-foreground/50 hover:text-foreground" />
-                </div>
+                <span className={`text-[13px] truncate select-none ${isSelected ? 'font-medium' : 'text-foundation-fg/90'}`}>
+                  {node.name}
+                </span>
               </div>
-            );
-          }}
-        />
-      </div>
+            </div>
+          );
+        }}
+      />
     </div>
   );
 }

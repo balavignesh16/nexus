@@ -251,4 +251,43 @@ describe('DeviceCommandControls - truthful command dispatch UI', () => {
 
     expect(screen.getByTestId('device-command-result')).toHaveTextContent('waiting for acknowledgement');
   });
+
+  // ---------- Step 3 correction: visual-only restyle ----------
+
+  it('never renders the legacy blue --primary chip styling on the command buttons', () => {
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+
+    expect(screen.getByText('Turn LED ON').closest('button')?.className).not.toContain('bg-primary');
+    expect(screen.getByText('Turn LED OFF').closest('button')?.className).not.toContain('bg-primary');
+  });
+
+  it('shows the acknowledged result in the restrained success color, still without a physical-outcome claim', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockResolvedValue({
+      executionId: 'exec-1',
+      requestId: 'cmd-ok',
+      matchId: null,
+      actionType: 'SEND_COMMAND',
+      parameters: {},
+      status: 'SUCCESS',
+      timestamp: new Date().toISOString(),
+      message: 'Command published to MQTT',
+    });
+
+    const { emitActionAcknowledged } = renderWithRealtime(
+      <DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />
+    );
+    fireEvent.click(screen.getByText('Turn LED ON'));
+    await waitFor(() => screen.getByTestId('device-command-result'));
+
+    emitActionAcknowledged({
+      commandId: 'cmd-ok',
+      deviceId: 'dev-1',
+      status: 'ACCEPTED',
+      message: '',
+      timestamp: Date.now() / 1000,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('Acknowledged'));
+    expect(screen.getByTestId('device-command-result').style.color).toBe('var(--success)');
+  });
 });

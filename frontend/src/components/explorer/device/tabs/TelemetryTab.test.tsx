@@ -8,13 +8,18 @@ vi.mock('../../../../repositories/RepositoryProvider', () => ({
 }));
 
 vi.mock('../../../../hooks/usePolling', () => ({
-  usePolling: (_key: unknown, fn: () => Promise<any>) => {
-    const [data, setData] = useState<any[]>([]);
+  usePolling: (key: unknown, fn: () => Promise<any>) => {
+    const [data, setData] = useState<any>(Array.isArray(key) && key[0] === 'telemetry-history' ? [] : undefined);
     useEffect(() => {
       fn().then(setData);
     }, []);
     return { data, isLoading: false };
   },
+}));
+
+const mockUseDeviceTwinState = vi.fn();
+vi.mock('../../../../hooks/useDeviceTwinState', () => ({
+  useDeviceTwinState: (...args: any[]) => mockUseDeviceTwinState(...args),
 }));
 
 const mockDownloadCsv = vi.fn();
@@ -24,9 +29,23 @@ vi.mock('../../../../utils/csv', () => ({
 
 import { TelemetryTab } from './TelemetryTab';
 
+function emptyTwinState(overrides: Record<string, any> = {}) {
+  return {
+    connectivity: undefined,
+    connectivityLoading: false,
+    connectivityError: null,
+    lastTelemetryAt: null,
+    reportedFields: [],
+    telemetryLoading: false,
+    telemetryError: null,
+    ...overrides,
+  };
+}
+
 describe('TelemetryTab - real CSV export and search, no dead buttons', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseDeviceTwinState.mockReturnValue(emptyTwinState());
   });
 
   it('Export CSV is disabled when there is no telemetry', async () => {
@@ -64,5 +83,16 @@ describe('TelemetryTab - real CSV export and search, no dead buttons', () => {
     fireEvent.change(screen.getByPlaceholderText('Search payloads...'), { target: { value: '99.9' } });
 
     await waitFor(() => expect(screen.getByText(/Showing 1 of 2 records/)).toBeInTheDocument());
+  });
+
+  it('uses the real device connectivity state, never a hardcoded CONNECTED/ACTIVE claim', async () => {
+    mockGetTelemetryHistory.mockResolvedValue([]);
+    mockUseDeviceTwinState.mockReturnValue(emptyTwinState({ connectivity: { deviceId: 'dev-1', status: 'OFFLINE', lastChangedAt: null } }));
+
+    render(<TelemetryTab deviceId="dev-1" />);
+
+    await waitFor(() => expect(screen.getByText('OFFLINE')).toBeInTheDocument());
+    expect(screen.queryByText('CONNECTED')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stream: ACTIVE')).not.toBeInTheDocument();
   });
 });

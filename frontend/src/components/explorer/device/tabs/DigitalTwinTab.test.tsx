@@ -135,4 +135,14 @@ describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
     expect(screen.queryByText('Connect')).not.toBeInTheDocument();
     expect(screen.queryByText('Reported state updated')).not.toBeInTheDocument();
   });
+
+  it('never shows the dead Edit Twin / Save Changes mutation controls', () => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Gas Sensor 1' } });
+    mockUseLatestTwins.mockReturnValue({ data: [] });
+
+    render(<DigitalTwinTab deviceId="dev-1" />);
+
+    expect(screen.queryByText('Edit Twin')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save Changes')).not.toBeInTheDocument();
+  });
 });

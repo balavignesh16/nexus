@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { deviceApi, CapabilityType, ExecutionStatus, type DeviceCapability } from '../api/deviceApi';
 import { ApiError } from '../api/apiClient';
 import { useActionAcknowledgementStream } from '../realtime/streams/useActionAcknowledgementStream';
+import { Button } from './foundation/Button';
 
 interface DeviceCommandControlsProps {
   deviceId: string;
@@ -108,30 +109,41 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
     }
   };
 
+  // Visual-only (Step 3 correction): restrained lavender/glass treatment
+  // via the foundation Button primitive, replacing the legacy blue
+  // --primary chip. No dispatch/ACK logic above this line changed.
+  const messageColor =
+    state === 'failed' || state === 'rejected' ? 'var(--danger)' :
+    state === 'acknowledged' ? 'var(--success)' :
+    'var(--foundation-muted-fg)';
+
   return (
     <div className="flex flex-col gap-2" data-testid="device-command-controls">
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={() => sendCommand(true)}
           disabled={state === 'sending'}
-          className="px-3 py-1.5 text-xs font-medium rounded bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
         >
           Turn LED ON
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => sendCommand(false)}
           disabled={state === 'sending'}
-          className="px-3 py-1.5 text-xs font-medium rounded bg-muted/50 text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
           Turn LED OFF
-        </button>
+        </Button>
       </div>
       {message && (
         <span
           data-testid="device-command-result"
-          className={`text-xs ${state === 'failed' || state === 'rejected' ? 'text-destructive' : 'text-muted-foreground'}`}
+          className="text-xs"
+          style={{ color: messageColor }}
         >
           {message}
         </span>

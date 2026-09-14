@@ -101,7 +101,7 @@ describe('RulesTab - device-scoped rules', () => {
 
     renderTab();
 
-    expect(screen.getByText('No Automations Bound')).toBeInTheDocument();
+    expect(screen.getByText('No automations bound.')).toBeInTheDocument();
   });
 
   it('shows a distinct loading state, never an empty state mistaken for zero rules', () => {
@@ -109,7 +109,7 @@ describe('RulesTab - device-scoped rules', () => {
 
     renderTab();
 
-    expect(screen.queryByText('No Automations Bound')).not.toBeInTheDocument();
+    expect(screen.queryByText('No automations bound.')).not.toBeInTheDocument();
   });
 
   it('shows a distinct error state, never silently falling back to the empty state', () => {
@@ -124,7 +124,26 @@ describe('RulesTab - device-scoped rules', () => {
     renderTab();
 
     expect(screen.getByTestId('rules-tab-error')).toBeInTheDocument();
-    expect(screen.queryByText('No Automations Bound')).not.toBeInTheDocument();
+    expect(screen.queryByText('No automations bound.')).not.toBeInTheDocument();
+  });
+
+  it('shows the real rule.enabled state instead of a hardcoded "Active" badge', () => {
+    mockPolling({ data: [rule({ enabled: false })], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    expect(screen.getByText('Not evaluated')).toBeInTheDocument();
+    expect(screen.queryByText('Monitored Live')).not.toBeInTheDocument();
+  });
+
+  it('shows Active/Monitored Live only when rule.enabled is genuinely true', () => {
+    mockPolling({ data: [rule({ enabled: true })], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    expect(screen.getByText('Monitored Live')).toBeInTheDocument();
+    expect(screen.queryByText('Disabled')).not.toBeInTheDocument();
   });
 
   it('refetches after a rule is successfully created, so it appears in this device scope', async () => {

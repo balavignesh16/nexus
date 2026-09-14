@@ -56,6 +56,10 @@ describe('OverviewTab - truthful status fields and real quick actions', () => {
     vi.resetModules();
     mockGetEvents.mockResolvedValue([]);
     mockGetDeviceConnectivity.mockResolvedValue({ deviceId: 'dev-1', status: 'UNKNOWN', lastChangedAt: null });
+    // Default for the real useDeviceTwinState hook OverviewTab now also
+    // uses for its "Latest Reading" module - individual tests below that
+    // need specific telemetry override this again.
+    mockGetTelemetryHistory.mockResolvedValue([]);
   });
 
   async function loadWithDemoMode(demoMode: boolean) {
@@ -157,6 +161,31 @@ describe('OverviewTab - truthful status fields and real quick actions', () => {
 
     expect(mockScenarioEngine.emitEvent).toHaveBeenCalledWith('Diagnostic', 'Ping successful. Latency 24ms', 'dev-1');
     expect(mockGetDeviceConnectivity).not.toHaveBeenCalled();
+  });
+
+  it('never renders the fabricated Temperature Trend chart or a fake device.metrics trend line', async () => {
+    mockUseDevice.mockReturnValue({ data: device(), isLoading: false, refetch: vi.fn() });
+    const OverviewTab = await loadWithDemoMode(false);
+
+    renderWithQueryClient(<OverviewTab deviceId="dev-1" />);
+
+    expect(screen.queryByText('Temperature Trend')).not.toBeInTheDocument();
+    expect(screen.queryByText('Live Readings')).not.toBeInTheDocument();
+  });
+
+  it('shows a real latest-reading link to Telemetry instead of a fabricated trend when telemetry exists', async () => {
+    mockUseDevice.mockReturnValue({ data: device(), isLoading: false, refetch: vi.fn() });
+    mockGetTelemetryHistory.mockResolvedValue([
+      { timestamp: new Date(Date.now() - 5000).toISOString(), payload: { temperature: 21.4 } },
+    ]);
+    const OverviewTab = await loadWithDemoMode(false);
+    const onNavigateToTab = vi.fn();
+
+    renderWithQueryClient(<OverviewTab deviceId="dev-1" onNavigateToTab={onNavigateToTab} />);
+
+    await waitFor(() => expect(screen.getByText(/Reporting: temperature/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText('View full telemetry history →'));
+    expect(onNavigateToTab).toHaveBeenLastCalledWith('telemetry');
   });
 
   it('no quick action button is ever disabled or shows a fabricated "unavailable" label', async () => {
