@@ -1,4 +1,5 @@
 import type { AnalyticsRangeParam } from '../../api/analyticsApi';
+import { Pill } from '../foundation/Pill';
 
 const RANGES: { value: AnalyticsRangeParam; label: string }[] = [
   { value: '1h', label: '1h' },
@@ -20,19 +21,11 @@ interface TimeRangeSelectorProps {
  */
 export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
   return (
-    <div className="flex items-center bg-surface border border-surface-border rounded-md p-0.5" role="group" aria-label="Time range">
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Time range">
       {RANGES.map((r) => (
-        <button
-          key={r.value}
-          type="button"
-          onClick={() => onChange(r.value)}
-          aria-pressed={value === r.value}
-          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-            value === r.value ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
+        <Pill key={r.value} active={value === r.value} onClick={() => onChange(r.value)}>
           {r.label}
-        </button>
+        </Pill>
       ))}
     </div>
   );

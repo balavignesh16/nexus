@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Skeleton } from '../ui/Skeleton';
+import { Card } from '../foundation/Card';
+import { EmptyState } from '../foundation/EmptyState';
+import { ErrorState } from '../foundation/ErrorState';
+import { LoadingBlock } from '../foundation/LoadingState';
 import { DataSourceBadge } from '../ui/DataSourceBadge';
 
 interface AnalyticsSectionProps {
@@ -17,7 +20,7 @@ interface AnalyticsSectionProps {
 
 /**
  * Every analytics section is independent: one section's failure never
- * blanks the rest of the page. Loading uses the real Skeleton component
+ * blanks the rest of the page. Loading uses the real LoadingBlock component
  * (never fabricated chart points); empty means the backend genuinely
  * calculated zero for the selected population/range, never a client-side
  * guess. Every value on this page is CALCULATED (database aggregation),
@@ -27,35 +30,35 @@ export function AnalyticsSection({
   title, subtitle, isLoading, error, isEmpty, emptyMessage, drillDownTo, drillDownLabel, children,
 }: AnalyticsSectionProps) {
   return (
-    <section className="bg-surface border border-surface-border rounded-lg p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/90">{title}</h3>
-          {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
-        </div>
+    <Card
+      level="glass"
+      padding="lg"
+      title={<span className="text-xs font-semibold uppercase tracking-wider">{title}</span>}
+      subtitle={subtitle}
+      action={
         <div className="flex items-center gap-3">
-          <DataSourceBadge classification="CALCULATED" />
+          <DataSourceBadge classification="CALCULATED" variant="foundation" />
           {drillDownTo && (
-            <Link to={drillDownTo} className="text-[11px] text-primary hover:underline whitespace-nowrap">
-              {drillDownLabel ?? 'Investigate'}
+            <Link to={drillDownTo} className="text-[11px] font-medium whitespace-nowrap" style={{ color: 'var(--accent)' }}>
+              {drillDownLabel ?? 'Investigate →'}
             </Link>
           )}
         </div>
-      </div>
-
+      }
+    >
       {isLoading ? (
-        <Skeleton className="h-32 w-full" />
+        <LoadingBlock className="h-32 w-full" />
       ) : error ? (
-        <div data-testid="section-error" className="h-24 flex items-center justify-center text-xs text-destructive">
-          {error instanceof Error ? error.message : 'Failed to load this section.'}
+        <div data-testid="section-error">
+          <ErrorState message={error instanceof Error ? error.message : 'Failed to load this section.'} />
         </div>
       ) : isEmpty ? (
-        <div data-testid="section-empty" className="h-24 flex items-center justify-center text-xs text-muted-foreground">
-          {emptyMessage}
+        <div data-testid="section-empty">
+          <EmptyState title={emptyMessage} />
         </div>
       ) : (
         children
       )}
-    </section>
+    </Card>
   );
 }

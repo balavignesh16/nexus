@@ -24,11 +24,12 @@ export function TimeSeriesChart({ data, color, unit }: TimeSeriesChartProps) {
               <stop offset="95%" stopColor={color} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-border)" vertical={false} />
-          <XAxis dataKey="time" stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} minTickGap={40} />
-          <YAxis stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--foundation-border)" vertical={false} />
+          <XAxis dataKey="time" stroke="var(--foundation-muted-fg)" fontSize={10} tickLine={false} axisLine={false} minTickGap={40} />
+          <YAxis stroke="var(--foundation-muted-fg)" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
           <Tooltip
-            contentStyle={{ backgroundColor: 'var(--sunken)', borderColor: 'var(--surface-border)', borderRadius: 8, fontSize: 12 }}
+            contentStyle={{ backgroundColor: 'var(--foundation-surface)', borderColor: 'var(--foundation-border)', borderRadius: 8, fontSize: 12 }}
+            labelStyle={{ color: 'var(--foundation-fg)' }}
             formatter={(value: number) => [`${value}${unit ? ` ${unit}` : ''}`, 'Count']}
           />
           <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fillOpacity={1} fill={`url(#grad-${color.replace('#', '')})`} />

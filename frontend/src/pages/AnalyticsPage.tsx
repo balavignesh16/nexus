@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { TrendingUp, Calendar } from 'lucide-react';
+import { BarChart3, Cpu, Bell, Sparkles } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
 import { analyticsApi, type AnalyticsRangeParam } from '../api/analyticsApi';
 import { TimeRangeSelector } from '../components/analytics/TimeRangeSelector';
 import { AnalyticsSection } from '../components/analytics/AnalyticsSection';
 import { DistributionBar } from '../components/analytics/DistributionBar';
 import { TimeSeriesChart } from '../components/analytics/TimeSeriesChart';
+import { SectionHeader } from '../components/foundation/SectionHeader';
+import { MetricCard } from '../components/foundation/MetricCard';
+import { DataSourceBadge } from '../components/ui/DataSourceBadge';
 
 const CONNECTIVITY_COLORS: Record<string, string> = {
   ONLINE: 'var(--data-live)',
@@ -71,158 +74,177 @@ export default function AnalyticsPage() {
   const summary = summaryQuery.data;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-canvas overflow-hidden text-foreground animate-in fade-in duration-300">
+    <div className="flex flex-col h-full overflow-y-auto" style={{ backgroundColor: 'var(--foundation-bg)' }}>
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
 
-      {/* TOOLBAR */}
-      <div className="shrink-0 h-16 border-b border-surface-border flex items-center justify-between px-6 bg-sunken z-10 relative">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <TrendingUp size={20} className="text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold">Operational Analytics</h1>
-            <p className="text-xs text-muted-foreground">
-              {summary ? `${new Date(summary.from).toLocaleString()} — ${new Date(summary.to).toLocaleString()}` : 'What is happening across the physical system'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Calendar size={14} className="text-muted-foreground" />
+        {/* HEADER */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <SectionHeader
+            icon={<BarChart3 size={18} />}
+            title="Analytics"
+            subtitle={
+              summary
+                ? `${new Date(summary.from).toLocaleString()} — ${new Date(summary.to).toLocaleString()}`
+                : 'What is happening across the physical system'
+            }
+          />
           <TimeRangeSelector value={range} onChange={setRange} />
         </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 lg:grid-cols-2 gap-4 content-start">
+        {/* Real summary metrics - straight from the backend, no derived scores */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+          <MetricCard
+            label="Devices Registered"
+            value={summary ? summary.totalDeviceCount : '—'}
+            icon={<Cpu size={18} />}
+            badge={<DataSourceBadge classification={summary ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+          />
+          <MetricCard
+            label="Events"
+            value={summary ? summary.eventCount : '—'}
+            icon={<Bell size={18} />}
+            badge={<DataSourceBadge classification={summary ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+          />
+          <MetricCard
+            label="Rule Matches"
+            value={summary ? summary.ruleMatchCount : '—'}
+            icon={<Sparkles size={18} />}
+            badge={<DataSourceBadge classification={summary ? 'CALCULATED' : 'UNAVAILABLE'} variant="foundation" />}
+          />
+        </div>
 
-        {/* SYSTEM ACTIVITY */}
-        <AnalyticsSection
-          title="System Activity"
-          subtitle="Telemetry volume over time"
-          isLoading={telemetrySeries.isLoading}
-          error={telemetrySeries.error}
-          isEmpty={!telemetrySeries.data || telemetrySeries.data.points.length === 0}
-          emptyMessage="No telemetry recorded in selected period."
-          drillDownTo="/telemetry"
-        >
-          {telemetrySeries.data && <TimeSeriesChart data={telemetrySeries.data} color="#3b82f6" />}
-        </AnalyticsSection>
+        {/* Analytics sections */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
 
-        {/* DEVICE ACTIVITY */}
-        <AnalyticsSection
-          title="Device Activity"
-          subtitle={summary ? `${summary.totalDeviceCount} device(s) registered` : undefined}
-          isLoading={summaryQuery.isLoading}
-          error={summaryQuery.error}
-          isEmpty={!summary || summary.totalDeviceCount === 0}
-          emptyMessage="No devices registered."
-          drillDownTo="/explorer"
-        >
-          {summary && (
-            <div className="flex flex-col gap-4">
-              <div>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1 block">By type</span>
-                <DistributionBar
-                  data={summary.deviceCountByType}
-                  colorFor={(key) => paletteColor(Object.keys(summary.deviceCountByType).indexOf(key), DEVICE_TYPE_PALETTE)}
-                />
+          {/* SYSTEM ACTIVITY */}
+          <AnalyticsSection
+            title="System Activity"
+            subtitle="Telemetry volume over time"
+            isLoading={telemetrySeries.isLoading}
+            error={telemetrySeries.error}
+            isEmpty={!telemetrySeries.data || telemetrySeries.data.points.length === 0}
+            emptyMessage="No telemetry recorded in selected period."
+            drillDownTo="/telemetry"
+          >
+            {telemetrySeries.data && <TimeSeriesChart data={telemetrySeries.data} color="var(--primary)" />}
+          </AnalyticsSection>
+
+          {/* DEVICE ACTIVITY */}
+          <AnalyticsSection
+            title="Device Activity"
+            subtitle={summary ? `${summary.totalDeviceCount} device(s) registered` : undefined}
+            isLoading={summaryQuery.isLoading}
+            error={summaryQuery.error}
+            isEmpty={!summary || summary.totalDeviceCount === 0}
+            emptyMessage="No devices registered."
+            drillDownTo="/explorer"
+          >
+            {summary && (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-foundation-muted-fg/70 mb-1 block">By type</span>
+                  <DistributionBar
+                    data={summary.deviceCountByType}
+                    colorFor={(key) => paletteColor(Object.keys(summary.deviceCountByType).indexOf(key), DEVICE_TYPE_PALETTE)}
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-foundation-muted-fg/70 mb-1 block">Connectivity (current)</span>
+                  <DistributionBar
+                    data={summary.connectivityDistribution}
+                    colorFor={(key) => CONNECTIVITY_COLORS[key] ?? 'var(--data-unavailable)'}
+                  />
+                </div>
               </div>
-              <div>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1 block">Connectivity (current)</span>
+            )}
+          </AnalyticsSection>
+
+          {/* EVENT ACTIVITY */}
+          <AnalyticsSection
+            title="Event Activity"
+            subtitle={summary ? `${summary.eventCount} event(s) in selected period` : undefined}
+            isLoading={eventsSeries.isLoading}
+            error={eventsSeries.error}
+            isEmpty={!eventsSeries.data || eventsSeries.data.points.length === 0}
+            emptyMessage="No events recorded in selected period."
+            drillDownTo="/events"
+          >
+            {eventsSeries.data && <TimeSeriesChart data={eventsSeries.data} color="var(--info)" />}
+          </AnalyticsSection>
+
+          {/* RULE ACTIVITY */}
+          <AnalyticsSection
+            title="Rule Activity"
+            subtitle={summary ? `${summary.ruleMatchCount} rule match(es) in selected period` : undefined}
+            isLoading={ruleMatchesSeries.isLoading}
+            error={ruleMatchesSeries.error}
+            isEmpty={!ruleMatchesSeries.data || ruleMatchesSeries.data.points.length === 0}
+            emptyMessage="No rule matches recorded in selected period."
+            drillDownTo="/rules"
+          >
+            {ruleMatchesSeries.data && <TimeSeriesChart data={ruleMatchesSeries.data} color="var(--data-simulated)" />}
+          </AnalyticsSection>
+
+          {/* ACTION ACTIVITY */}
+          <AnalyticsSection
+            title="Action Activity"
+            subtitle="Status distribution in selected period"
+            isLoading={summaryQuery.isLoading}
+            error={summaryQuery.error}
+            isEmpty={!summary || Object.keys(summary.actionStatusDistribution).length === 0}
+            emptyMessage="No actions executed in selected period."
+            drillDownTo="/actions"
+          >
+            {summary && (
+              <div className="flex flex-col gap-4">
                 <DistributionBar
-                  data={summary.connectivityDistribution}
-                  colorFor={(key) => CONNECTIVITY_COLORS[key] ?? 'var(--data-unavailable)'}
+                  data={summary.actionStatusDistribution}
+                  colorFor={(key) => ACTION_STATUS_COLORS[key] ?? 'var(--data-unavailable)'}
                 />
+                {actionsSeries.data && actionsSeries.data.points.length > 0 && (
+                  <TimeSeriesChart data={actionsSeries.data} color="var(--success)" />
+                )}
               </div>
-            </div>
-          )}
-        </AnalyticsSection>
+            )}
+          </AnalyticsSection>
 
-        {/* EVENT ACTIVITY */}
-        <AnalyticsSection
-          title="Event Activity"
-          subtitle={summary ? `${summary.eventCount} event(s) in selected period` : undefined}
-          isLoading={eventsSeries.isLoading}
-          error={eventsSeries.error}
-          isEmpty={!eventsSeries.data || eventsSeries.data.points.length === 0}
-          emptyMessage="No events recorded in selected period."
-          drillDownTo="/events"
-        >
-          {eventsSeries.data && <TimeSeriesChart data={eventsSeries.data} color="var(--info)" />}
-        </AnalyticsSection>
-
-        {/* RULE ACTIVITY */}
-        <AnalyticsSection
-          title="Rule Activity"
-          subtitle={summary ? `${summary.ruleMatchCount} rule match(es) in selected period` : undefined}
-          isLoading={ruleMatchesSeries.isLoading}
-          error={ruleMatchesSeries.error}
-          isEmpty={!ruleMatchesSeries.data || ruleMatchesSeries.data.points.length === 0}
-          emptyMessage="No rule matches recorded in selected period."
-          drillDownTo="/rules"
-        >
-          {ruleMatchesSeries.data && <TimeSeriesChart data={ruleMatchesSeries.data} color="var(--data-simulated)" />}
-        </AnalyticsSection>
-
-        {/* ACTION ACTIVITY */}
-        <AnalyticsSection
-          title="Action Activity"
-          subtitle="Status distribution in selected period"
-          isLoading={summaryQuery.isLoading}
-          error={summaryQuery.error}
-          isEmpty={!summary || Object.keys(summary.actionStatusDistribution).length === 0}
-          emptyMessage="No actions executed in selected period."
-          drillDownTo="/actions"
-        >
-          {summary && (
-            <div className="flex flex-col gap-4">
+          {/* COMMAND RELIABILITY */}
+          <AnalyticsSection
+            title="Command Reliability"
+            subtitle="Physical command acknowledgement outcome (SEND_COMMAND only)"
+            isLoading={summaryQuery.isLoading}
+            error={summaryQuery.error}
+            isEmpty={!summary || Object.keys(summary.commandAckDistribution).length === 0}
+            emptyMessage="No commands dispatched in selected period."
+            drillDownTo="/actions"
+          >
+            {summary && (
               <DistributionBar
-                data={summary.actionStatusDistribution}
-                colorFor={(key) => ACTION_STATUS_COLORS[key] ?? 'var(--data-unavailable)'}
+                data={summary.commandAckDistribution}
+                colorFor={(key) => ACK_COLORS[key] ?? 'var(--data-unavailable)'}
+                labelFor={(key) => (key === 'NO_ACK_YET' ? 'No ack yet' : key)}
               />
-              {actionsSeries.data && actionsSeries.data.points.length > 0 && (
-                <TimeSeriesChart data={actionsSeries.data} color="var(--success)" />
-              )}
-            </div>
-          )}
-        </AnalyticsSection>
+            )}
+          </AnalyticsSection>
 
-        {/* COMMAND RELIABILITY */}
-        <AnalyticsSection
-          title="Command Reliability"
-          subtitle="Physical command acknowledgement outcome (SEND_COMMAND only)"
-          isLoading={summaryQuery.isLoading}
-          error={summaryQuery.error}
-          isEmpty={!summary || Object.keys(summary.commandAckDistribution).length === 0}
-          emptyMessage="No commands dispatched in selected period."
-          drillDownTo="/actions"
-        >
-          {summary && (
-            <DistributionBar
-              data={summary.commandAckDistribution}
-              colorFor={(key) => ACK_COLORS[key] ?? 'var(--data-unavailable)'}
-              labelFor={(key) => (key === 'NO_ACK_YET' ? 'No ack yet' : key)}
-            />
-          )}
-        </AnalyticsSection>
+          {/* PIPELINE ACTIVITY */}
+          <AnalyticsSection
+            title="Pipeline Activity"
+            subtitle={
+              pipelineSeries.data
+                ? `Retained window: ${new Date(pipelineSeries.data.from).toLocaleDateString()} — ${new Date(pipelineSeries.data.to).toLocaleDateString()} (pipeline traces retain only 7 days, regardless of the selected range)`
+                : undefined
+            }
+            isLoading={pipelineSeries.isLoading}
+            error={pipelineSeries.error}
+            isEmpty={!pipelineSeries.data || pipelineSeries.data.points.length === 0}
+            emptyMessage="No pipeline traces recorded in the retained 7-day window."
+            drillDownTo="/pipeline"
+          >
+            {pipelineSeries.data && <TimeSeriesChart data={pipelineSeries.data} color="var(--data-ai)" />}
+          </AnalyticsSection>
 
-        {/* PIPELINE ACTIVITY */}
-        <AnalyticsSection
-          title="Pipeline Activity"
-          subtitle={
-            pipelineSeries.data
-              ? `Retained window: ${new Date(pipelineSeries.data.from).toLocaleDateString()} — ${new Date(pipelineSeries.data.to).toLocaleDateString()} (pipeline traces retain only 7 days, regardless of the selected range)`
-              : undefined
-          }
-          isLoading={pipelineSeries.isLoading}
-          error={pipelineSeries.error}
-          isEmpty={!pipelineSeries.data || pipelineSeries.data.points.length === 0}
-          emptyMessage="No pipeline traces recorded in the retained 7-day window."
-          drillDownTo="/pipeline"
-        >
-          {pipelineSeries.data && <TimeSeriesChart data={pipelineSeries.data} color="var(--data-ai)" />}
-        </AnalyticsSection>
-
+        </div>
       </div>
     </div>
   );

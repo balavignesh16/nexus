@@ -19,7 +19,7 @@ export function DistributionBar({ data, colorFor, labelFor }: DistributionBarPro
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex h-2 rounded-full overflow-hidden bg-raised">
+      <div className="flex h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--foundation-border)' }}>
         {entries.map(([key, value]) => (
           <div
             key={key}
@@ -32,8 +32,8 @@ export function DistributionBar({ data, colorFor, labelFor }: DistributionBarPro
         {entries.map(([key, value]) => (
           <div key={key} className="flex items-center gap-1.5 text-xs">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorFor(key) }} />
-            <span className="text-muted-foreground">{labelFor ? labelFor(key) : key}</span>
-            <span className="font-mono text-foreground/90">{value}</span>
+            <span className="text-foundation-muted-fg">{labelFor ? labelFor(key) : key}</span>
+            <span className="font-mono text-foundation-fg/90">{value}</span>
           </div>
         ))}
       </div>
