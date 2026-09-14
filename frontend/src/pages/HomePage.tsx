@@ -1,16 +1,38 @@
+import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useSites, useActiveDevices, useEvents, useActionHistory } from '../hooks/queries';
 import { useExplorerHierarchy } from '../hooks/useExplorerHierarchy';
-import { StatCard } from '../components/ui/StatCard';
-import { PlatformHealthWidget } from '../components/widgets/PlatformHealthWidget';
-import { LiveAreaChart } from '../components/ui/LiveAreaChart';
-import { ActivityTimeline } from '../components/ui/ActivityTimeline';
-import { Activity, AlertTriangle, Box, RefreshCw } from 'lucide-react';
-import { DeviceStatusBadge } from '../components/DeviceStatusBadge';
 import { useConnectionStatus } from '../services/ConnectionManager';
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { usePolling } from '../hooks/usePolling';
 import { analyticsApi } from '../api/analyticsApi';
+import { DeviceStatus } from '../api/deviceApi';
+import {
+  Building2,
+  Layers,
+  Box,
+  Radio,
+  WifiOff,
+  Activity,
+  AlertTriangle,
+  Zap,
+  Sparkles,
+  Signal,
+} from 'lucide-react';
+import { GlassPanel } from '../components/foundation/GlassPanel';
+import { Card } from '../components/foundation/Card';
+import { MetricCard } from '../components/foundation/MetricCard';
+import { SectionHeader } from '../components/foundation/SectionHeader';
+import { StatusIndicator, type StatusTone } from '../components/foundation/StatusIndicator';
+import { EmptyState } from '../components/foundation/EmptyState';
+import { DataSourceBadge } from '../components/ui/DataSourceBadge';
+
+const DEVICE_STATUS_TONE: Record<string, StatusTone> = {
+  [DeviceStatus.ACTIVE]: 'online',
+  [DeviceStatus.OFFLINE]: 'offline',
+  [DeviceStatus.MAINTENANCE]: 'warning',
+  [DeviceStatus.REGISTERED]: 'unknown',
+};
 
 export default function HomePage() {
   const { data: sites } = useSites();
@@ -31,40 +53,40 @@ export default function HomePage() {
   );
   const offlineCount = summary?.connectivityDistribution?.OFFLINE ?? 0;
 
+  // Unchanged real-but-currently-inert data flow (Step 2 does not touch
+  // this): only ever hydrated by an external realtime write into the query
+  // cache; queryFn intentionally starts empty.
   const { data: globalTelemetry = [] } = useQuery<any[]>({
     queryKey: ['telemetry', 100],
-    queryFn: () => [], // default empty, hydrated by realtime
+    queryFn: () => [],
     initialData: [],
   });
 
-  const chartData = useMemo(() => {
-    return globalTelemetry
-      .filter(t => t && t.payload)
-      .map(t => {
-        const metricKey = Object.keys(t.payload)[0] || 'value';
-        return {
-          time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          value: Number(t.payload[metricKey]) || 0,
-          timestamp: t.timestamp
-        };
-      })
-      .sort((a, b) => a.timestamp - b.timestamp);
+  const latestTelemetry = useMemo(() => {
+    if (globalTelemetry.length === 0) return null;
+    return [...globalTelemetry].sort((a, b) => b.timestamp - a.timestamp)[0];
   }, [globalTelemetry]);
 
   const liveActivity = useMemo(() => {
     const combined = [
       ...events.map((e: any) => ({
-        id: e.id, time: new Date(e.timestamp).toLocaleTimeString(), title: e.type,
-        description: e.message || `${e.severity} event from ${e.deviceId}`, icon: AlertTriangle, type: 'rule' as const,
-        timestamp: e.timestamp
+        id: `event-${e.id}`,
+        timestamp: e.timestamp,
+        title: e.type,
+        description: e.message || `${e.severity} event from ${e.deviceId}`,
+        icon: AlertTriangle,
+        tone: 'var(--warning)',
       })),
       ...actions.map((a: any) => ({
-        id: a.id, time: new Date(a.timestamp).toLocaleTimeString(), title: a.actionType,
-        description: a.message || 'Action executed', icon: Activity, type: 'action' as const,
-        timestamp: a.timestamp
-      }))
+        id: `action-${a.id}`,
+        timestamp: a.timestamp,
+        title: a.actionType,
+        description: a.message || 'Action executed',
+        icon: Zap,
+        tone: 'var(--accent)',
+      })),
     ];
-    return combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 50);
+    return combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 8);
   }, [events, actions]);
 
   const siteCount = sites?.length || 0;
@@ -73,72 +95,221 @@ export default function HomePage() {
   const deviceCount = devices?.length || 0;
 
   return (
-    <div className="flex flex-col gap-6 animate-in h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Mission Control</h1>
-          <p className="text-muted-foreground text-sm mt-1">Global platform visibility and health.</p>
-        </div>
-        <button className="flex items-center gap-2 bg-[#12121a] hover:bg-[#1a1a24] border border-[#1f1f28] px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors text-foreground">
-          <RefreshCw size={14} className="text-muted-foreground" />
-          Refresh Dashboards
-        </button>
-      </div>
-
-      {/* Platform Health */}
-      <section>
-        <PlatformHealthWidget />
-      </section>
-
-      {/* KPI Stats */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
-        <StatCard title="Sites" value={siteCount} subtitle="Total registered sites" />
-        <StatCard title="Buildings" value={buildingCount} subtitle="Monitored structures" />
-        <StatCard title="Spaces" value={spaceCount} subtitle="Active zones" />
-        <StatCard title="Total Devices" value={deviceCount} subtitle="Provisioned sensors" />
-        <StatCard title="Throughput" value={connection.messagesPerSec} subtitle="Live packets / sec" />
-        <StatCard
-          title="Offline"
-          value={summaryError ? 'Unavailable' : summaryLoading ? '…' : offlineCount}
-          subtitle="Devices with last-known status OFFLINE"
-          badge={summaryError ? 'UNAVAILABLE' : 'CALCULATED'}
+    <div
+      className="flex flex-col h-full overflow-y-auto"
+      style={{ backgroundColor: 'var(--foundation-bg)' }}
+    >
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
+        {/* Context header */}
+        <SectionHeader
+          icon={<Sparkles size={18} />}
+          title="NEXUS"
+          subtitle="AI-driven physical intelligence platform — operational overview"
         />
-      </section>
 
-      {/* Main Content Grid - 12 Column Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 flex-1 min-h-[400px]">
-        {/* Left Column (8 columns): Chart */}
-        <div className="xl:col-span-8 flex flex-col gap-6">
-          <LiveAreaChart title="Global Telemetry Ingestion" data={chartData} />
-          
-          {/* Real device list - honestly labeled "Devices", not "Digital
-              Twins" (Phase 8): this is a plain roster (name/id/status),
-              not twin state. The real per-device twin signals (connectivity,
-              telemetry recency, reported fields) live on the Digital Twin
-              page and device detail view. */}
-          <div className="bg-[#12121a] border border-[#1f1f28] rounded-xl p-5 shadow-sm">
-            <h3 className="text-sm font-semibold text-foreground mb-4">Devices</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {(devices ?? []).slice(0, 4).map(device => (
-                <div key={device.id} className="flex items-center gap-4 p-3 rounded-lg bg-[#0a0a0f] border border-[#1f1f28] transition-all hover:border-blue-400 hover:shadow-[0_0_16px_rgba(59,130,246,.15)]">
-                  <div className="w-10 h-10 rounded bg-[#12121a] border border-[#1f1f28] flex items-center justify-center">
-                    <Box size={20} className="text-blue-400" />
-                  </div>
-                  <div className="flex-1 flex flex-col">
-                    <span className="text-sm font-semibold text-foreground">{device.name}</span>
-                    <span className="text-xs text-muted-foreground">ID: {device.id}</span>
-                  </div>
-                  <DeviceStatusBadge status={device.status} />
+        {/* System Snapshot */}
+        <section>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-foundation-muted-fg mb-3">System Snapshot</h2>
+
+          {/* Real platform health signals - same useConnectionStatus() values
+              PlatformHealthWidget/HealthCard render elsewhere; reimplemented
+              here as a compact glass strip to fit the light layout, not
+              recomputed or fabricated. */}
+          <GlassPanel level="glass" radius="panel" className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 mb-3 sm:mb-4">
+            <StatusIndicator
+              tone={connection.backend === 'Online' ? 'online' : 'offline'}
+              label={`Backend API · ${connection.backend}`}
+            />
+            <StatusIndicator
+              tone={connection.database === 'Online' ? 'online' : 'offline'}
+              label={`Database · ${connection.database}`}
+            />
+            <StatusIndicator
+              tone={connection.mqtt === 'Online' ? 'online' : 'offline'}
+              label={`MQTT Broker · ${connection.mqtt}`}
+            />
+            <StatusIndicator
+              tone={connection.realtimeStatus === 'connected' ? 'online' : connection.realtimeStatus === 'demo' ? 'warning' : 'offline'}
+              label={`Realtime · ${connection.realtimeStatus}`}
+              pulse={connection.realtimeStatus === 'connected'}
+            />
+          </GlassPanel>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+            <MetricCard label="Sites" value={siteCount} icon={<Building2 size={18} />} />
+            <MetricCard label="Buildings" value={buildingCount} icon={<Layers size={18} />} />
+            <MetricCard label="Spaces" value={spaceCount} icon={<Box size={18} />} />
+            <MetricCard label="Devices" value={deviceCount} icon={<Radio size={18} />} />
+            <MetricCard
+              label="Throughput"
+              value={connection.messagesPerSec}
+              unit="msg/s"
+              icon={<Signal size={18} />}
+            />
+            <MetricCard
+              label="Offline"
+              value={summaryError ? 'Unavailable' : summaryLoading ? '…' : offlineCount}
+              icon={<WifiOff size={18} />}
+              badge={<DataSourceBadge classification={summaryError ? 'UNAVAILABLE' : 'CALCULATED'} variant="foundation" />}
+            />
+          </div>
+        </section>
+
+        {/* Main grid: Device/Physical System + Operational Activity */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6">
+          {/* Device / Physical System area */}
+          <div className="xl:col-span-7">
+            <Card
+              level="glass"
+              icon={<Radio size={16} />}
+              title="Devices"
+              subtitle={`${deviceCount} provisioned`}
+              padding="lg"
+              className="h-full"
+            >
+              {(devices ?? []).length === 0 ? (
+                <EmptyState icon={<Radio size={28} />} title="No devices provisioned yet." />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(devices ?? []).slice(0, 6).map((device) => (
+                    <div
+                      key={device.id}
+                      className="flex items-center gap-3 p-3 rounded-[var(--radius-panel)]"
+                      style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)' }}
+                    >
+                      <div
+                        className="w-9 h-9 rounded-[var(--radius-panel)] flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}
+                      >
+                        <Box size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-foundation-fg truncate">{device.name}</div>
+                        <div className="text-[11px] text-foundation-muted-fg truncate">{device.id}</div>
+                      </div>
+                      <StatusIndicator
+                        tone={DEVICE_STATUS_TONE[device.status] ?? 'unknown'}
+                        label={device.status}
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Operational Activity */}
+          <div className="xl:col-span-5">
+            <Card
+              level="glass"
+              icon={<Activity size={16} />}
+              title="Operational Activity"
+              subtitle="Recent events & actions"
+              padding="lg"
+              className="h-full"
+            >
+              {liveActivity.length === 0 ? (
+                <EmptyState icon={<Activity size={28} />} title="No recent events or actions recorded." />
+              ) : (
+                <div className="flex flex-col divide-y" style={{ borderColor: 'var(--foundation-border)' }}>
+                  {liveActivity.map((item) => (
+                    <div key={item.id} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
+                        style={{ backgroundColor: `color-mix(in srgb, ${item.tone} 14%, transparent)`, color: item.tone }}
+                      >
+                        <item.icon size={13} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-foundation-fg truncate">{item.title}</div>
+                        <div className="text-xs text-foundation-muted-fg truncate">{item.description}</div>
+                      </div>
+                      <span className="text-[10px] text-foundation-tertiary-fg shrink-0 mt-1">
+                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
           </div>
         </div>
 
-        {/* Right Column (4 columns): Event Feed */}
-        <div className="xl:col-span-4 flex flex-col">
-          <ActivityTimeline title="Global System Activity" events={liveActivity} />
+        {/* Telemetry + Intelligence */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6">
+          {/* Telemetry area - honest: this page's telemetry query buffer is
+              only ever hydrated by realtime writes (unchanged from before
+              the redesign). A fabricated chart is never shown in its
+              place - when the buffer is empty, that is stated plainly. */}
+          <div className="xl:col-span-7">
+            <Card
+              level="glass"
+              icon={<Signal size={16} />}
+              title="Telemetry"
+              subtitle="Live readings buffered on this page"
+              padding="lg"
+              action={<DataSourceBadge classification="LIVE" variant="foundation" />}
+              className="h-full"
+            >
+              {latestTelemetry ? (
+                <div className="flex items-baseline gap-3">
+                  <span className="text-3xl font-semibold text-foundation-fg tabular-nums">{globalTelemetry.length}</span>
+                  <span className="text-sm text-foundation-muted-fg">
+                    readings · most recent {new Date(latestTelemetry.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+              ) : (
+                <EmptyState
+                  icon={<Signal size={28} />}
+                  title="No live telemetry buffered on this page yet."
+                  description="Open the Telemetry workspace for full device-level history."
+                  action={
+                    <Link
+                      to="/telemetry"
+                      className="text-xs font-medium"
+                      style={{ color: 'var(--accent)' }}
+                    >
+                      Go to Telemetry →
+                    </Link>
+                  }
+                />
+              )}
+            </Card>
+          </div>
+
+          {/* Intelligence - no new AI call/widget is introduced here. AI
+              Insights is a stateful investigation workspace (select a rule
+              match, then fetch its explanation) with no standalone
+              reusable "latest insight" component to surface without
+              building new AI logic, which this phase explicitly forbids.
+              An honest unavailable/empty state links to the real page
+              instead. */}
+          <div className="xl:col-span-5">
+            <Card
+              level="glass"
+              icon={<Sparkles size={16} />}
+              title="Intelligence"
+              subtitle="Evidence-grounded rule-match explanations"
+              padding="lg"
+              action={<DataSourceBadge classification="UNAVAILABLE" variant="foundation" />}
+              className="h-full"
+            >
+              <EmptyState
+                icon={<Sparkles size={28} />}
+                title="No intelligence summary surfaced here."
+                description="Open NEXUS Intelligence to review evidence-grounded explanations for real rule matches."
+                action={
+                  <Link
+                    to="/ai"
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--accent)' }}
+                  >
+                    Go to Intelligence →
+                  </Link>
+                }
+              />
+            </Card>
+          </div>
         </div>
       </div>
     </div>

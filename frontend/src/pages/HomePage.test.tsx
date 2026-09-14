@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 const mockUseSites = vi.fn();
 const mockUseActiveDevices = vi.fn();
@@ -28,17 +29,15 @@ vi.mock('../hooks/usePolling', () => ({
   usePolling: (...args: any[]) => mockUsePolling(...args),
 }));
 
-vi.mock('../components/widgets/PlatformHealthWidget', () => ({ PlatformHealthWidget: () => null }));
-vi.mock('../components/ui/LiveAreaChart', () => ({ LiveAreaChart: () => null }));
-vi.mock('../components/ui/ActivityTimeline', () => ({ ActivityTimeline: () => null }));
-
 import HomePage from './HomePage';
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <HomePage />
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -49,7 +48,14 @@ function baseMocks() {
   mockUseEvents.mockReturnValue({ data: [] });
   mockUseActionHistory.mockReturnValue({ data: [] });
   mockUseExplorerHierarchy.mockReturnValue({ data: { buildingCount: 1, spaceCount: 2 } });
-  mockUseConnectionStatus.mockReturnValue({ messagesPerSec: 3.2, realtimeStatus: 'connected' });
+  mockUseConnectionStatus.mockReturnValue({
+    messagesPerSec: 3.2,
+    realtimeStatus: 'connected',
+    backend: 'Online',
+    database: 'Online',
+    mqtt: 'Online',
+    latencyMs: 12,
+  });
 }
 
 describe('HomePage - real connectivity-derived Offline count, honest terminology', () => {
@@ -79,7 +85,7 @@ describe('HomePage - real connectivity-derived Offline count, honest terminology
 
     renderPage();
 
-    expect(screen.getByText('0')).toBeInTheDocument();
+    expect(screen.getAllByText('0').length).toBeGreaterThan(0);
   });
 
   it('never counts UNKNOWN devices as OFFLINE', () => {
@@ -91,7 +97,7 @@ describe('HomePage - real connectivity-derived Offline count, honest terminology
 
     renderPage();
 
-    expect(screen.getByText('0')).toBeInTheDocument();
+    expect(screen.getAllByText('0').length).toBeGreaterThan(0);
   });
 
   it('shows Unavailable rather than a fabricated number when the summary fails to load', () => {
@@ -101,13 +107,72 @@ describe('HomePage - real connectivity-derived Offline count, honest terminology
 
     expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
   });
+});
 
-  it('uses the honest "Devices" heading instead of "Active Digital Twins"', () => {
-    mockUsePolling.mockReturnValue({ data: { connectivityDistribution: {} }, isLoading: false, error: null });
+describe('HomePage - real module composition, no fabricated content', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    baseMocks();
+    mockUsePolling.mockReturnValue({
+      data: { connectivityDistribution: { ONLINE: 1, OFFLINE: 0, UNKNOWN: 0 } },
+      isLoading: false,
+      error: null,
+    });
+  });
+
+  it('renders real device identity and status, not a fabricated roster', () => {
+    renderPage();
+
+    expect(screen.getByText('Device 1')).toBeInTheDocument();
+    expect(screen.getByText('d1')).toBeInTheDocument();
+  });
+
+  it('shows a truthful empty state, not fabricated activity, when there are no events or actions', () => {
+    renderPage();
+
+    expect(screen.getByText('No recent events or actions recorded.')).toBeInTheDocument();
+  });
+
+  it('renders real events and actions when present, sorted with the most recent first', () => {
+    mockUseEvents.mockReturnValue({
+      data: [{ id: 'e1', type: 'TEMP_HIGH', severity: 'WARNING', deviceId: 'd1', timestamp: 1000 }],
+    });
+    mockUseActionHistory.mockReturnValue({
+      data: [{ id: 'a1', actionType: 'SEND_COMMAND', timestamp: 2000 }],
+    });
 
     renderPage();
 
-    expect(screen.getByText('Devices')).toBeInTheDocument();
-    expect(screen.queryByText('Active Digital Twins')).not.toBeInTheDocument();
+    expect(screen.getByText('TEMP_HIGH')).toBeInTheDocument();
+    expect(screen.getByText('SEND_COMMAND')).toBeInTheDocument();
+  });
+
+  it('shows a truthful empty state for telemetry rather than a fabricated chart', () => {
+    renderPage();
+
+    expect(screen.getByText('No live telemetry buffered on this page yet.')).toBeInTheDocument();
+  });
+
+  it('shows a truthful unavailable state for Intelligence rather than inventing new AI content', () => {
+    renderPage();
+
+    expect(screen.getByText('No intelligence summary surfaced here.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Go to Intelligence/ })).toHaveAttribute('href', '/ai');
+  });
+
+  it('reflects real platform health signals, not a hardcoded status', () => {
+    mockUseConnectionStatus.mockReturnValue({
+      messagesPerSec: 0,
+      realtimeStatus: 'recovering',
+      backend: 'Degraded',
+      database: 'Online',
+      mqtt: 'Offline',
+      latencyMs: 500,
+    });
+
+    renderPage();
+
+    expect(screen.getByText('Backend API · Degraded')).toBeInTheDocument();
+    expect(screen.getByText('MQTT Broker · Offline')).toBeInTheDocument();
   });
 });

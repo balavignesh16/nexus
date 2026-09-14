@@ -5,6 +5,8 @@ import { DemoScenarioSelector } from './ui/DemoScenarioSelector';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationCenter } from './ui/NotificationCenter';
+import { GlassPanel } from './foundation/GlassPanel';
+import { IconButton } from './foundation/IconButton';
 
 interface AppShellProps {
   children?: ReactNode;
@@ -12,7 +14,8 @@ interface AppShellProps {
 
 // Grouped by the platform's actual data-flow layers (Physical -> Observation
 // -> Understanding -> Decision), not a flat alphabetical menu - the sidebar
-// itself should communicate what NEXUS is.
+// itself should communicate what NEXUS is. Unchanged from the pre-redesign
+// shell: same four groups, same ten destinations, same routes.
 const NAV_GROUPS = [
   {
     label: 'Observe',
@@ -47,6 +50,13 @@ const NAV_GROUPS = [
   },
 ];
 
+const CONNECTION_TONE: Record<string, string> = {
+  connected: 'var(--success)',
+  demo: 'var(--data-simulated)',
+  recovering: 'var(--warning)',
+  connecting: 'var(--info)',
+};
+
 export function AppShell({ children }: AppShellProps = {}) {
   const location = useLocation();
   const connection = useConnectionStatus();
@@ -58,182 +68,161 @@ export function AppShell({ children }: AppShellProps = {}) {
     return location.pathname.startsWith(path);
   };
 
+  const connectionColor = CONNECTION_TONE[connection.realtimeStatus] ?? 'var(--danger)';
+
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
-      
-      {/* GLOBAL SHELL: TOP NAVBAR */}
-      <header className="h-[60px] flex-shrink-0 bg-sunken border-b border-surface-border flex items-center justify-between px-4 z-30 relative">
-
-        {/* Left: Logo & Wordmark - flat mark, no decorative gradient */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-primary/15 border border-primary/30 flex items-center justify-center">
-              <Box size={16} className="text-primary" />
+    <div
+      className="flex flex-col h-screen w-screen overflow-hidden"
+      style={{ backgroundColor: 'var(--foundation-bg)' }}
+    >
+      {/* GLOBAL SHELL: TOP BAR - refined glass header, floating above the
+          (still dark, unredesigned) content area. */}
+      <header className="h-[68px] flex-shrink-0 flex items-center gap-4 px-4 sm:px-6 z-30 relative">
+        <GlassPanel
+          level="float"
+          radius="pill"
+          className="flex-1 h-12 flex items-center justify-between gap-4 px-2 sm:px-3"
+        >
+          {/* Left: Wordmark */}
+          <div className="flex items-center gap-2.5 shrink-0 pl-2">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}
+            >
+              <Box size={16} />
             </div>
-            <span className="font-bold text-[15px] tracking-[0.08em] text-white">NEXUS</span>
-          </div>
-          <div className="h-5 w-px bg-surface-border"></div>
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Physical Intelligence Platform</span>
-        </div>
-
-        {/* Center: Global Search */}
-        <div className="flex-1 max-w-xl px-8">
-          <div
-            className="relative group cursor-text"
-            onClick={() => setCmdOpen(true)}
-          >
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-            <div className="w-full bg-surface border border-surface-border rounded-md py-1.5 pl-10 pr-4 text-sm text-muted-foreground group-hover:border-primary/40 transition-colors flex justify-between items-center">
-              <span>Search devices, events, rules...</span>
-              <span className="flex items-center gap-1">
-                <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-medium bg-raised text-muted-foreground rounded border border-surface-border">Ctrl</kbd>
-                <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-medium bg-raised text-muted-foreground rounded border border-surface-border">K</kbd>
-              </span>
-            </div>
-          </div>
-        </div>
-        {/* Right: Actions */}
-        <div className="flex items-center gap-4 z-50">
-          <DemoScenarioSelector />
-
-          <div className="flex items-center gap-2 group relative">
-            <span className={`w-2 h-2 rounded-full ${
-              connection.realtimeStatus === 'connected' ? 'bg-success' :
-              connection.realtimeStatus === 'demo' ? 'bg-[var(--data-simulated)]' :
-              connection.realtimeStatus === 'recovering' ? 'bg-warning' :
-              connection.realtimeStatus === 'connecting' ? 'bg-info' : 'bg-destructive'
-            }`}></span>
-            <span className="text-xs font-mono font-medium tracking-wider text-muted-foreground hidden md:block uppercase">
-              {connection.realtimeStatus === 'connected' ? 'LIVE' : connection.realtimeStatus}
+            <span className="font-bold text-[14px] tracking-[0.08em] text-foundation-fg hidden sm:inline">NEXUS</span>
+            <span className="text-[10px] font-medium text-foundation-muted-fg uppercase tracking-wider hidden lg:inline">
+              Physical Intelligence Platform
             </span>
-
-            {/* Hover tooltip for connection stats */}
-            <div className="absolute top-full mt-2 right-0 w-64 bg-surface border border-surface-border rounded-lg p-4 shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex flex-col gap-3">
-              <h4 className="text-xs font-bold text-foreground mb-1 uppercase tracking-wider border-b border-surface-border pb-2">Connection Stats</h4>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Messages/sec</span>
-                <span className="font-mono text-white">{connection.messagesPerSec}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Latency</span>
-                <span className="font-mono text-white">{connection.latencyMs}ms</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Dropped</span>
-                <span className="font-mono text-white">{connection.droppedMessages}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Reconnects</span>
-                <span className="font-mono text-white">{connection.reconnectAttempts}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Clock Offset</span>
-                <span className="font-mono text-white">{connection.clientOffset}ms</span>
-              </div>
-            </div>
           </div>
-          
-          <div className="h-4 w-px bg-border/50"></div>
 
-          <button
-            onClick={() => setNotifOpen(true)}
-            aria-label="Notifications"
-            className="relative p-2 hover:bg-surface rounded-lg text-muted-foreground hover:text-foreground transition-colors group"
-          >
-            <Bell size={18} className="group-hover:text-primary transition-colors" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full border border-sunken"></span>
-          </button>
-
+          {/* Center: Global Search - opens the real CommandPalette */}
           <button
             onClick={() => setCmdOpen(true)}
-            aria-label="Open command palette"
-            className="p-2 hover:bg-surface rounded-lg text-muted-foreground hover:text-foreground transition-colors group flex items-center gap-2"
+            aria-label="Open search"
+            className="flex-1 max-w-md hidden sm:flex items-center gap-2 h-9 px-3.5 rounded-[var(--radius-pill)] text-left transition-colors"
+            style={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}
           >
-            <Search size={18} className="group-hover:text-primary transition-colors" />
-            <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border border-surface-border bg-muted/50 px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
-              <span className="text-xs">⌘</span>K
+            <Search size={14} className="text-foundation-muted-fg shrink-0" />
+            <span className="text-xs text-foundation-muted-fg flex-1 truncate">Search devices, events, rules...</span>
+            <kbd className="hidden md:inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-foundation-muted-fg rounded border border-foundation-border">
+              Ctrl K
             </kbd>
           </button>
-        </div>
+
+          {/* Right: real connection state + real overlays */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <DemoScenarioSelector />
+
+            <div
+              className="hidden md:flex items-center gap-1.5 px-3 h-8 rounded-[var(--radius-pill)] text-[11px] font-mono font-medium uppercase tracking-wider"
+              style={{ backgroundColor: 'color-mix(in srgb, ' + connectionColor + ' 12%, transparent)', color: connectionColor }}
+              title={`${connection.messagesPerSec} msg/s · ${connection.latencyMs}ms latency`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: connectionColor }} />
+              {connection.realtimeStatus === 'connected' ? 'Live' : connection.realtimeStatus}
+            </div>
+
+            <IconButton variant="ghost" aria-label="Open search" className="sm:hidden" onClick={() => setCmdOpen(true)}>
+              <Search size={16} />
+            </IconButton>
+
+            <IconButton variant="ghost" aria-label="Notifications" onClick={() => setNotifOpen(true)}>
+              <Bell size={16} />
+            </IconButton>
+          </div>
+        </GlassPanel>
       </header>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Nav - grouped by data-flow layer (Observe / Understand /
-            Decide & Act), not a flat alphabetical list. */}
-        <aside className="w-[68px] flex-col border-r border-surface-border bg-sunken hidden md:flex transition-all duration-300 z-10 shrink-0 hover:w-[212px] group/sidebar">
+      <div className="flex flex-1 overflow-hidden px-4 sm:px-6 pb-4 sm:pb-6 gap-4 sm:gap-6">
+        {/* Sidebar Nav - refined glass rail, hover-expand preserved from the
+            prior shell (same interaction, new visual language). */}
+        <aside className="hidden md:flex w-[72px] hover:w-[224px] flex-col shrink-0 transition-all duration-300 z-10 group/sidebar">
+          <GlassPanel level="elevated" radius="panel-lg" className="flex-1 flex flex-col overflow-hidden">
+            <nav className="flex-1 flex flex-col gap-4 p-3 overflow-hidden">
+              {NAV_GROUPS.map((group) => (
+                <div key={group.label} className="flex flex-col gap-1">
+                  <span className="px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-foundation-tertiary-fg opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200 h-3">
+                    {group.label}
+                  </span>
+                  {group.items.map((item) => {
+                    const active = getIsActive(item.path);
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        aria-current={active ? 'page' : undefined}
+                        className="flex items-center gap-4 rounded-[var(--radius-pill)] p-3 transition-colors text-sm"
+                        style={active
+                          ? { backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' }
+                          : undefined}
+                      >
+                        <div className="shrink-0">
+                          <item.icon size={19} className={active ? '' : 'text-foundation-muted-fg'} />
+                        </div>
+                        <span
+                          className={`opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200 font-medium ${active ? '' : 'text-foundation-fg/90'}`}
+                        >
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
 
-          <nav className="flex-1 flex flex-col gap-4 p-3 mt-4 overflow-hidden">
-            {NAV_GROUPS.map((group) => (
-              <div key={group.label} className="flex flex-col gap-1">
-                <span className="px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground/50 opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200 h-3">
-                  {group.label}
-                </span>
-                {group.items.map((item) => {
-                  const active = getIsActive(item.path);
+            {/* Bottom Status Modules - same real ConnectionManager data as before */}
+            <div className="shrink-0 flex flex-col border-t border-foundation-border">
+              <div className="px-3 py-4 flex flex-col gap-3 text-xs overflow-hidden">
+                {[
+                  { label: 'Realtime', status: connection.realtimeStatus },
+                  { label: 'Backend', status: connection.backend },
+                  { label: 'MQTT Broker', status: connection.mqtt },
+                  { label: 'Database', status: connection.database },
+                ].map((service, i) => {
+                  const isOnline = service.status === 'Online' || service.status === 'connected' || service.status === 'demo';
                   return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      aria-current={active ? 'page' : undefined}
-                      className={`
-                        flex items-center gap-4 rounded-lg p-3 transition-colors text-sm relative
-                        ${active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-surface hover:text-foreground'}
-                      `}
-                    >
-                      {active && <div className="absolute left-0 top-1 bottom-1 w-1 bg-primary rounded-r-full" />}
-                      <div className="shrink-0">
-                        <item.icon size={20} className={active ? 'text-primary' : 'opacity-70'} />
+                    <div key={i} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-foundation-muted-fg shrink-0">
+                        <div
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: isOnline ? 'var(--success)' : 'var(--danger)' }}
+                        />
+                        <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap overflow-hidden w-0 group-hover/sidebar:w-auto duration-200">
+                          {service.label}
+                        </span>
                       </div>
-                      <span className="opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200">
-                        {item.label}
+                      <span
+                        className="font-medium text-[11px] opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap"
+                        style={{ color: isOnline ? 'var(--success)' : 'var(--danger)' }}
+                      >
+                        {service.status}
                       </span>
-                    </Link>
+                    </div>
                   );
                 })}
               </div>
-            ))}
-          </nav>
 
-          {/* Bottom Status Modules */}
-          <div className="shrink-0 flex flex-col">
-            <div className="px-3 py-4 border-t border-surface-border flex flex-col gap-3 text-xs overflow-hidden">
-              {[
-                { label: 'Realtime', status: connection.realtimeStatus },
-                { label: 'Backend', status: connection.backend },
-                { label: 'MQTT Broker', status: connection.mqtt },
-                { label: 'Database', status: connection.database },
-              ].map((service, i) => {
-                const isOnline = service.status === 'Online' || service.status === 'connected' || service.status === 'demo';
-                return (
-                  <div key={i} className="flex items-center justify-between group cursor-default">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success' : 'bg-destructive'}`}></div>
-                      <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap overflow-hidden absolute left-[68px] group-hover/sidebar:relative group-hover/sidebar:left-0 duration-200">
-                        {service.label}
-                      </span>
-                    </div>
-                    <span className={`${isOnline ? 'text-success' : 'text-destructive'} font-medium text-[11px] opacity-0 group-hover/sidebar:opacity-100 transition-opacity`}>{service.status}</span>
-                  </div>
-                );
-              })}
-
-              <div className="flex justify-between items-center mt-2 pt-2 border-t border-surface-border opacity-0 group-hover/sidebar:opacity-100 transition-opacity">
-                <span className="text-[10px] text-muted-foreground">Latency</span>
-                <span className="text-[10px] font-mono font-medium text-white">{connection.latencyMs}ms</span>
+              <div className="px-5 py-3 border-t border-foundation-border text-[11px] text-foundation-tertiary-fg flex items-center justify-between opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap">
+                <span>v1.0.0</span>
+                <span>Build 250803.1</span>
               </div>
             </div>
-
-            {/* Version Footer */}
-            <div className="px-5 py-4 border-t border-surface-border text-[11px] text-muted-foreground/60 flex items-center justify-between opacity-0 group-hover/sidebar:opacity-100 transition-opacity">
-              <span>v1.0.0</span>
-              <span>Build 250803.1</span>
-            </div>
-          </div>
+          </GlassPanel>
         </aside>
 
-        {/* PANE 2/3: DYNAMIC MAIN CONTENT */}
-        <div className="flex-1 flex overflow-hidden bg-canvas relative z-0">
+        {/* PANE 2/3: DYNAMIC MAIN CONTENT
+            Deliberately kept on the legacy dark bg-canvas: every other route
+            (Explorer, Twins, Telemetry, Events, Rules, Actions, Pipeline,
+            Analytics, AI Insights, Settings) has not been redesigned yet and
+            still uses dark-theme text/surface colors. Only HomePage (the
+            Overview route) paints its own light foundation background as a
+            self-contained container - the shared content slot itself must
+            stay dark so those untouched pages remain legible. */}
+        <div className="flex-1 flex overflow-hidden bg-canvas relative z-0 rounded-[var(--radius-panel-lg)]">
           {children || <Outlet />}
         </div>
       </div>
