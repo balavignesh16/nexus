@@ -135,4 +135,13 @@ describe('AppShell - navigation, connection state, real overlays', () => {
     expect(classes).not.toContain('flex');
     expect(classes).toContain('bg-canvas');
   });
+
+  it('the content slot forces its single page child to fill 100% width and height (regression: a page using bare flex-1 without h-full, e.g. ExplorerPage, must not collapse to its own content height)', () => {
+    renderShell();
+
+    const contentSlot = screen.getByTestId('page-content').parentElement;
+    const classes = (contentSlot?.className ?? '').split(/\s+/);
+    expect(classes).toContain('[&>*]:w-full');
+    expect(classes).toContain('[&>*]:h-full');
+  });
 });

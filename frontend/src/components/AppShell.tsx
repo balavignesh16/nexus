@@ -218,16 +218,21 @@ export function AppShell({ children }: AppShellProps = {}) {
             Deliberately kept on the legacy dark bg-canvas: pages not yet
             redesigned still use dark-theme text/surface colors, so the
             shared content slot itself must stay dark so those pages remain
-            legible. Intentionally NOT display:flex: a flex container's
-            single child defaults to shrink-to-fit (fit-content) width on
-            the main axis, not 100% - any page whose own content is
-            narrower than the available canvas (e.g. a single centered
-            column) would then leave this dark bg-canvas exposed as a
-            visible gap on the right. A plain block box gives the child
-            its correct default block-level width:auto (= fill 100% of
-            this container), which every redesigned page's own h-full/
-            overflow-y-auto root div already assumes. */}
-        <div className="flex-1 overflow-hidden bg-canvas relative z-0 rounded-[var(--radius-panel-lg)]">
+            legible. [&>*]:w-full [&>*]:h-full forces the one rendered page
+            root to exactly fill this slot regardless of how that page
+            authored its own sizing - some pages size themselves via
+            flex-1/min-h-0 (which only works when their parent is itself
+            display:flex), others via h-full (percentage height, which
+            only works when their parent has a definite height). Rather
+            than depend on either assumption holding for every page, this
+            direct-child rule makes both true unconditionally: a page
+            relying on flex-1 alone (e.g. ExplorerPage) no longer collapses
+            to its own content height, and a page relying on h-full is
+            pinned to 100% with certainty. This replaces an earlier,
+            narrower fix that only solved the width case and inadvertently
+            left the height case unresolved for pages using flex-1 without
+            h-full. */}
+        <div className="flex-1 overflow-hidden bg-canvas relative z-0 rounded-[var(--radius-panel-lg)] [&>*]:w-full [&>*]:h-full">
           {children || <Outlet />}
         </div>
       </div>
