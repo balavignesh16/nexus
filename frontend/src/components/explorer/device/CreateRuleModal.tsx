@@ -3,7 +3,12 @@ import { X } from 'lucide-react';
 import { ruleApi, type RuleField, type RuleOperator } from '../../../api/ruleApi';
 
 interface CreateRuleModalProps {
-  deviceId: string;
+  /** Optional (Step 4): when launched from a device's Rules tab, pre-fills
+   * the condition to DEVICE_ID = this device. When launched from the
+   * global Rules page there is no device context, so the condition value
+   * starts blank - never a fabricated device ID - and the user fills it
+   * in via the existing, unchanged form fields. */
+  deviceId?: string;
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
@@ -25,7 +30,7 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
   const [enabled, setEnabled] = useState(true);
   const [conditionField, setConditionField] = useState<RuleField>('DEVICE_ID');
   const [conditionOperator, setConditionOperator] = useState<RuleOperator>('EQ');
-  const [conditionValue, setConditionValue] = useState(deviceId);
+  const [conditionValue, setConditionValue] = useState(deviceId ?? '');
   const [actionType, setActionType] = useState<typeof ACTION_TYPES[number]>('CREATE_ALERT');
   const [actionParams, setActionParams] = useState('{"severity":"INFO"}');
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +44,7 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
     setEnabled(true);
     setConditionField('DEVICE_ID');
     setConditionOperator('EQ');
-    setConditionValue(deviceId);
+    setConditionValue(deviceId ?? '');
     setActionType('CREATE_ALERT');
     setActionParams('{"severity":"INFO"}');
     setError(null);

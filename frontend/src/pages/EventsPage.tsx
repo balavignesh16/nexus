@@ -2,10 +2,18 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRepositories } from '../repositories/RepositoryProvider';
 import { usePolling } from '../hooks/usePolling';
-import { Zap, Search, Filter, AlertTriangle, AlertCircle, Info, Hash } from 'lucide-react';
-import { Skeleton } from '../components/ui/Skeleton';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Zap, Search, AlertTriangle, AlertCircle, Info, Hash, Cpu } from 'lucide-react';
 import { useInspector } from '../components/ui/InspectorProvider';
+import { GlassPanel } from '../components/foundation/GlassPanel';
+import { Card } from '../components/foundation/Card';
+import { SectionHeader } from '../components/foundation/SectionHeader';
+import { Input } from '../components/foundation/Input';
+import { Pill } from '../components/foundation/Pill';
+import { EmptyState } from '../components/foundation/EmptyState';
+import { LoadingBlock } from '../components/foundation/LoadingState';
+import { DataSourceBadge } from '../components/ui/DataSourceBadge';
+
+const SEVERITIES = ['ALL', 'INFO', 'WARNING', 'CRITICAL'];
 
 export default function EventsPage() {
   const { events } = useRepositories();
@@ -22,162 +30,177 @@ export default function EventsPage() {
 
   const filteredEvents = useMemo(() => {
     return [...globalEvents].filter((e: any) => {
-      const matchSearch = (e.type || '').toLowerCase().includes(search.toLowerCase()) || 
+      const matchSearch = (e.type || '').toLowerCase().includes(search.toLowerCase()) ||
                           (e.deviceId || '').toLowerCase().includes(search.toLowerCase());
       const matchSeverity = filterSeverity === 'ALL' || e.severity === filterSeverity;
       return matchSearch && matchSeverity;
     });
   }, [globalEvents, search, filterSeverity]);
 
+  // Real counts computed from the currently loaded event set - never a
+  // fabricated percentage/trend.
+  const summary = useMemo(() => {
+    return {
+      total: globalEvents.length,
+      critical: globalEvents.filter((e: any) => e.severity === 'CRITICAL').length,
+      warning: globalEvents.filter((e: any) => e.severity === 'WARNING').length,
+      info: globalEvents.filter((e: any) => e.severity === 'INFO').length,
+    };
+  }, [globalEvents]);
+
+  const getEventIcon = (severity: string) => {
+    switch (severity) {
+      case 'CRITICAL': return <AlertCircle size={16} style={{ color: 'var(--danger)' }} />;
+      case 'WARNING': return <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />;
+      default: return <Info size={16} style={{ color: 'var(--accent)' }} />;
+    }
+  };
+
   if (isLoading && globalEvents.length === 0) {
     return (
-      <div className="p-8 h-full flex flex-col gap-4">
-        <Skeleton className="w-1/3 h-10 rounded" />
-        <Skeleton className="w-full h-full rounded-xl" />
+      <div className="flex flex-col h-full overflow-y-auto p-4 sm:p-6" style={{ backgroundColor: 'var(--foundation-bg)' }}>
+        <LoadingBlock className="h-16 mb-4" />
+        <LoadingBlock className="flex-1" />
       </div>
     );
   }
 
-  const getEventIcon = (severity: string) => {
-    switch (severity) {
-      case 'CRITICAL': return <AlertCircle size={16} className="text-destructive" />;
-      case 'WARNING': return <AlertTriangle size={16} className="text-warning" />;
-      default: return <Info size={16} className="text-blue-400" />;
-    }
-  };
-
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#060b14] overflow-hidden text-foreground animate-in fade-in duration-300">
-      
-      {/* TOOLBAR */}
-      <div className="shrink-0 h-16 border-b border-[#1f1f28] flex items-center justify-between px-6 bg-[#0a0a0f]">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-500/10 rounded-lg">
-            <Zap size={20} className="text-blue-400" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold">Event Operations Center</h1>
-            <p className="text-xs text-muted-foreground">Global event stream & correlation</p>
-          </div>
-        </div>
+    <div className="flex flex-col h-full overflow-y-auto" style={{ backgroundColor: 'var(--foundation-bg)' }}>
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8 max-w-[1100px] w-full mx-auto">
 
-        <div className="flex items-center gap-4">
+        {/* HEADER */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <SectionHeader
+            icon={<Zap size={18} />}
+            title="Events"
+            subtitle="Global event stream & correlation"
+          />
           <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input 
-              type="text" 
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-foundation-muted-fg" />
+            <Input
+              type="text"
               placeholder="Search events..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="pl-9 pr-4 py-1.5 bg-[#13131a] border border-[#1f1f28] rounded-md text-sm focus:outline-none focus:border-blue-500 transition-colors w-64"
+              className="pl-9 w-64"
             />
           </div>
-          
-          <select 
-            className="bg-[#13131a] border border-[#1f1f28] rounded-md text-sm px-3 py-1.5 focus:outline-none focus:border-blue-500"
-            value={filterSeverity}
-            onChange={e => setFilterSeverity(e.target.value)}
-          >
-            <option value="ALL">All Severities</option>
-            <option value="INFO">Info</option>
-            <option value="WARNING">Warning</option>
-            <option value="CRITICAL">Critical</option>
-          </select>
-          
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-[#13131a] border border-[#1f1f28] rounded-md text-sm text-muted-foreground hover:text-foreground">
-            <Filter size={14} /> Advanced
-          </button>
         </div>
-      </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        
+        {/* FILTERS */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {SEVERITIES.map(s => (
+            <Pill key={s} active={filterSeverity === s} onClick={() => setFilterSeverity(s)}>{s}</Pill>
+          ))}
+        </div>
+
+        {/* SUMMARY */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          {[
+            { label: 'Total', value: summary.total, color: 'var(--foundation-fg)' },
+            { label: 'Critical', value: summary.critical, color: 'var(--danger)' },
+            { label: 'Warning', value: summary.warning, color: 'var(--warning)' },
+            { label: 'Info', value: summary.info, color: 'var(--accent)' },
+          ].map((stat) => (
+            <Card key={stat.label} level="glass" padding="md">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wider text-foundation-muted-fg">{stat.label}</span>
+                <DataSourceBadge classification="CALCULATED" variant="foundation" />
+              </div>
+              <div className="text-2xl font-semibold mt-1.5" style={{ color: stat.color }}>{stat.value}</div>
+            </Card>
+          ))}
+        </div>
+
         {/* TIMELINE */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-          <div className="max-w-4xl mx-auto space-y-4">
-            <AnimatePresence>
-              {filteredEvents.length === 0 ? (
-                <div className="text-center py-20 text-muted-foreground">
-                  <Zap size={48} className="mx-auto opacity-20 mb-4" />
-                  <p>No events found matching your criteria.</p>
-                </div>
-              ) : (
-                filteredEvents.map((event: any, idx: number) => {
-                  return (
-                    <motion.div 
-                      key={event.id || idx}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      onClick={() => openInspector({
-                        id: event.id,
-                        type: 'Event',
-                        title: event.type,
-                        subtitle: event.deviceId ? `Source: ${event.deviceId}` : 'System Event',
-                        status: event.severity,
-                        statusColor: event.severity === 'CRITICAL' ? 'destructive' : event.severity === 'WARNING' ? 'warning' : 'success',
-                        properties: {
-                          'Correlation ID': event.correlationId || 'N/A',
-                          'Source Node': event.deviceId || 'System',
-                          'Timestamp': new Date(event.timestamp).toLocaleString(),
-                          'Severity': event.severity
-                        },
-                        rawJson: event,
-                        correlationId: event.correlationId,
-                        // No real per-event history source exists (Phase 3) -
-                        // omitted rather than fabricated. The real
-                        // correlation/pipeline trace is reachable via the
-                        // "View Trace" link below, when a correlationId
-                        // actually exists.
-                      })}
-                      className={`relative pl-8 pb-8 group cursor-pointer`}
-                    >
-                      {/* Line */}
-                      <div className={`absolute left-[11px] top-6 bottom-0 w-0.5 ${idx === filteredEvents.length - 1 ? 'bg-transparent' : 'bg-[#1f1f28]'}`}></div>
-                      
-                      {/* Dot */}
-                      <div className={`absolute left-0 top-1 p-1.5 rounded-lg border bg-[#13131a] z-10 transition-colors ${
-                        event.severity === 'CRITICAL' ? 'border-destructive/30 group-hover:border-destructive/60' :
-                        event.severity === 'WARNING' ? 'border-warning/30 group-hover:border-warning/60' :
-                        'border-blue-500/30 group-hover:border-blue-500/60'
-                      }`}>
-                        {getEventIcon(event.severity)}
+        {filteredEvents.length === 0 ? (
+          <Card level="glass" padding="lg">
+            <EmptyState icon={<Zap size={28} />} title="No events found matching your criteria." />
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-3 pb-4">
+            {filteredEvents.map((event: any, idx: number) => (
+              <GlassPanel
+                key={event.id || idx}
+                level="glass"
+                className="p-4 cursor-pointer transition-colors hover:shadow-[var(--shadow-glass-lg)]"
+                onClick={() => openInspector({
+                  id: event.id,
+                  type: 'Event',
+                  title: event.type,
+                  subtitle: event.deviceId ? `Source: ${event.deviceId}` : 'System Event',
+                  status: event.severity,
+                  statusColor: event.severity === 'CRITICAL' ? 'destructive' : event.severity === 'WARNING' ? 'warning' : 'success',
+                  properties: {
+                    'Correlation ID': event.correlationId || 'N/A',
+                    'Source Node': event.deviceId || 'System',
+                    'Timestamp': new Date(event.timestamp).toLocaleString(),
+                    'Severity': event.severity,
+                  },
+                  rawJson: event,
+                  correlationId: event.correlationId,
+                })}
+              >
+                <div className="flex items-start gap-3.5">
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)' }}
+                  >
+                    {getEventIcon(event.severity)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0"
+                          style={{
+                            backgroundColor: event.severity === 'CRITICAL' ? 'color-mix(in srgb, var(--danger) 14%, transparent)' : event.severity === 'WARNING' ? 'color-mix(in srgb, var(--warning) 14%, transparent)' : 'color-mix(in srgb, var(--accent) 14%, transparent)',
+                            color: event.severity === 'CRITICAL' ? 'var(--danger)' : event.severity === 'WARNING' ? 'var(--warning)' : 'var(--accent)',
+                          }}
+                        >
+                          {event.severity || 'UNKNOWN'}
+                        </span>
+                        <h3 className="font-semibold text-foundation-fg truncate">{event.type}</h3>
                       </div>
+                      <span className="text-xs font-mono text-foundation-tertiary-fg shrink-0" title={new Date(event.timestamp).toLocaleString()}>
+                        {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foundation-muted-fg mt-1.5">{event.message}</p>
 
-                      {/* Content Card */}
-                      <div className={`bg-card/50 backdrop-blur border rounded-xl p-4 transition-all border-border/50 group-hover:border-[#2d2d3d] group-hover:bg-[#13131a]`}>
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="font-semibold text-foreground group-hover:text-blue-400 transition-colors">{event.type}</h3>
-                          <span className="text-xs font-mono text-muted-foreground bg-[#0a0a0f] px-2 py-1 rounded border border-[#1f1f28]">
-                            {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                          </span>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">{event.message}</p>
-                        
-                        {event.correlationId && (
-                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#1f1f28]/50 text-xs font-mono text-muted-foreground">
-                            <Hash size={12} className="text-purple-400" />
-                            {event.correlationId}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/pipeline?correlationId=${encodeURIComponent(event.correlationId)}`);
-                              }}
-                              className="ml-auto text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
-                            >
-                              View Trace &rarr;
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })
-              )}
-            </AnimatePresence>
+                    {/* Real operational metadata row - every field shown
+                        honestly, "Unavailable" rather than a silently
+                        empty/missing segment when a real event genuinely
+                        has no device/correlationId (e.g. system events). */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2.5 pt-2.5 border-t border-foundation-border text-xs">
+                      <span className="flex items-center gap-1.5 text-foundation-muted-fg">
+                        <Cpu size={12} className="text-foundation-tertiary-fg" />
+                        {event.deviceId || 'Unavailable'}
+                      </span>
+                      <span className="flex items-center gap-1.5 font-mono text-foundation-muted-fg min-w-0">
+                        <Hash size={12} className="text-foundation-tertiary-fg shrink-0" />
+                        <span className="truncate">{event.correlationId || 'Unavailable'}</span>
+                      </span>
+                      {event.correlationId && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/pipeline?correlationId=${encodeURIComponent(event.correlationId)}`);
+                          }}
+                          className="ml-auto text-[11px] font-medium hover:underline shrink-0"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          View Trace &rarr;
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </GlassPanel>
+            ))}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -126,4 +126,13 @@ describe('AppShell - navigation, connection state, real overlays', () => {
 
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
+
+  it('the content slot is not display:flex, so a narrower page cannot leave dark bg-canvas exposed as a right-side gap (regression)', () => {
+    renderShell();
+
+    const contentSlot = screen.getByTestId('page-content').parentElement;
+    const classes = (contentSlot?.className ?? '').split(/\s+/);
+    expect(classes).not.toContain('flex');
+    expect(classes).toContain('bg-canvas');
+  });
 });

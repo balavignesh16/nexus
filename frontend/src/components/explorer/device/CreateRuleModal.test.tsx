@@ -26,6 +26,19 @@ describe('CreateRuleModal - real rule creation, no fabrication', () => {
     expect(screen.getByDisplayValue('dev-1')).toBeInTheDocument();
   });
 
+  it('Step 4: with no deviceId (global Rules page), the condition value starts blank - never a fabricated device ID', async () => {
+    render(<CreateRuleModal isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'Global Rule' } });
+    fireEvent.click(screen.getAllByText('Create Rule').find((el) => el.tagName === 'BUTTON')!);
+
+    await waitFor(() => expect(ruleApi.createRule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conditions: [{ field: 'DEVICE_ID', operator: 'EQ', expectedValue: '' }],
+      })
+    ));
+  });
+
   it('requires a name before submitting', async () => {
     render(<CreateRuleModal deviceId="dev-1" isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByText('Create Rule', { selector: 'button' }));

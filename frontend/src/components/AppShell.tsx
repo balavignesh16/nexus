@@ -215,14 +215,19 @@ export function AppShell({ children }: AppShellProps = {}) {
         </aside>
 
         {/* PANE 2/3: DYNAMIC MAIN CONTENT
-            Deliberately kept on the legacy dark bg-canvas: every other route
-            (Explorer, Twins, Telemetry, Events, Rules, Actions, Pipeline,
-            Analytics, AI Insights, Settings) has not been redesigned yet and
-            still uses dark-theme text/surface colors. Only HomePage (the
-            Overview route) paints its own light foundation background as a
-            self-contained container - the shared content slot itself must
-            stay dark so those untouched pages remain legible. */}
-        <div className="flex-1 flex overflow-hidden bg-canvas relative z-0 rounded-[var(--radius-panel-lg)]">
+            Deliberately kept on the legacy dark bg-canvas: pages not yet
+            redesigned still use dark-theme text/surface colors, so the
+            shared content slot itself must stay dark so those pages remain
+            legible. Intentionally NOT display:flex: a flex container's
+            single child defaults to shrink-to-fit (fit-content) width on
+            the main axis, not 100% - any page whose own content is
+            narrower than the available canvas (e.g. a single centered
+            column) would then leave this dark bg-canvas exposed as a
+            visible gap on the right. A plain block box gives the child
+            its correct default block-level width:auto (= fill 100% of
+            this container), which every redesigned page's own h-full/
+            overflow-y-auto root div already assumes. */}
+        <div className="flex-1 overflow-hidden bg-canvas relative z-0 rounded-[var(--radius-panel-lg)]">
           {children || <Outlet />}
         </div>
       </div>

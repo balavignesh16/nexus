@@ -96,4 +96,60 @@ describe('EventsPage - real correlation/pipeline trace links, no fabricated hist
 
     expect(screen.getByText('No events found matching your criteria.')).toBeInTheDocument();
   });
+
+  it('the CRITICAL severity pill filters to only real critical events', () => {
+    mockUsePolling.mockReturnValue({
+      data: [event({ severity: 'CRITICAL', type: 'GAS_LEAK' }), event({ severity: 'INFO', type: 'HEARTBEAT' })],
+      isLoading: false,
+    });
+
+    render(<EventsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'CRITICAL' }));
+
+    expect(screen.getByText('GAS_LEAK')).toBeInTheDocument();
+    expect(screen.queryByText('HEARTBEAT')).not.toBeInTheDocument();
+  });
+
+  it('shows real summary counts computed from the loaded event set, not a fabricated total', () => {
+    mockUsePolling.mockReturnValue({
+      data: [
+        event({ severity: 'CRITICAL' }),
+        event({ severity: 'CRITICAL' }),
+        event({ severity: 'WARNING' }),
+        event({ severity: 'INFO' }),
+      ],
+      isLoading: false,
+    });
+
+    render(<EventsPage />);
+
+    expect(screen.getByText('4')).toBeInTheDocument(); // total
+    expect(screen.getByText('2')).toBeInTheDocument(); // critical
+    expect(screen.getAllByText('1').length).toBe(2); // warning + info
+  });
+
+  it('never shows the dead "Advanced" filter control', () => {
+    mockUsePolling.mockReturnValue({ data: [event()], isLoading: false });
+
+    render(<EventsPage />);
+
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
+  });
+
+  it('shows the real severity and device on each row, not just a bare UUID', () => {
+    mockUsePolling.mockReturnValue({ data: [event({ severity: 'WARNING', deviceId: 'device-42' })], isLoading: false });
+
+    render(<EventsPage />);
+
+    expect(screen.getAllByText('WARNING').length).toBeGreaterThan(0);
+    expect(screen.getByText('device-42')).toBeInTheDocument();
+  });
+
+  it('shows an honest "Unavailable" for device/correlationId rather than a silently empty row when genuinely absent', () => {
+    mockUsePolling.mockReturnValue({ data: [event({ deviceId: null, correlationId: null })], isLoading: false });
+
+    render(<EventsPage />);
+
+    expect(screen.getAllByText('Unavailable').length).toBe(2);
+  });
 });
