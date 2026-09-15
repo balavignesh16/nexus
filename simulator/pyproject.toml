@@ -10,7 +10,8 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31.0",
     "pydantic>=2.5.0",
-    "paho-mqtt>=1.6.1"
+    "paho-mqtt>=1.6.1",
+    "PyYAML>=6.0"
 ]
 
 [project.optional-dependencies]

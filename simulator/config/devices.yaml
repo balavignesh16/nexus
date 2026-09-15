@@ -1,0 +1,33 @@
+# NEXUS Simulator - Phase 12 device/capability configuration.
+#
+# One entry here = one simulated ESP32 (DeviceType.CUSTOM, mode=SIMULATED).
+# `capabilities` are DeviceCapability rows for that device - never a
+# separate Device per sensor/actuator. This is an example allocation
+# only; capability lists are arbitrary and freely editable, and nothing
+# in the simulator hardcodes this specific split across the three boards.
+#
+# RELAY is deliberately ONE capability row with metadata.channels listing
+# the available channel numbers (Phase 11's UNIQUE(device_id,
+# capability_type, direction) constraint forbids four separate RELAY/WRITE
+# rows on one device).
+
+devices:
+  - name: ESP32-SIM-001
+    capabilities:
+      - {type: TEMPERATURE, direction: READ, unit: CELSIUS}
+      - {type: HUMIDITY, direction: READ, unit: PERCENT}
+      - {type: PRESSURE, direction: READ, unit: HPA}
+      - {type: MOTION, direction: READ, unit: BOOLEAN}
+      - {type: LED, direction: WRITE, unit: BOOLEAN}
+
+  - name: ESP32-SIM-002
+    capabilities:
+      - {type: GAS, direction: READ, unit: PPM}
+      - {type: RELAY, direction: WRITE, unit: BOOLEAN, metadata: {channels: [1, 2, 3, 4]}}
+      - {type: FAN, direction: WRITE, unit: BOOLEAN}
+      - {type: BUZZER, direction: WRITE, unit: BOOLEAN}
+
+  - name: ESP32-SIM-003
+    capabilities:
+      - {type: BUTTON, direction: READ, unit: BOOLEAN}
+      - {type: SERVO, direction: WRITE, unit: DEGREES}

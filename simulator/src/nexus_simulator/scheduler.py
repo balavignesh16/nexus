@@ -1,165 +1,172 @@
-import time
-from typing import Dict, Any, List
 import concurrent.futures
 import threading
+import time
+from typing import Dict, List
 
-from .generators import TelemetryGenerator, TemperatureGenerator, GasGenerator, MotionGenerator
-from .publishers import TelemetryPublisher
 from .client import NexusClient
+from .devices import SimulatedDevice
+from .mqtt_publisher import MQTTPublisher
+from .publishers import ConsolePublisher, HTTPPublisher
 
 
 class SimulatorScheduler:
-    def __init__(self, client: NexusClient, publisher: TelemetryPublisher, 
-                 interval_seconds: float, refresh_interval_seconds: float = 60.0,
-                 max_workers: int = 50, batch_size: int = 10):
+    """Capability-driven, multi-device simulator runtime.
+
+    Discovers SIMULATED devices from the backend (client.py already filters
+    out REAL devices), builds one SimulatedDevice per discovered device from
+    its provisioned capabilities, and independently schedules every READ
+    capability's telemetry publish. Each device owns exactly one MQTT
+    client (mqtt_publisher.py) for telemetry, LWT/status, command
+    subscription, and ACK - never one client per capability.
+    """
+
+    def __init__(self, client: NexusClient, config,
+                 refresh_interval_seconds: float = 60.0, max_workers: int = 50):
         self.client = client
-        self.publisher = publisher
-        self.interval_seconds = interval_seconds
+        self.config = config
         self.refresh_interval_seconds = refresh_interval_seconds
         self.max_workers = max_workers
-        self.batch_size = batch_size
-        
-        # State: device_id -> generator
-        self.device_generators: Dict[str, TelemetryGenerator] = {}
-        
+
+        self.devices: Dict[str, SimulatedDevice] = {}
+
         self.running = False
         self.last_sync_time = 0.0
-        
-        # Metrics
+
+        self._console = ConsolePublisher()
+        http_enabled = config.publish_mode in ("http", "composite")
+        self._http = HTTPPublisher(config.backend_url) if http_enabled else None
+        self._mqtt_enabled = config.publish_mode in ("mqtt", "composite")
+
         self.metrics_lock = threading.Lock()
         self.metrics = {
             "generated": 0,
             "published": 0,
             "failures": 0,
-            "latency_sum": 0.0,
-            "publish_count": 0
         }
 
-    def get_generator_for_type(self, device_type: str) -> TelemetryGenerator:
-        if device_type == "TEMPERATURE_SENSOR":
-            return TemperatureGenerator()
-        elif device_type == "GAS_SENSOR":
-            return GasGenerator()
-        elif device_type == "MOTION_SENSOR":
-            return MotionGenerator()
-        else:
-            return None
-
     def sync_devices(self) -> None:
-        """Fetches active devices and initializes generators for new ones."""
+        """Fetches SIMULATED devices and builds/tears down SimulatedDevice
+        instances (and their MQTT clients) for the delta."""
         try:
-            devices = self.client.get_active_devices()
+            device_dicts = self.client.get_active_devices()
             active_ids = set()
-            
-            for device in devices:
-                d_id = device.get("id")
-                active_ids.add(d_id)
-                if d_id not in self.device_generators:
-                    gen = self.get_generator_for_type(device.get("deviceType"))
-                    if gen:
-                        self.device_generators[d_id] = gen
-                    else:
-                        print(f"Unsupported device type ignored: {device.get('deviceType')} for {d_id}")
-                        self.device_generators[d_id] = None
-            
-            # Remove generators for devices that are no longer active
-            obsolete_ids = set(self.device_generators.keys()) - active_ids
-            for obs_id in obsolete_ids:
-                del self.device_generators[obs_id]
-                
+
+            for device_dict in device_dicts:
+                device_id = device_dict.get("id")
+                active_ids.add(device_id)
+                if device_id in self.devices:
+                    continue
+
+                sim_device = SimulatedDevice(
+                    device_id=device_id,
+                    name=device_dict.get("name", ""),
+                    serial_number=device_dict.get("serialNumber", ""),
+                    capabilities=device_dict.get("capabilities", []),
+                )
+
+                if not sim_device.has_capabilities():
+                    print(f"Device {device_id} has no supported provisioned capabilities "
+                          "- skipping")
+                    continue
+
+                if self._mqtt_enabled:
+                    sim_device.mqtt_publisher = MQTTPublisher(self.config, device_id, sim_device)
+
+                self.devices[device_id] = sim_device
+
+            obsolete_ids = set(self.devices.keys()) - active_ids
+            for obsolete_id in obsolete_ids:
+                device = self.devices.pop(obsolete_id)
+                if device.mqtt_publisher:
+                    device.mqtt_publisher.close()
+
             self.last_sync_time = time.time()
         except Exception as e:
             print(f"Failed to sync devices: {e}")
 
-    def process_batch(self, batch: List[str]) -> None:
-        for device_id in batch:
-            if not self.running:
-                break
-                
-            generator = self.device_generators.get(device_id)
-            if generator:
-                val = generator.generate()
-                # Default unit for simplicity; a robust system would map types to units
-                unit = "RAW"
-                if isinstance(generator, TemperatureGenerator):
-                    unit = "CELSIUS"
-                elif isinstance(generator, GasGenerator):
-                    unit = "PPM"
+    def _publish_reading(self, device: SimulatedDevice, capability) -> None:
+        value = capability.generator.generate()
+        if value is None:
+            # Event-driven capability (e.g. BUTTON) with no state change
+            # this tick - nothing to publish.
+            return
 
-                # The backend's TelemetryRequest.value is a numeric Double. MotionGenerator
-                # returns a Python bool, which Jackson cannot deserialize into a Double -
-                # that mismatch causes every motion-sensor message to be rejected and,
-                # under QoS 1, retried forever (a real poison-message loop, not hypothetical -
-                # observed live against the running backend). Encode presence as 1.0/0.0.
-                if isinstance(val, bool):
-                    val = 1.0 if val else 0.0
-                    unit = "BOOLEAN"
-                
-                sensor_type = type(generator).__name__.replace("Generator", "").upper() + "_SENSOR"
-                
-                success, latency = self.publisher.publish(device_id, sensor_type, val, unit)
-                
-                with self.metrics_lock:
-                    self.metrics["generated"] += 1
-                    if success:
-                        self.metrics["published"] += 1
-                    else:
-                        self.metrics["failures"] += 1
-                    self.metrics["latency_sum"] += latency
-                    self.metrics["publish_count"] += 1
+        unit = capability.unit
+        if isinstance(value, bool):
+            value = 1.0 if value else 0.0
+            if unit in (None, "RAW"):
+                unit = "BOOLEAN"
+
+        with self.metrics_lock:
+            self.metrics["generated"] += 1
+
+        success = True
+        device_id, sensor_type = device.device_id, capability.capability_type
+        self._console.publish(device_id, sensor_type, value, unit)
+        if self._http:
+            http_success, _ = self._http.publish(device_id, sensor_type, value, unit)
+            success = success and http_success
+        if device.mqtt_publisher:
+            mqtt_success, _ = device.mqtt_publisher.publish(device_id, sensor_type, value, unit)
+            success = success and mqtt_success
+
+        with self.metrics_lock:
+            if success:
+                self.metrics["published"] += 1
+            else:
+                self.metrics["failures"] += 1
 
     def print_metrics(self) -> None:
         with self.metrics_lock:
             generated = self.metrics["generated"]
             published = self.metrics["published"]
             failures = self.metrics["failures"]
-            publish_count = self.metrics["publish_count"]
-            avg_latency = self.metrics["latency_sum"] / publish_count if publish_count > 0 else 0
-            
-        print(f"\n--- Simulator Metrics ---")
-        print(f"Devices simulated     : {len(self.device_generators)}")
+
+        print("\n--- Simulator Metrics ---")
+        print(f"Devices simulated     : {len(self.devices)}")
         print(f"Telemetry generated   : {generated}")
         print(f"Telemetry published   : {published}")
         print(f"Publish failures      : {failures}")
-        print(f"Average latency       : {avg_latency:.2f} ms")
-        print(f"-------------------------\n")
+        print("-------------------------\n")
 
     def run(self) -> None:
         self.running = True
-        print(f"Simulator scheduler started. Polling every {self.interval_seconds}s.")
+        print("Simulator scheduler started (capability-driven). "
+              f"Polling every {self.config.publish_interval_seconds}s.")
         print(f"Device discovery every {self.refresh_interval_seconds}s.")
-        print(f"Concurrency: {self.max_workers} workers, {self.batch_size} batch size.")
-        
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
-        
+
         try:
             while self.running:
                 loop_start = time.time()
-                
+
                 if time.time() - self.last_sync_time >= self.refresh_interval_seconds:
                     self.sync_devices()
                     self.print_metrics()
-                
-                device_ids = [d for d, g in self.device_generators.items() if g is not None]
-                
-                # Create batches
-                batches = [device_ids[i:i + self.batch_size] for i in range(0, len(device_ids), self.batch_size)]
-                
-                futures = []
-                for batch in batches:
-                    futures.append(executor.submit(self.process_batch, batch))
-                    
-                # We don't block on futures here, they run concurrently.
-                # The loop sleeps until the next interval.
-                
+
+                tasks: List[tuple] = [
+                    (device, capability)
+                    for device in list(self.devices.values())
+                    for capability in device.read_capabilities.values()
+                ]
+
+                for device, capability in tasks:
+                    if not self.running:
+                        break
+                    executor.submit(self._publish_reading, device, capability)
+
                 elapsed = time.time() - loop_start
-                sleep_time = max(0.0, self.interval_seconds - elapsed)
+                sleep_time = max(0.0, self.config.publish_interval_seconds - elapsed)
                 time.sleep(sleep_time)
-                
+
         except KeyboardInterrupt:
             print("\nSimulator stopping. Gracefully shutting down...")
         finally:
             self.running = False
             executor.shutdown(wait=True)
+            for device in self.devices.values():
+                if device.mqtt_publisher:
+                    device.mqtt_publisher.close()
             self.print_metrics()
             print("Simulator shutdown complete.")
