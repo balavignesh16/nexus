@@ -4,7 +4,8 @@ import { useRepositories } from '../repositories/RepositoryProvider';
 import { usePolling } from '../hooks/usePolling';
 import { useActiveDevices } from '../hooks/queries';
 import { aiApi } from '../api/aiApi';
-import { FileJson, Search, Plus, Zap, CheckCircle2, XCircle, Circle, ArrowRight, Sparkles, Clock } from 'lucide-react';
+import { ruleApi } from '../api/ruleApi';
+import { FileJson, Search, Plus, Zap, CheckCircle2, XCircle, Circle, ArrowRight, Sparkles, Clock, Trash2, Power } from 'lucide-react';
 import { GlassPanel } from '../components/foundation/GlassPanel';
 import { Card } from '../components/foundation/Card';
 import { MetricCard } from '../components/foundation/MetricCard';
@@ -45,6 +46,30 @@ export function RulesPage() {
 
   const enabledCount = globalRules.filter(r => r.enabled).length;
   const disabledCount = globalRules.length - enabledCount;
+
+  const [busyRuleId, setBusyRuleId] = useState<string | null>(null);
+
+  const toggleEnabled = async (rule: any) => {
+    const id = rule.ruleId ?? rule.id;
+    setBusyRuleId(id);
+    try {
+      await (rule.enabled ? ruleApi.disableRule(id) : ruleApi.enableRule(id));
+      await refetch();
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
+
+  const deleteRule = async (rule: any) => {
+    const id = rule.ruleId ?? rule.id;
+    setBusyRuleId(id);
+    try {
+      await ruleApi.deleteRule(id);
+      await refetch();
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
 
   if (isLoading && globalRules.length === 0) {
     return (
@@ -157,6 +182,26 @@ export function RulesPage() {
                   <div className="flex items-center gap-1">
                     <Circle size={7} style={{ fill: rule.enabled ? 'var(--success)' : 'var(--foundation-tertiary-fg)', color: rule.enabled ? 'var(--success)' : 'var(--foundation-tertiary-fg)' }} />
                     {rule.enabled ? 'Monitored Live' : 'Not evaluated'}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleEnabled(rule)}
+                      disabled={busyRuleId === (rule.ruleId ?? rule.id)}
+                      aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                      className="text-foundation-muted-fg hover:text-foundation-fg disabled:opacity-40"
+                    >
+                      <Power size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteRule(rule)}
+                      disabled={busyRuleId === (rule.ruleId ?? rule.id)}
+                      aria-label="Delete rule"
+                      className="text-foundation-muted-fg hover:text-[var(--danger)] disabled:opacity-40"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
               </GlassPanel>

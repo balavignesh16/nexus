@@ -29,6 +29,13 @@ public interface DeviceCapabilityRepository extends JpaRepository<DeviceCapabili
 
     boolean existsByDeviceIdAndCapabilityTypeAndDirection(UUID deviceId, CapabilityType capabilityType, CapabilityDirection direction);
 
+    /**
+     * Phase 13: unlike the boolean existence check above, this returns the
+     * actual row - needed to read its metadata (e.g. RELAY's channel list)
+     * for command value validation.
+     */
+    Optional<DeviceCapability> findByDeviceIdAndCapabilityTypeAndDirection(UUID deviceId, CapabilityType capabilityType, CapabilityDirection direction);
+
     default Map<UUID, List<DeviceCapability>> findByDeviceIdInGroupedByDevice(Collection<UUID> deviceIds) {
         return findByDeviceIdIn(deviceIds).stream()
                 .collect(java.util.stream.Collectors.groupingBy(DeviceCapability::getDeviceId));

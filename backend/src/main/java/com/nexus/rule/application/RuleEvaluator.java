@@ -1,27 +1,57 @@
 package com.nexus.rule.application;
 
 import com.nexus.event.domain.DomainEvent;
+import com.nexus.rule.domain.CapabilityValueKind;
 import com.nexus.rule.domain.ConditionEvidence;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleCondition;
 import com.nexus.rule.domain.RuleEvaluationResult;
+import com.nexus.rule.domain.RuleField;
+import com.nexus.twin.domain.DigitalTwin;
+import com.nexus.twin.domain.DigitalTwinRegistry;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
+/**
+ * Phase 13: a condition with {@code capabilityType == null} is evaluated
+ * exactly as before Phase 13 - reading the triggering event's own payload,
+ * byte-for-byte unchanged (see extractActualValue/evaluateConditionMet). A
+ * condition with {@code capabilityType != null} is evaluated instead
+ * against CURRENT DigitalTwinRegistry state for one device's one capability
+ * - this is what makes multi-capability AND rules (e.g. "GAS > 800 AND
+ * MOTION == true") correct: a GAS-triggered event can still see MOTION's
+ * last-known state, because that state is read from the twin registry, not
+ * from this event's own payload. DigitalTwinRegistry.get(deviceId,
+ * sensorType) is a pure in-memory lookup (Phase 11 infrastructure) - this
+ * adds zero per-event database queries.
+ */
 @Component
 public class RuleEvaluator {
+
+    private static final String MISSING = "MISSING";
+
+    private final DigitalTwinRegistry digitalTwinRegistry;
+
+    public RuleEvaluator(DigitalTwinRegistry digitalTwinRegistry) {
+        this.digitalTwinRegistry = digitalTwinRegistry;
+    }
 
     public RuleEvaluationResult evaluate(Rule rule, DomainEvent event) {
         if (rule.conditions() == null || rule.conditions().isEmpty()) {
             return new RuleEvaluationResult(false, rule, event, "No conditions defined");
         }
 
+        UUID resolvedDeviceId = resolveDeviceId(rule, event);
+
         List<ConditionEvidence> evidence = new ArrayList<>();
         for (RuleCondition condition : rule.conditions()) {
-            ConditionEvidence conditionEvidence = evaluateCondition(condition, event);
+            ConditionEvidence conditionEvidence = evaluateCondition(condition, event, resolvedDeviceId);
             evidence.add(conditionEvidence);
             if (!conditionEvidence.conditionMet()) {
                 return new RuleEvaluationResult(false, rule, event, "Condition not met: " + condition.field(), evidence);
@@ -32,15 +62,108 @@ public class RuleEvaluator {
     }
 
     /**
-     * Extracts the actual value exactly once and reuses it both to decide
-     * whether the condition matched and to record it as evidence - the two
-     * concerns share a single extraction rather than each re-deriving it.
+     * The single device every capability-typed condition in this rule is
+     * scoped to (Phase 13 guardrail: strict single-device evaluation - never
+     * a mix of devices within one rule's condition set). An explicit
+     * DEVICE_ID condition pins it; otherwise the triggering event's own
+     * device is used (a platform-wide rule still only ever evaluates one
+     * device's state per evaluation instance, never two).
      */
-    private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event) {
+    private UUID resolveDeviceId(Rule rule, DomainEvent event) {
+        for (RuleCondition c : rule.conditions()) {
+            if (c.field() == RuleField.DEVICE_ID && c.expectedValue() != null) {
+                try {
+                    return UUID.fromString(c.expectedValue());
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            }
+        }
+        return event.deviceId();
+    }
+
+    private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event, UUID resolvedDeviceId) {
+        if (condition.capabilityType() != null) {
+            return evaluateCapabilityCondition(condition, resolvedDeviceId);
+        }
         Object actualValue = extractActualValue(condition, event);
         boolean conditionMet = evaluateConditionMet(condition, actualValue);
         return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), actualValue, conditionMet);
     }
+
+    /**
+     * Reads current state for (resolvedDeviceId, condition.capabilityType)
+     * from DigitalTwinRegistry - never from the triggering event's payload.
+     * A device the rule couldn't resolve, or a capability the device has
+     * never reported, is MISSING: evaluates to not-met, recorded explicitly
+     * as "MISSING" evidence, never silently coerced to a false/zero value.
+     * A present-but-old twin row still counts (no TTL/staleness rejection in
+     * Phase 13) - its timestamp is recorded in evidence regardless.
+     */
+    private ConditionEvidence evaluateCapabilityCondition(RuleCondition condition, UUID resolvedDeviceId) {
+        if (resolvedDeviceId == null) {
+            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), MISSING, false, null);
+        }
+
+        Optional<DigitalTwin> twin = digitalTwinRegistry.get(resolvedDeviceId, condition.capabilityType().name());
+        if (twin.isEmpty() || twin.get().latestValue() == null) {
+            Instant twinTimestamp = twin.map(DigitalTwin::latestTimestamp).orElse(null);
+            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), MISSING, false, twinTimestamp);
+        }
+
+        DigitalTwin currentTwin = twin.get();
+        double rawValue = currentTwin.latestValue();
+        CapabilityValueKind kind = CapabilityValueKind.of(condition.capabilityType());
+        boolean conditionMet = evaluateTypedConditionMet(condition, rawValue, kind);
+        Object actualValueForEvidence = kind == CapabilityValueKind.BOOLEAN ? (rawValue != 0.0) : rawValue;
+
+        return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(),
+                actualValueForEvidence, conditionMet, currentTwin.latestTimestamp());
+    }
+
+    /**
+     * BOOLEAN capabilities (MOTION, BUTTON) are never published as the
+     * string "true"/"false" - the Phase 12 simulator (and, by the same
+     * TelemetryRequest.value:Double contract, any real ESP32 firmware)
+     * encodes them as 1.0/0.0 because the telemetry value field is a hard
+     * Double. Deriving the boolean here from the twin's numeric value
+     * (!= 0.0) - never Boolean.parseBoolean(actualValue) - is what makes
+     * this correct against the real wire contract.
+     */
+    private boolean evaluateTypedConditionMet(RuleCondition condition, double rawValue, CapabilityValueKind kind) {
+        if (kind == CapabilityValueKind.BOOLEAN) {
+            boolean actual = rawValue != 0.0;
+            Boolean expected = parseBooleanOrNull(condition.expectedValue());
+            if (expected == null) return false;
+            return switch (condition.operator()) {
+                case EQ -> actual == expected;
+                case NE -> actual != expected;
+                default -> false; // GT/LT/GTE/LTE on a boolean capability is rejected at registration (RuleRegistry)
+            };
+        }
+
+        try {
+            double expected = Double.parseDouble(condition.expectedValue());
+            return switch (condition.operator()) {
+                case EQ -> rawValue == expected;
+                case NE -> rawValue != expected;
+                case GT -> rawValue > expected;
+                case LT -> rawValue < expected;
+                case GTE -> rawValue >= expected;
+                case LTE -> rawValue <= expected;
+            };
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private Boolean parseBooleanOrNull(String value) {
+        if ("true".equalsIgnoreCase(value)) return Boolean.TRUE;
+        if ("false".equalsIgnoreCase(value)) return Boolean.FALSE;
+        return null;
+    }
+
+    // ---- Legacy path (capabilityType == null) - unchanged from pre-Phase-13 ----
 
     private boolean evaluateConditionMet(RuleCondition condition, Object actualValue) {
         if (actualValue == null) return false;

@@ -21,6 +21,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Behavioral tests for RuleRegistry: validation on register(), enable/disable
@@ -33,12 +34,16 @@ import static org.mockito.Mockito.verify;
 class RuleRegistryTest {
 
     private RuleRepository repository;
+    private com.nexus.device.capability.DeviceCapabilityRepository deviceCapabilityRepository;
+    private com.nexus.device.domain.DeviceRepository deviceRepository;
     private RuleRegistry registry;
 
     @BeforeEach
     void setUp() {
         repository = mock(RuleRepository.class);
-        registry = new RuleRegistry(repository);
+        deviceCapabilityRepository = mock(com.nexus.device.capability.DeviceCapabilityRepository.class);
+        deviceRepository = mock(com.nexus.device.domain.DeviceRepository.class);
+        registry = new RuleRegistry(repository, deviceCapabilityRepository, deviceRepository);
     }
 
     private Rule validRule(String name, boolean enabled, int priority) {
@@ -269,5 +274,258 @@ class RuleRegistryTest {
 
         assertTrue(registry.get(rule.ruleId()).isPresent(),
                 "a failed delete must leave the rule in the cache exactly as it was");
+    }
+
+    // ---------- Phase 13: capability-aware condition validation ----------
+
+    private Rule ruleWithConditionsAndActions(List<RuleCondition> conditions, List<RuleAction> actions) {
+        return new Rule(UUID.randomUUID(), "Test Rule", true, 1, conditions, actions, Map.of());
+    }
+
+    @Test
+    void capabilityAwareCondition_deviceHasCapability_registersSuccessfully() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(
+                deviceId, com.nexus.device.capability.CapabilityType.GAS, com.nexus.device.capability.CapabilityDirection.READ))
+                .thenReturn(true);
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(
+                        new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceId.toString(), null),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "800", com.nexus.device.capability.CapabilityType.GAS)
+                ),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_deviceLacksCapability_rejected() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(
+                deviceId, com.nexus.device.capability.CapabilityType.GAS, com.nexus.device.capability.CapabilityDirection.READ))
+                .thenReturn(false);
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(
+                        new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceId.toString(), null),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "800", com.nexus.device.capability.CapabilityType.GAS)
+                ),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_platformWide_noDeviceIdCondition_skipsDeviceExistenceCheck() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "800", com.nexus.device.capability.CapabilityType.GAS)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+        org.mockito.Mockito.verifyNoInteractions(deviceCapabilityRepository);
+    }
+
+    @Test
+    void capabilityAwareCondition_rangeOperatorOnBooleanCapability_rejected() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "true", com.nexus.device.capability.CapabilityType.MOTION)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_eqOperatorOnBooleanCapability_accepted() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.EQ, "true", com.nexus.device.capability.CapabilityType.MOTION)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_malformedNumericExpectedValue_rejected() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "not-a-number", com.nexus.device.capability.CapabilityType.GAS)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_malformedBooleanExpectedValue_rejected() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.VALUE, RuleOperator.EQ, "yes", com.nexus.device.capability.CapabilityType.MOTION)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_sensorTypeContradictsCapabilityType_rejected() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(
+                        new RuleCondition(RuleField.SENSOR_TYPE, RuleOperator.EQ, "HUMIDITY", null),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "35", com.nexus.device.capability.CapabilityType.TEMPERATURE)
+                ),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void capabilityAwareCondition_sensorTypeMatchesCapabilityType_accepted() {
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(
+                        new RuleCondition(RuleField.SENSOR_TYPE, RuleOperator.EQ, "TEMPERATURE", null),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "35", com.nexus.device.capability.CapabilityType.TEMPERATURE)
+                ),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void legacyCondition_noCapabilityType_neverConsultsDeviceCapabilityRepository() {
+        // Exact backward-compatibility guarantee (Critical Issue 2 resolution):
+        // a rule with DEVICE_ID + VALUE but no capabilityType is untouched by
+        // any Phase 13 validation, exactly as it behaved before Phase 13.
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(
+                        new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, UUID.randomUUID().toString(), null),
+                        new RuleCondition(RuleField.VALUE, RuleOperator.GT, "800", null)
+                ),
+                List.of(new RuleAction("CREATE_ALERT", Map.of()))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+        org.mockito.Mockito.verifyNoInteractions(deviceCapabilityRepository);
+    }
+
+    // ---------- Phase 13: SEND_COMMAND rule action validation ----------
+
+    private RuleAction sendCommandAction(UUID deviceId, String capability, Object value) {
+        return new RuleAction("SEND_COMMAND", Map.of(
+                "deviceId", deviceId.toString(), "capability", capability, "command", "SET_STATE", "value", value));
+    }
+
+    @Test
+    void sendCommandAction_validRelay_registersSuccessfully() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceRepository.existsById(deviceId)).thenReturn(true);
+        com.nexus.device.capability.DeviceCapability relayCapability = mock(com.nexus.device.capability.DeviceCapability.class);
+        when(relayCapability.getMetadata()).thenReturn(Map.of("channels", List.of(1, 2, 3, 4)));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(
+                deviceId, com.nexus.device.capability.CapabilityType.RELAY, com.nexus.device.capability.CapabilityDirection.WRITE))
+                .thenReturn(java.util.Optional.of(relayCapability));
+
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(sendCommandAction(deviceId, "RELAY", Map.of("channel", 2, "state", true)))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void sendCommandAction_invalidRelayChannel_rejected() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceRepository.existsById(deviceId)).thenReturn(true);
+        com.nexus.device.capability.DeviceCapability relayCapability = mock(com.nexus.device.capability.DeviceCapability.class);
+        when(relayCapability.getMetadata()).thenReturn(Map.of("channels", List.of(1, 2, 3, 4)));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(
+                deviceId, com.nexus.device.capability.CapabilityType.RELAY, com.nexus.device.capability.CapabilityDirection.WRITE))
+                .thenReturn(java.util.Optional.of(relayCapability));
+
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(sendCommandAction(deviceId, "RELAY", Map.of("channel", 9, "state", true)))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void sendCommandAction_deviceMissingWriteCapability_rejected() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceRepository.existsById(deviceId)).thenReturn(true);
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(
+                deviceId, com.nexus.device.capability.CapabilityType.FAN, com.nexus.device.capability.CapabilityDirection.WRITE))
+                .thenReturn(java.util.Optional.empty());
+
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(sendCommandAction(deviceId, "FAN", true))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void sendCommandAction_nonexistentDevice_rejected() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceRepository.existsById(deviceId)).thenReturn(false);
+
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(sendCommandAction(deviceId, "FAN", true))
+        );
+
+        assertThrows(ValidationException.class, () -> registry.register(rule));
+    }
+
+    @Test
+    void createAlertAction_isNeverSubjectToCommandValidation() {
+        // Only SEND_COMMAND actions are validated against device/capability -
+        // CREATE_ALERT/WEBHOOK actions are completely untouched.
+        Rule rule = ruleWithConditionsAndActions(
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of("severity", "INFO")))
+        );
+
+        assertDoesNotThrow(() -> registry.register(rule));
+        org.mockito.Mockito.verifyNoInteractions(deviceRepository);
+        org.mockito.Mockito.verifyNoInteractions(deviceCapabilityRepository);
+    }
+
+    // ---------- Phase 13: cooldown validation ----------
+
+    @Test
+    void cooldownSeconds_null_accepted() {
+        Rule rule = new Rule(UUID.randomUUID(), "No Cooldown", true, 1,
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of(), null);
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void cooldownSeconds_positive_accepted() {
+        Rule rule = new Rule(UUID.randomUUID(), "With Cooldown", true, 1,
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of(), 60);
+
+        assertDoesNotThrow(() -> registry.register(rule));
+    }
+
+    @Test
+    void cooldownSeconds_zeroOrNegative_rejected() {
+        Rule zeroCooldown = new Rule(UUID.randomUUID(), "Zero Cooldown", true, 1,
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of(), 0);
+        Rule negativeCooldown = new Rule(UUID.randomUUID(), "Negative Cooldown", true, 1,
+                List.of(new RuleCondition(RuleField.EVENT_TYPE, RuleOperator.EQ, "TWIN_UPDATED", null)),
+                List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of(), -5);
+
+        assertThrows(ValidationException.class, () -> registry.register(zeroCooldown));
+        assertThrows(ValidationException.class, () -> registry.register(negativeCooldown));
     }
 }

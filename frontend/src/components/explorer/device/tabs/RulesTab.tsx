@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus, AlertTriangle, Sparkles, Clock } from 'lucide-react';
+import { Server, Activity, ArrowRight, CheckCircle2, Circle, Plus, AlertTriangle, Sparkles, Clock, Power, Trash2 } from 'lucide-react';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { DebugOverlay } from '../DebugOverlay';
 import { CreateRuleModal } from '../CreateRuleModal';
 import { aiApi } from '../../../../api/aiApi';
+import { ruleApi } from '../../../../api/ruleApi';
 import { Card } from '../../../foundation/Card';
 import { GlassPanel } from '../../../foundation/GlassPanel';
 import { Button } from '../../../foundation/Button';
@@ -21,6 +22,29 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
     { interval: 30000 }
   );
   const [modalOpen, setModalOpen] = useState(false);
+  const [busyRuleId, setBusyRuleId] = useState<string | null>(null);
+
+  const toggleEnabled = async (rule: any) => {
+    const id = rule.ruleId ?? rule.id;
+    setBusyRuleId(id);
+    try {
+      await (rule.enabled ? ruleApi.disableRule(id) : ruleApi.enableRule(id));
+      await refetch();
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
+
+  const deleteRule = async (rule: any) => {
+    const id = rule.ruleId ?? rule.id;
+    setBusyRuleId(id);
+    try {
+      await ruleApi.deleteRule(id);
+      await refetch();
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
 
   // Phase 3: this device's real recent rule-match history, via the
   // persisted eventId -> DomainEvent.deviceId relationship
@@ -135,7 +159,27 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
                   <Circle size={8} style={{ fill: rule.enabled ? 'var(--success)' : 'var(--foundation-tertiary-fg)', color: rule.enabled ? 'var(--success)' : 'var(--foundation-tertiary-fg)' }} />
                   {rule.enabled ? 'Monitored Live' : 'Not evaluated'}
                 </div>
-                <span>Priority: {rule.priority}</span>
+                <div className="flex items-center gap-3">
+                  <span>Priority: {rule.priority}</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleEnabled(rule)}
+                    disabled={busyRuleId === (rule.ruleId ?? rule.id)}
+                    aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                    className="text-foundation-muted-fg hover:text-foundation-fg disabled:opacity-40"
+                  >
+                    <Power size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteRule(rule)}
+                    disabled={busyRuleId === (rule.ruleId ?? rule.id)}
+                    aria-label="Delete rule"
+                    className="text-foundation-muted-fg hover:text-[var(--danger)] disabled:opacity-40"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
             </GlassPanel>
           ))}

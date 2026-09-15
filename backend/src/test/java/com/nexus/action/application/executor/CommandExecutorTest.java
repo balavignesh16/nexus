@@ -9,10 +9,13 @@ import com.nexus.action.domain.ActionType;
 import com.nexus.action.domain.ExecutionStatus;
 import com.nexus.device.capability.CapabilityDirection;
 import com.nexus.device.capability.CapabilityType;
+import com.nexus.device.capability.DeviceCapability;
 import com.nexus.device.capability.DeviceCapabilityRepository;
 import com.nexus.device.connectivity.DeviceConnectivity;
 import com.nexus.device.connectivity.DeviceConnectivityRegistry;
 import com.nexus.device.connectivity.DeviceConnectivityStatus;
+import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,10 +35,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
- * Tier 5D: CommandExecutor is the sole gate that turns an ActionExecutionRequest
- * into a real, non-retained, QoS-1 MQTT command - only after device
- * existence, capability authorization, command-shape validation, and
- * device connectivity all pass, in that order.
+ * Tier 5D / Phase 13: CommandExecutor is the sole gate that turns an
+ * ActionExecutionRequest into a real, non-retained, QoS-1 MQTT command -
+ * only after device existence, REAL-mode rejection, capability
+ * authorization, command/value-shape validation (CommandValueValidator),
+ * and device connectivity all pass, in that order.
  */
 class CommandExecutorTest {
 
@@ -45,6 +50,7 @@ class CommandExecutorTest {
     private CommandExecutor executor;
 
     private UUID deviceId;
+    private Device simulatedDevice;
     private ActionExecutionRequest ledOnRequest;
 
     @BeforeEach
@@ -57,21 +63,31 @@ class CommandExecutorTest {
         executor = new CommandExecutor(deviceRepository, deviceCapabilityRepository, deviceConnectivityRegistry, mqttClient, objectMapper);
 
         deviceId = UUID.randomUUID();
+        simulatedDevice = mock(Device.class);
+        when(simulatedDevice.getMode()).thenReturn(DeviceMode.SIMULATED);
+
         ledOnRequest = new ActionExecutionRequest(
                 UUID.randomUUID(), null, ActionType.SEND_COMMAND,
                 Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "SET_STATE", "value", true));
     }
 
+    private DeviceCapability writeCapability(CapabilityType type, Map<String, Object> metadata) {
+        DeviceCapability capability = mock(DeviceCapability.class);
+        when(capability.getMetadata()).thenReturn(metadata);
+        return capability;
+    }
+
     private void givenDeviceExistsAuthorizedAndOnline() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         when(deviceConnectivityRegistry.get(deviceId))
                 .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.ONLINE, Instant.now())));
         when(mqttClient.isConnected()).thenReturn(true);
     }
 
-    // ---------- happy path ----------
+    // ---------- happy path (LED regression - byte-for-byte, pre-Phase-13 behavior) ----------
 
     @Test
     void authorizedOnlineDevice_publishesCommand_andReturnsSuccess() throws Exception {
@@ -128,9 +144,9 @@ class CommandExecutorTest {
 
     @Test
     void missingWriteCapability_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(false);
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.empty());
 
         ActionExecutionResult result = executor.execute(ledOnRequest, new ActionContext(null, null));
 
@@ -141,11 +157,9 @@ class CommandExecutorTest {
     @Test
     void deviceHasReadOnly_notWrite_rejectsWithoutPublishing() throws Exception {
         // Device has LED READ but not LED WRITE - the exact "wrong direction" case.
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.READ))
-                .thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(false);
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.empty());
 
         ActionExecutionResult result = executor.execute(ledOnRequest, new ActionContext(null, null));
 
@@ -157,9 +171,10 @@ class CommandExecutorTest {
 
     @Test
     void unsupportedCommand_forAuthorizedCapability_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         ActionExecutionRequest badCommand = new ActionExecutionRequest(
                 UUID.randomUUID(), null, ActionType.SEND_COMMAND,
                 Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "BLINK", "value", true));
@@ -172,9 +187,10 @@ class CommandExecutorTest {
 
     @Test
     void nonBooleanValue_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         ActionExecutionRequest badValue = new ActionExecutionRequest(
                 UUID.randomUUID(), null, ActionType.SEND_COMMAND,
                 Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "SET_STATE", "value", "not-a-boolean"));
@@ -185,13 +201,134 @@ class CommandExecutorTest {
         verify(mqttClient, never()).publish(anyString(), any(MqttMessage.class));
     }
 
+    // ---------- Phase 13: non-LED WRITE capabilities ----------
+
+    @Test
+    void relayCommand_validChannel_publishesCommand() throws Exception {
+        DeviceCapability relayCapability = writeCapability(CapabilityType.RELAY, Map.of("channels", List.of(1, 2, 3, 4)));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.RELAY, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(relayCapability));
+        when(deviceConnectivityRegistry.get(deviceId))
+                .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.ONLINE, Instant.now())));
+        when(mqttClient.isConnected()).thenReturn(true);
+
+        ActionExecutionRequest relayRequest = new ActionExecutionRequest(
+                UUID.randomUUID(), null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "RELAY", "command", "SET_STATE",
+                        "value", Map.of("channel", 2, "state", true)));
+
+        ActionExecutionResult result = executor.execute(relayRequest, new ActionContext(null, null));
+
+        assertEquals(ExecutionStatus.SUCCESS, result.status());
+        org.mockito.ArgumentCaptor<MqttMessage> messageCaptor = org.mockito.ArgumentCaptor.forClass(MqttMessage.class);
+        verify(mqttClient).publish(anyString(), messageCaptor.capture());
+        JsonNode payload = new ObjectMapper().readTree(messageCaptor.getValue().getPayload());
+        assertEquals(2, payload.get("value").get("channel").asInt());
+        assertTrue(payload.get("value").get("state").asBoolean());
+    }
+
+    @Test
+    void relayCommand_invalidChannel_rejectsWithoutPublishing() throws Exception {
+        DeviceCapability relayCapability = writeCapability(CapabilityType.RELAY, Map.of("channels", List.of(1, 2, 3, 4)));
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.RELAY, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(relayCapability));
+
+        ActionExecutionRequest relayRequest = new ActionExecutionRequest(
+                UUID.randomUUID(), null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "RELAY", "command", "SET_STATE",
+                        "value", Map.of("channel", 9, "state", true)));
+
+        ActionExecutionResult result = executor.execute(relayRequest, new ActionContext(null, null));
+
+        assertEquals(ExecutionStatus.FAILURE, result.status());
+        verify(mqttClient, never()).publish(anyString(), any(MqttMessage.class));
+    }
+
+    @Test
+    void servoCommand_validAngle_publishesCommand() throws Exception {
+        DeviceCapability servoCapability = writeCapability(CapabilityType.SERVO, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.SERVO, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(servoCapability));
+        when(deviceConnectivityRegistry.get(deviceId))
+                .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.ONLINE, Instant.now())));
+        when(mqttClient.isConnected()).thenReturn(true);
+
+        ActionExecutionRequest servoRequest = new ActionExecutionRequest(
+                UUID.randomUUID(), null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "SERVO", "command", "SET_STATE", "value", 90));
+
+        ActionExecutionResult result = executor.execute(servoRequest, new ActionContext(null, null));
+
+        assertEquals(ExecutionStatus.SUCCESS, result.status());
+    }
+
+    @Test
+    void servoCommand_outOfRangeAngle_rejectsWithoutPublishing() throws Exception {
+        DeviceCapability servoCapability = writeCapability(CapabilityType.SERVO, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.SERVO, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(servoCapability));
+
+        ActionExecutionRequest servoRequest = new ActionExecutionRequest(
+                UUID.randomUUID(), null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "SERVO", "command", "SET_STATE", "value", 270));
+
+        ActionExecutionResult result = executor.execute(servoRequest, new ActionContext(null, null));
+
+        assertEquals(ExecutionStatus.FAILURE, result.status());
+        verify(mqttClient, never()).publish(anyString(), any(MqttMessage.class));
+    }
+
+    @Test
+    void fanAndBuzzerCommands_validBoolean_publishCommand() throws Exception {
+        for (CapabilityType type : List.of(CapabilityType.FAN, CapabilityType.BUZZER)) {
+            reset(deviceRepository, deviceCapabilityRepository, deviceConnectivityRegistry, mqttClient);
+            DeviceCapability capability = writeCapability(type, Map.of());
+            when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+            when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, type, CapabilityDirection.WRITE))
+                    .thenReturn(Optional.of(capability));
+            when(deviceConnectivityRegistry.get(deviceId))
+                    .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.ONLINE, Instant.now())));
+            when(mqttClient.isConnected()).thenReturn(true);
+
+            ActionExecutionRequest request = new ActionExecutionRequest(
+                    UUID.randomUUID(), null, ActionType.SEND_COMMAND,
+                    Map.of("deviceId", deviceId.toString(), "capability", type.name(), "command", "SET_STATE", "value", true));
+
+            ActionExecutionResult result = executor.execute(request, new ActionContext(null, null));
+
+            assertEquals(ExecutionStatus.SUCCESS, result.status(), type + " should be dispatchable with a boolean value");
+        }
+    }
+
+    // ---------- Phase 13: REAL-mode guard ----------
+
+    @Test
+    void realDevice_rejectsCommandDispatch_regardlessOfOtherPreconditions() throws Exception {
+        Device realDevice = mock(Device.class);
+        when(realDevice.getMode()).thenReturn(DeviceMode.REAL);
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(realDevice));
+
+        ActionExecutionResult result = executor.execute(ledOnRequest, new ActionContext(null, null));
+
+        assertEquals(ExecutionStatus.FAILURE, result.status());
+        assertTrue(result.message().toLowerCase().contains("real"), "message must explain the REAL-mode rejection");
+        verifyNoInteractions(mqttClient);
+        // Must fail before ever touching capability/connectivity lookups.
+        verifyNoInteractions(deviceCapabilityRepository);
+    }
+
     // ---------- connectivity precondition ----------
 
     @Test
     void offlineDevice_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         when(deviceConnectivityRegistry.get(deviceId))
                 .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.OFFLINE, Instant.now())));
 
@@ -204,9 +341,10 @@ class CommandExecutorTest {
 
     @Test
     void unknownConnectivity_neverObserved_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         when(deviceConnectivityRegistry.get(deviceId)).thenReturn(Optional.empty());
 
         ActionExecutionResult result = executor.execute(ledOnRequest, new ActionContext(null, null));
@@ -219,9 +357,10 @@ class CommandExecutorTest {
 
     @Test
     void mqttDisconnected_rejectsWithoutPublishing() throws Exception {
-        when(deviceRepository.existsById(deviceId)).thenReturn(true);
-        when(deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
-                .thenReturn(true);
+        DeviceCapability ledCapability = writeCapability(CapabilityType.LED, Map.of());
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(simulatedDevice));
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId, CapabilityType.LED, CapabilityDirection.WRITE))
+                .thenReturn(Optional.of(ledCapability));
         when(deviceConnectivityRegistry.get(deviceId))
                 .thenReturn(Optional.of(new DeviceConnectivity(deviceId, DeviceConnectivityStatus.ONLINE, Instant.now())));
         when(mqttClient.isConnected()).thenReturn(false);
@@ -246,7 +385,7 @@ class CommandExecutorTest {
 
     @Test
     void unknownDevice_rejectsWithoutPublishing() {
-        when(deviceRepository.existsById(deviceId)).thenReturn(false);
+        when(deviceRepository.findById(deviceId)).thenReturn(Optional.empty());
 
         ActionExecutionResult result = executor.execute(ledOnRequest, new ActionContext(null, null));
 

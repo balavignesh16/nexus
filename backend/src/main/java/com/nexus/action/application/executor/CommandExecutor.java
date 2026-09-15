@@ -9,9 +9,12 @@ import com.nexus.action.domain.ActionType;
 import com.nexus.action.domain.ExecutionStatus;
 import com.nexus.device.capability.CapabilityDirection;
 import com.nexus.device.capability.CapabilityType;
+import com.nexus.device.capability.DeviceCapability;
 import com.nexus.device.capability.DeviceCapabilityRepository;
 import com.nexus.device.connectivity.DeviceConnectivityRegistry;
 import com.nexus.device.connectivity.DeviceConnectivityStatus;
+import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -22,16 +25,18 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Tier 5D: the first genuine physical command dispatch. Publishes a
- * non-retained, QoS-1 MQTT command only after every precondition below
- * passes, in this exact order (approved corrected plan):
+ * Tier 5D / Phase 13: publishes a non-retained, QoS-1 MQTT command only
+ * after every precondition below passes, in this exact order:
  *
  *   device exists
+ *   -> device is not REAL mode (Phase 13 safety guard - see below)
  *   -> authorized WRITE capability
- *   -> command is the one supported (LED, SET_STATE, boolean) case
+ *   -> command + value shape valid for that capability (CommandValueValidator,
+ *      mirrors the Phase 12 simulator's own actuator contract exactly)
  *   -> device connectivity == ONLINE (never OFFLINE or UNKNOWN)
  *   -> backend MQTT client connected
  *   -> publish
@@ -42,8 +47,17 @@ import java.util.UUID;
  *
  * This class can only ever claim "NEXUS successfully published the
  * command to MQTT" - it never claims the device received it, processed
- * it, or that the LED actually changed. No acknowledgement or physical
- * outcome verification exists yet (deferred to a later phase).
+ * it, or that the actuator actually changed. No physical outcome
+ * verification exists.
+ *
+ * Phase 13 REAL-mode guard: rules introduce unattended, automatic command
+ * dispatch for the first time - a misconfigured rule targeting a REAL
+ * device would, without this check, dispatch identically to a SIMULATED
+ * one. This is a narrow, deliberate safety boundary (not the broader
+ * physical-safety architecture Phase 17 will cover) - Phase 16 (Real ESP32
+ * Hardware) will revisit it explicitly, not silently. Applies uniformly to
+ * both manual and rule-triggered dispatch, since both flow through this
+ * same class.
  */
 @Component
 public class CommandExecutor implements ActionExecutor {
@@ -52,9 +66,6 @@ public class CommandExecutor implements ActionExecutor {
 
     private static final String COMMAND_TOPIC_TEMPLATE = "nexus/devices/%s/commands";
     private static final int COMMAND_QOS = 1;
-
-    private static final String SUPPORTED_CAPABILITY = "LED";
-    private static final String SUPPORTED_COMMAND = "SET_STATE";
 
     private final DeviceRepository deviceRepository;
     private final DeviceCapabilityRepository deviceCapabilityRepository;
@@ -91,8 +102,14 @@ public class CommandExecutor implements ActionExecutor {
             return failure(request, "Missing or invalid deviceId parameter");
         }
 
-        if (!deviceRepository.existsById(deviceId)) {
+        Optional<Device> deviceOpt = deviceRepository.findById(deviceId);
+        if (deviceOpt.isEmpty()) {
             return failure(request, "Device not found: " + deviceId);
+        }
+        Device device = deviceOpt.get();
+
+        if (device.getMode() == DeviceMode.REAL) {
+            return failure(request, "Command dispatch to REAL devices is not yet enabled");
         }
 
         String capability = asString(parameters.get("capability"));
@@ -101,16 +118,19 @@ public class CommandExecutor implements ActionExecutor {
             return failure(request, "Unknown capability: " + capability);
         }
 
-        if (!deviceCapabilityRepository.existsByDeviceIdAndCapabilityTypeAndDirection(deviceId, capabilityType, CapabilityDirection.WRITE)) {
+        Optional<DeviceCapability> deviceCapability = deviceCapabilityRepository
+                .findByDeviceIdAndCapabilityTypeAndDirection(deviceId, capabilityType, CapabilityDirection.WRITE);
+        if (deviceCapability.isEmpty()) {
             return failure(request, "Device " + deviceId + " is not authorized for " + capabilityType + " WRITE");
         }
 
         String command = asString(parameters.get("command"));
-        Object valueObj = parameters.get("value");
-        if (!isSupportedCommand(capability, command, valueObj)) {
-            return failure(request, "Unsupported command: capability=" + capability + " command=" + command);
+        Object value = parameters.get("value");
+        try {
+            CommandValueValidator.validate(capabilityType, deviceCapability.get(), command, value);
+        } catch (CommandValueValidator.CommandValidationException e) {
+            return failure(request, "Unsupported command: capability=" + capability + " command=" + command + " - " + e.getMessage());
         }
-        boolean value = (Boolean) valueObj;
 
         DeviceConnectivityStatus connectivity = deviceConnectivityRegistry.get(deviceId)
                 .map(c -> c.status())
@@ -145,13 +165,7 @@ public class CommandExecutor implements ActionExecutor {
         }
     }
 
-    private boolean isSupportedCommand(String capability, String command, Object valueObj) {
-        return SUPPORTED_CAPABILITY.equals(capability)
-                && SUPPORTED_COMMAND.equals(command)
-                && valueObj instanceof Boolean;
-    }
-
-    private String buildPayload(UUID commandId, String capability, String command, boolean value) throws Exception {
+    private String buildPayload(UUID commandId, String capability, String command, Object value) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("commandId", commandId.toString());
         payload.put("capability", capability);

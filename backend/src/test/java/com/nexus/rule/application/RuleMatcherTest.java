@@ -8,6 +8,7 @@ import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import com.nexus.rule.persistence.BoundedRuleMatchStore;
 import com.nexus.rule.persistence.RuleMatchPersister;
+import com.nexus.rule.persistence.RuleMatchRepository;
 import com.nexus.rule.persistence.RuleRegistry;
 import com.nexus.realtime.RealtimePublisher;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +43,7 @@ class RuleMatcherTest {
     private ApplicationEventPublisher applicationEventPublisher;
     private RealtimePublisher realtimePublisher;
     private RuleMatchPersister ruleMatchPersister;
+    private RuleMatchRepository ruleMatchRepository;
     private RuleMatcher ruleMatcher;
 
     @BeforeEach
@@ -53,7 +55,9 @@ class RuleMatcherTest {
         applicationEventPublisher = mock(ApplicationEventPublisher.class);
         realtimePublisher = mock(RealtimePublisher.class);
         ruleMatchPersister = mock(RuleMatchPersister.class);
-        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister);
+        ruleMatchRepository = mock(RuleMatchRepository.class);
+        when(ruleMatchRepository.findLastMatchedAtByRule()).thenReturn(List.of());
+        ruleMatcher = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister, ruleMatchRepository);
     }
 
     private DomainEvent sampleEvent(String correlationId) {
@@ -220,5 +224,93 @@ class RuleMatcherTest {
         RuleMatchedEvent publishedEvent = (RuleMatchedEvent) publishedEventCaptor.getValue();
         assertEquals(healthyMatchRule, publishedEvent.result().rule(),
                 "only the healthy rule's match may reach the application event bus");
+    }
+
+    // ---------- Phase 13: cooldown ----------
+
+    private Rule sampleRuleWithCooldown(String name, int cooldownSeconds) {
+        return new Rule(UUID.randomUUID(), name, true, 1, List.of(), List.of(), Map.of(), cooldownSeconds);
+    }
+
+    @Test
+    void cooldown_null_everyMatchingEventStillTriggersAMatch() {
+        DomainEvent event = sampleEvent("corr-cd-null");
+        Rule rule = sampleRule("No Cooldown"); // cooldownSeconds == null
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(rule));
+        when(ruleEvaluator.evaluate(rule, event)).thenReturn(new RuleEvaluationResult(true, rule, event, "matched"));
+
+        ruleMatcher.onEvent(event);
+        ruleMatcher.onEvent(event);
+
+        verify(matchStore, times(2)).add(any());
+    }
+
+    @Test
+    void cooldown_setSeconds_blocksASecondMatchWithinTheWindow() {
+        DomainEvent event = sampleEvent("corr-cd-block");
+        Rule rule = sampleRuleWithCooldown("Cooldown Rule", 60);
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(rule));
+        when(ruleEvaluator.evaluate(rule, event)).thenReturn(new RuleEvaluationResult(true, rule, event, "matched"));
+
+        ruleMatcher.onEvent(event);
+        ruleMatcher.onEvent(event);
+
+        verify(matchStore, times(1)).add(any());
+        verify(ruleEvaluator, times(1)).evaluate(rule, event); // second call must be gated before even evaluating
+    }
+
+    @Test
+    void cooldown_isPerRule_doesNotAffectAnUnrelatedRule() {
+        DomainEvent event = sampleEvent("corr-cd-perrule");
+        Rule cooledDown = sampleRuleWithCooldown("Cooled Down", 60);
+        Rule other = sampleRule("Unaffected Rule");
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(cooledDown, other));
+        when(ruleEvaluator.evaluate(cooledDown, event)).thenReturn(new RuleEvaluationResult(true, cooledDown, event, "matched"));
+        when(ruleEvaluator.evaluate(other, event)).thenReturn(new RuleEvaluationResult(true, other, event, "matched"));
+
+        ruleMatcher.onEvent(event); // cooledDown matches once, enters cooldown
+        ruleMatcher.onEvent(event); // cooledDown gated; other still matches again
+
+        verify(ruleEvaluator, times(1)).evaluate(cooledDown, event);
+        verify(ruleEvaluator, times(2)).evaluate(other, event);
+    }
+
+    @Test
+    void cooldown_persistenceFailure_doesNotPoisonCooldownState_nextEventStillEvaluated() {
+        DomainEvent event = sampleEvent("corr-cd-failsafe");
+        Rule rule = sampleRuleWithCooldown("Flaky Persist", 60);
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(rule));
+        when(ruleEvaluator.evaluate(rule, event)).thenReturn(new RuleEvaluationResult(true, rule, event, "matched"));
+        doThrow(new RuntimeException("simulated persistence failure")).when(ruleMatchPersister).persist(any());
+
+        ruleMatcher.onEvent(event); // persist throws - cooldown must NOT be armed
+        ruleMatcher.onEvent(event); // must still attempt to evaluate/persist again, not be gated by a phantom cooldown
+
+        verify(ruleEvaluator, times(2)).evaluate(rule, event);
+        verify(matchStore, never()).add(any());
+    }
+
+    @Test
+    void init_hydratesCooldownState_fromDurableRuleMatchRepository() {
+        UUID ruleId = UUID.randomUUID();
+        Instant recentMatch = Instant.now().minusSeconds(5);
+        RuleMatchRepository freshRepository = mock(RuleMatchRepository.class);
+        when(freshRepository.findLastMatchedAtByRule()).thenReturn(java.util.Collections.singletonList(new Object[]{ruleId, recentMatch}));
+        RuleMatcher matcherWithHistory = new RuleMatcher(eventDispatcher, ruleRegistry, ruleEvaluator, matchStore,
+                applicationEventPublisher, realtimePublisher, ruleMatchPersister, freshRepository);
+
+        matcherWithHistory.init();
+
+        DomainEvent event = sampleEvent("corr-cd-restart");
+        Rule rehydratedRule = new Rule(ruleId, "Rehydrated", true, 1, List.of(), List.of(), Map.of(), 60);
+        when(ruleRegistry.listEnabledOrderedByPriority()).thenReturn(List.of(rehydratedRule));
+        when(ruleEvaluator.evaluate(rehydratedRule, event)).thenReturn(new RuleEvaluationResult(true, rehydratedRule, event, "matched"));
+
+        matcherWithHistory.onEvent(event);
+
+        // The rule matched 5s ago (within its 60s cooldown) per durable
+        // history - a freshly-constructed RuleMatcher (simulating a restart)
+        // must honor that without ever evaluating this event for this rule.
+        verify(ruleEvaluator, never()).evaluate(rehydratedRule, event);
     }
 }

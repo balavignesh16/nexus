@@ -69,6 +69,9 @@ public class RuleMatchPersister {
         map.put("expectedValue", conditionEvidence.expectedValue());
         map.put("actualValue", conditionEvidence.actualValue());
         map.put("conditionMet", conditionEvidence.conditionMet());
+        if (conditionEvidence.stateTimestamp() != null) {
+            map.put("stateTimestamp", conditionEvidence.stateTimestamp().toString());
+        }
         return map;
     }
 }

@@ -1,5 +1,6 @@
 package com.nexus.rule.application;
 
+import com.nexus.device.capability.CapabilityType;
 import com.nexus.event.domain.DomainEvent;
 import com.nexus.event.domain.EventType;
 import com.nexus.rule.domain.ConditionEvidence;
@@ -8,28 +9,43 @@ import com.nexus.rule.domain.RuleCondition;
 import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.domain.RuleOperator;
+import com.nexus.twin.domain.DigitalTwin;
+import com.nexus.twin.domain.DigitalTwinRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Behavioral tests for RuleEvaluator: every RuleOperator (EQ, NE, GT, LT, GTE,
  * LTE), the RuleField -> DomainEvent extraction logic, and the documented edge
  * cases (missing conditions, null/missing values, non-numeric comparisons,
- * multi-condition AND semantics). No mocking required - RuleEvaluator has no
- * dependencies.
+ * multi-condition AND semantics). The legacy (capabilityType == null) path
+ * needs no DigitalTwinRegistry interaction at all - a mock is used only so
+ * the constructor is satisfiable; capability-aware tests below configure it
+ * explicitly with an in-memory fake.
  */
 class RuleEvaluatorTest {
 
-    private final RuleEvaluator evaluator = new RuleEvaluator();
+    private DigitalTwinRegistry digitalTwinRegistry;
+    private RuleEvaluator evaluator;
+
+    @BeforeEach
+    void setUp() {
+        digitalTwinRegistry = mock(DigitalTwinRegistry.class);
+        evaluator = new RuleEvaluator(digitalTwinRegistry);
+    }
 
     private DomainEvent eventWithPayload(EventType type, UUID deviceId, String severity, Map<String, Object> payload) {
         return new DomainEvent(UUID.randomUUID(), type, deviceId, Instant.now(), "test", payload, severity, "corr-1");
@@ -455,5 +471,167 @@ class RuleEvaluatorTest {
         assertEquals(RuleField.EVENT_TYPE, result.evidence().get(0).field());
         assertEquals(RuleField.SEVERITY, result.evidence().get(1).field());
         assertEquals(RuleField.VALUE, result.evidence().get(2).field());
+    }
+
+    // ---------- Phase 13: capability-aware, multi-capability, twin-state evaluation ----------
+
+    private DigitalTwin twin(UUID deviceId, String sensorType, double value, Instant timestamp) {
+        return new DigitalTwin(deviceId, timestamp, sensorType, value, "UNIT", timestamp, Map.of());
+    }
+
+    private RuleCondition deviceCondition(UUID deviceId) {
+        return new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, deviceId.toString(), null);
+    }
+
+    private RuleCondition capabilityCondition(RuleOperator operator, String expectedValue, CapabilityType type) {
+        return new RuleCondition(RuleField.VALUE, operator, expectedValue, type);
+    }
+
+    @Test
+    void capabilityAwareCondition_readsFromDigitalTwinRegistry_notFromEventTriggeringPayload() {
+        UUID deviceId = UUID.randomUUID();
+        Instant twinTimestamp = Instant.now().minusSeconds(30);
+        when(digitalTwinRegistry.get(deviceId, "GAS")).thenReturn(Optional.of(twin(deviceId, "GAS", 850, twinTimestamp)));
+
+        Rule rule = ruleWithConditions(deviceCondition(deviceId), capabilityCondition(RuleOperator.GT, "800", CapabilityType.GAS));
+        // The triggering event is for a totally different capability (MOTION) -
+        // the GAS condition must still be evaluated from twin state, never from
+        // this event's own payload (which has no "GAS" value at all).
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "MOTION", "value", 1.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched());
+        ConditionEvidence gasEvidence = result.evidence().get(1);
+        assertEquals(850.0, gasEvidence.actualValue());
+        assertEquals(twinTimestamp, gasEvidence.stateTimestamp(), "capability-aware evidence must record the twin's own timestamp");
+    }
+
+    @Test
+    void multiCapabilityAnd_gasAboveThresholdAndMotionTrue_bothReadFromTwinState_matches() {
+        UUID deviceId = UUID.randomUUID();
+        when(digitalTwinRegistry.get(deviceId, "GAS")).thenReturn(Optional.of(twin(deviceId, "GAS", 900, Instant.now())));
+        when(digitalTwinRegistry.get(deviceId, "MOTION")).thenReturn(Optional.of(twin(deviceId, "MOTION", 1.0, Instant.now().minusSeconds(120))));
+
+        Rule rule = ruleWithConditions(
+                deviceCondition(deviceId),
+                capabilityCondition(RuleOperator.GT, "800", CapabilityType.GAS),
+                capabilityCondition(RuleOperator.EQ, "true", CapabilityType.MOTION)
+        );
+        // Triggered by the GAS reading - MOTION's *prior* state must still be
+        // enough to satisfy the MOTION condition.
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "GAS", "value", 900.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched(), "GAS>800 AND MOTION==true must match using current twin state for both capabilities");
+    }
+
+    @Test
+    void multiDeviceIsolation_ruleScopedToD1_neverUsesD2sMotionState() {
+        UUID d1 = UUID.randomUUID();
+        UUID d2 = UUID.randomUUID();
+
+        // D1: GAS=900, MOTION=false. D2: GAS=100, MOTION=true.
+        when(digitalTwinRegistry.get(d1, "GAS")).thenReturn(Optional.of(twin(d1, "GAS", 900, Instant.now())));
+        when(digitalTwinRegistry.get(d1, "MOTION")).thenReturn(Optional.of(twin(d1, "MOTION", 0.0, Instant.now())));
+        when(digitalTwinRegistry.get(d2, "GAS")).thenReturn(Optional.of(twin(d2, "GAS", 100, Instant.now())));
+        when(digitalTwinRegistry.get(d2, "MOTION")).thenReturn(Optional.of(twin(d2, "MOTION", 1.0, Instant.now())));
+
+        Rule ruleScopedToD1 = ruleWithConditions(
+                deviceCondition(d1),
+                capabilityCondition(RuleOperator.GT, "800", CapabilityType.GAS),
+                capabilityCondition(RuleOperator.EQ, "true", CapabilityType.MOTION)
+        );
+
+        // D1's own GAS telemetry triggers evaluation.
+        DomainEvent d1Event = eventWithPayload(EventType.TWIN_UPDATED, d1, "INFO", Map.of("sensorType", "GAS", "value", 900.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(ruleScopedToD1, d1Event);
+
+        // D1's GAS condition is met (900 > 800) but D1's OWN motion is false -
+        // the rule must NOT match by accidentally borrowing D2's MOTION=true.
+        assertFalse(result.matched(), "a rule scoped to D1 must never read D2's MOTION state, even though D2's MOTION is true");
+        assertEquals(false, result.evidence().get(2).actualValue(), "the MOTION evidence must reflect D1's own state (false), never D2's (true)");
+
+        // digitalTwinRegistry.get(d2, ...) must never have been consulted at all
+        // for this D1-scoped rule.
+        org.mockito.Mockito.verify(digitalTwinRegistry, org.mockito.Mockito.never()).get(eq(d2), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void missingCapabilityState_recordsMissingEvidence_conditionNotMet() {
+        UUID deviceId = UUID.randomUUID();
+        when(digitalTwinRegistry.get(deviceId, "MOTION")).thenReturn(Optional.empty());
+
+        Rule rule = ruleWithConditions(deviceCondition(deviceId), capabilityCondition(RuleOperator.EQ, "true", CapabilityType.MOTION));
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "MOTION", "value", 1.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertFalse(result.matched());
+        assertEquals("MISSING", result.evidence().get(1).actualValue(), "a never-observed capability must be recorded explicitly as MISSING, never coerced to false/0");
+        assertFalse(result.evidence().get(1).conditionMet());
+    }
+
+    @Test
+    void presentButOldCapabilityState_stillCountsAsPresent_noTtlRejection() {
+        UUID deviceId = UUID.randomUUID();
+        Instant veryOld = Instant.now().minusSeconds(60 * 60 * 24 * 30); // 30 days old
+        when(digitalTwinRegistry.get(deviceId, "TEMPERATURE")).thenReturn(Optional.of(twin(deviceId, "TEMPERATURE", 40, veryOld)));
+
+        Rule rule = ruleWithConditions(deviceCondition(deviceId), capabilityCondition(RuleOperator.GT, "35", CapabilityType.TEMPERATURE));
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "TEMPERATURE", "value", 40.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched(), "Phase 13 does not enforce staleness - a present-but-old reading still counts");
+        assertEquals(veryOld, result.evidence().get(1).stateTimestamp(), "the (old) timestamp must still be recorded for auditability");
+    }
+
+    @Test
+    void booleanCapability_derivedFromNumericTwinValue_never_fromStringParsing() {
+        UUID deviceId = UUID.randomUUID();
+        // The Phase 12 simulator (and TelemetryRequest.value's Double contract)
+        // encodes MOTION as 1.0/0.0, never the string "true"/"false".
+        when(digitalTwinRegistry.get(deviceId, "MOTION")).thenReturn(Optional.of(twin(deviceId, "MOTION", 1.0, Instant.now())));
+
+        Rule rule = ruleWithConditions(deviceCondition(deviceId), capabilityCondition(RuleOperator.EQ, "true", CapabilityType.MOTION));
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "MOTION", "value", 1.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched());
+        assertEquals(Boolean.TRUE, result.evidence().get(1).actualValue(), "evidence must record a real boolean, derived from the 1.0/0.0 twin value");
+    }
+
+    @Test
+    void implicitDevice_noDeviceIdCondition_usesTriggeringEventsOwnDevice() {
+        UUID deviceId = UUID.randomUUID();
+        when(digitalTwinRegistry.get(deviceId, "GAS")).thenReturn(Optional.of(twin(deviceId, "GAS", 900, Instant.now())));
+
+        // Platform-wide rule: no DEVICE_ID condition at all.
+        Rule rule = ruleWithConditions(capabilityCondition(RuleOperator.GT, "800", CapabilityType.GAS));
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("sensorType", "GAS", "value", 900.0));
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched(), "a platform-wide capability-aware rule must resolve the device from the triggering event");
+    }
+
+    @Test
+    void legacyCondition_capabilityTypeNull_neverConsultsDigitalTwinRegistry() {
+        DomainEvent event = eventWithPayload(EventType.TWIN_UPDATED, UUID.randomUUID(), "INFO", Map.of("value", 35.0));
+        Rule rule = ruleWithCondition(RuleField.VALUE, RuleOperator.GT, "30.0");
+
+        RuleEvaluationResult result = evaluator.evaluate(rule, event);
+
+        assertTrue(result.matched());
+        assertNull(result.evidence().get(0).stateTimestamp(), "a legacy, event-payload-based condition must never populate stateTimestamp");
+        org.mockito.Mockito.verifyNoInteractions(digitalTwinRegistry);
+    }
+
+    private static UUID eq(UUID value) {
+        return org.mockito.ArgumentMatchers.eq(value);
     }
 }

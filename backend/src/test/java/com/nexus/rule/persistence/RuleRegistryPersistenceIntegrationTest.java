@@ -83,6 +83,12 @@ class RuleRegistryPersistenceIntegrationTest {
     private ObjectMapper objectMapper;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private com.nexus.device.capability.DeviceCapabilityRepository deviceCapabilityRepository;
+    @Autowired
+    private com.nexus.device.domain.DeviceRepository deviceRepository;
+    @Autowired
+    private com.nexus.twin.domain.DigitalTwinRegistry digitalTwinRegistry;
 
     @BeforeEach
     void setUp() {
@@ -131,7 +137,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void register_create_persistsToRealDatabase() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Create Test", true, 1);
 
         registry.register(rule);
@@ -142,7 +148,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void register_update_persistsToRealDatabase() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule original = richRule("Before Update", true, 1);
         registry.register(original);
 
@@ -157,7 +163,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void enable_persistsStateToRealDatabase() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Enable Test", false, 1);
         registry.register(rule);
 
@@ -168,7 +174,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void disable_persistsStateToRealDatabase() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Disable Test", true, 1);
         registry.register(rule);
 
@@ -179,7 +185,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void unregister_deletesFromRealDatabase() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Delete Test", true, 1);
         registry.register(rule);
 
@@ -192,11 +198,11 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void priorityRoundTripsCorrectly() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Priority RT", true, 37);
         writer.register(rule);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertEquals(37, fresh.get(rule.ruleId()).orElseThrow().priority());
@@ -204,11 +210,11 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void conditionsRoundTrip_withMultipleDifferentOperators() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Conditions RT", true, 1);
         writer.register(rule);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertEquals(rule.conditions(), fresh.get(rule.ruleId()).orElseThrow().conditions());
@@ -216,11 +222,11 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void actionsRoundTrip_withNonEmptyParameterMaps() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Actions RT", true, 1);
         writer.register(rule);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertEquals(rule.actions(), fresh.get(rule.ruleId()).orElseThrow().actions());
@@ -228,11 +234,11 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void metadataRoundTrips_withNonEmptyContent() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Metadata RT", true, 1);
         writer.register(rule);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertEquals(rule.metadata(), fresh.get(rule.ruleId()).orElseThrow().metadata());
@@ -242,13 +248,13 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void hydration_multipleRulesLoadCorrectly() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule a = richRule("Rule A", true, 1);
         Rule b = richRule("Rule B", true, 2);
         writer.register(a);
         writer.register(b);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertEquals(2, fresh.list().size());
@@ -256,7 +262,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void hydration_emptyDatabase_resultsInEmptyRegistry() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
 
         registry.init();
 
@@ -265,13 +271,13 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void hydration_preservesEnabledAndDisabledState() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule enabledRule = richRule("Stays Enabled", true, 1);
         Rule disabledRule = richRule("Stays Disabled", false, 2);
         writer.register(enabledRule);
         writer.register(disabledRule);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         assertTrue(fresh.get(enabledRule.ruleId()).orElseThrow().enabled());
@@ -280,13 +286,13 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void hydration_priorityOrderingIsPreserved() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule low = richRule("Low Priority Number", true, 1);
         Rule high = richRule("High Priority Number", true, 10);
         writer.register(high);
         writer.register(low);
 
-        RuleRegistry fresh = new RuleRegistry(ruleRepository);
+        RuleRegistry fresh = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         fresh.init();
 
         List<UUID> order = fresh.listEnabledOrderedByPriority().stream().map(Rule::ruleId).toList();
@@ -300,11 +306,11 @@ class RuleRegistryPersistenceIntegrationTest {
         // exactly what a prior instance persisted - this is the strongest
         // deterministic proxy for a true process restart, avoiding the
         // brittleness of actually killing/relaunching a JVM inside a test.
-        RuleRegistry instanceBeforeRestart = new RuleRegistry(ruleRepository);
+        RuleRegistry instanceBeforeRestart = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = richRule("Survives Restart", true, 5);
         instanceBeforeRestart.register(rule);
 
-        RuleRegistry instanceAfterRestart = new RuleRegistry(ruleRepository);
+        RuleRegistry instanceAfterRestart = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         assertTrue(instanceAfterRestart.get(rule.ruleId()).isEmpty(),
                 "a brand new registry must start with an empty cache, before init() runs");
 
@@ -318,7 +324,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void hydratedRule_isEvaluatedAndMatchedByRuleMatcher() {
-        RuleRegistry writer = new RuleRegistry(ruleRepository);
+        RuleRegistry writer = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(
                 UUID.randomUUID(), "Matches Twin Updates", true, 1,
                 List.of(
@@ -330,16 +336,16 @@ class RuleRegistryPersistenceIntegrationTest {
         );
         writer.register(rule);
 
-        RuleRegistry hydratedRegistry = new RuleRegistry(ruleRepository);
+        RuleRegistry hydratedRegistry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         hydratedRegistry.init();
 
         EventDispatcher eventDispatcher = mock(EventDispatcher.class);
-        RuleEvaluator realEvaluator = new RuleEvaluator();
+        RuleEvaluator realEvaluator = new RuleEvaluator(digitalTwinRegistry);
         BoundedRuleMatchStore matchStore = new BoundedRuleMatchStore();
         ApplicationEventPublisher applicationEventPublisher = mock(ApplicationEventPublisher.class);
         RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
         RuleMatchPersister ruleMatchPersister = new RuleMatchPersister(ruleMatchRepository, objectMapper);
-        RuleMatcher ruleMatcher = new RuleMatcher(eventDispatcher, hydratedRegistry, realEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister);
+        RuleMatcher ruleMatcher = new RuleMatcher(eventDispatcher, hydratedRegistry, realEvaluator, matchStore, applicationEventPublisher, realtimePublisher, ruleMatchPersister, ruleMatchRepository);
 
         DomainEvent event = new DomainEvent(UUID.randomUUID(), EventType.TWIN_UPDATED, UUID.randomUUID(),
                 Instant.now(), "test", Map.of("value", 34.7), "INFO", "corr-hydrated");
@@ -377,18 +383,18 @@ class RuleRegistryPersistenceIntegrationTest {
 
     private com.nexus.rule.api.RuleController ruleMatchHistoryController() {
         return new com.nexus.rule.api.RuleController(
-                new RuleRegistry(ruleRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
+                new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
     }
 
     private RuleMatchedEvent triggerRealMatch(RuleRegistry registry, Rule rule, double value, String correlationId) {
         EventDispatcher eventDispatcher = mock(EventDispatcher.class);
-        RuleEvaluator realEvaluator = new RuleEvaluator();
+        RuleEvaluator realEvaluator = new RuleEvaluator(digitalTwinRegistry);
         BoundedRuleMatchStore localMatchStore = new BoundedRuleMatchStore();
         ApplicationEventPublisher applicationEventPublisher = mock(ApplicationEventPublisher.class);
         RealtimePublisher realtimePublisher = mock(RealtimePublisher.class);
         RuleMatchPersister persister = new RuleMatchPersister(ruleMatchRepository, objectMapper);
         RuleMatcher matcher = new RuleMatcher(eventDispatcher, registry, realEvaluator, localMatchStore,
-                applicationEventPublisher, realtimePublisher, persister);
+                applicationEventPublisher, realtimePublisher, persister, ruleMatchRepository);
 
         DomainEvent event = new DomainEvent(UUID.randomUUID(), EventType.TWIN_UPDATED, UUID.randomUUID(),
                 Instant.now(), "test", Map.of("value", value), "INFO", correlationId);
@@ -399,7 +405,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_listEndpoint_returnsDurableMatch() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(UUID.randomUUID(), "History List Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -413,7 +419,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_orderingIsMatchedAtDescending() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(UUID.randomUUID(), "Ordering Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -432,7 +438,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_ruleIdFilter_returnsOnlyThatRulesMatches() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule ruleA = new Rule(UUID.randomUUID(), "Filter Rule A", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -452,7 +458,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_correlationIdFilter_returnsOnlyThatCorrelation() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(UUID.randomUUID(), "Correlation Filter Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -467,7 +473,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_detailEndpoint_returnsPersistedSnapshotAndEvidenceWithNumericActualValue() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(UUID.randomUUID(), "Detail Endpoint Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -505,7 +511,7 @@ class RuleRegistryPersistenceIntegrationTest {
         // match through the durable history endpoint - unlike GET
         // /api/v1/rule-matches, which is expected to return [] after a
         // restart because it reads only the volatile cache.
-        RuleRegistry writerRegistry = new RuleRegistry(ruleRepository);
+        RuleRegistry writerRegistry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule rule = new Rule(UUID.randomUUID(), "Restart Survival Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());
@@ -515,7 +521,7 @@ class RuleRegistryPersistenceIntegrationTest {
         // "After restart": a completely fresh controller, backed only by the
         // shared real database.
         com.nexus.rule.api.RuleController freshController = new com.nexus.rule.api.RuleController(
-                new RuleRegistry(ruleRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
+                new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository), new BoundedRuleMatchStore(), ruleMatchRepository);
 
         // The volatile cache-backed endpoint on a fresh instance is empty...
         assertTrue(freshController.getRuleMatches(100).getBody().isEmpty(),
@@ -531,7 +537,7 @@ class RuleRegistryPersistenceIntegrationTest {
 
     @Test
     void historyApi_ruleEditAfterMatch_historyStillReportsOriginalSnapshot() {
-        RuleRegistry registry = new RuleRegistry(ruleRepository);
+        RuleRegistry registry = new RuleRegistry(ruleRepository, deviceCapabilityRepository, deviceRepository);
         Rule original = new Rule(UUID.randomUUID(), "Edit Integrity Rule", true, 1,
                 List.of(new RuleCondition(RuleField.VALUE, RuleOperator.GT, "30.0")),
                 List.of(new RuleAction("CREATE_ALERT", Map.of())), Map.of());

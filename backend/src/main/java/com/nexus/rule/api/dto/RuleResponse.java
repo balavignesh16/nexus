@@ -15,7 +15,8 @@ public record RuleResponse(
     int priority,
     List<RuleCondition> conditions,
     List<RuleAction> actions,
-    Map<String, String> metadata
+    Map<String, String> metadata,
+    Integer cooldownSeconds
 ) {
     public static RuleResponse from(Rule rule) {
         return new RuleResponse(
@@ -25,7 +26,8 @@ public record RuleResponse(
                 rule.priority(),
                 rule.conditions(),
                 rule.actions(),
-                rule.metadata()
+                rule.metadata(),
+                rule.cooldownSeconds()
         );
     }
 }

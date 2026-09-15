@@ -56,7 +56,8 @@ public class RuleController {
                 request.priority(),
                 request.conditions(),
                 request.actions(),
-                request.metadata()
+                request.metadata(),
+                request.cooldownSeconds()
         );
         ruleRegistry.register(rule);
         return ResponseEntity.status(HttpStatus.CREATED).body(RuleResponse.from(rule));
@@ -111,7 +112,8 @@ public class RuleController {
                 request.priority(),
                 request.conditions(),
                 request.actions(),
-                request.metadata()
+                request.metadata(),
+                request.cooldownSeconds()
         );
         ruleRegistry.register(rule);
         return ResponseEntity.ok(RuleResponse.from(rule));

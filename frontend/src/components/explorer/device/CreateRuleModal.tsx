@@ -1,40 +1,144 @@
-import { useState } from 'react';
-import { X } from 'lucide-react';
-import { ruleApi, type RuleField, type RuleOperator } from '../../../api/ruleApi';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Plus, Trash2 } from 'lucide-react';
+import { ruleApi, type RuleCondition, type RuleOperator } from '../../../api/ruleApi';
+import {
+  type CapabilityType,
+  type Device,
+  type DeviceCapability,
+  READ_CAPABILITIES,
+  WRITE_CAPABILITIES,
+  isBooleanCapability,
+} from '../../../api/deviceApi';
+import { useActiveDevices } from '../../../hooks/queries';
 
 interface CreateRuleModalProps {
-  /** Optional (Step 4): when launched from a device's Rules tab, pre-fills
-   * the condition to DEVICE_ID = this device. When launched from the
-   * global Rules page there is no device context, so the condition value
-   * starts blank - never a fabricated device ID - and the user fills it
-   * in via the existing, unchanged form fields. */
+  /** Optional: when launched from a device's Rules tab, pre-selects and
+   * locks the trigger device to this one. When launched from the global
+   * Rules page there is no device context, so the user picks one. */
   deviceId?: string;
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
 }
 
-const FIELDS: RuleField[] = ['EVENT_TYPE', 'DEVICE_ID', 'SENSOR_TYPE', 'VALUE', 'SEVERITY'];
-const OPERATORS: RuleOperator[] = ['EQ', 'NE', 'GT', 'LT', 'GTE', 'LTE'];
+const NUMERIC_OPERATORS: RuleOperator[] = ['EQ', 'NE', 'GT', 'LT', 'GTE', 'LTE'];
+const BOOLEAN_OPERATORS: RuleOperator[] = ['EQ', 'NE'];
 const ACTION_TYPES = ['CREATE_ALERT', 'SEND_COMMAND', 'WEBHOOK'] as const;
 
+interface ConditionRow {
+  id: string;
+  capabilityType: CapabilityType | '';
+  operator: RuleOperator;
+  value: string; // 'true'/'false' for boolean capabilities, numeric text otherwise
+}
+
+function readCapabilitiesOf(device: Device | undefined): DeviceCapability[] {
+  if (!device) return [];
+  return device.capabilities.filter((c) => c.direction === 'READ' && (READ_CAPABILITIES as string[]).includes(c.capabilityType));
+}
+
+function writeCapabilitiesOf(device: Device | undefined): DeviceCapability[] {
+  if (!device) return [];
+  return device.capabilities.filter((c) => c.direction === 'WRITE' && (WRITE_CAPABILITIES as string[]).includes(c.capabilityType));
+}
+
+function newConditionRow(defaultCapability: CapabilityType | ''): ConditionRow {
+  return {
+    id: Math.random().toString(36).slice(2),
+    capabilityType: defaultCapability,
+    operator: 'EQ',
+    value: defaultCapability && isBooleanCapability(defaultCapability) ? 'true' : '',
+  };
+}
+
 /**
- * Minimal, real rule builder: exactly one condition and one action, POSTed
- * to the existing /api/v1/rules endpoint. Pre-fills the condition to
- * DEVICE_ID = this device since it's launched from a device's Rules tab,
- * but every field is editable - nothing is hidden or fabricated.
+ * Phase 13 capability-aware rule builder: Device -> Capability -> Operator
+ * -> Typed Value for conditions (supports multiple, AND-combined - e.g.
+ * "GAS > 800 AND MOTION == true"), and Target Device -> WRITE Capability ->
+ * Typed Value for SEND_COMMAND actions (LED/FAN/BUZZER boolean, SERVO
+ * angle, RELAY channel+state). No raw JSON required for these cases.
+ * CREATE_ALERT/WEBHOOK actions keep the existing raw JSON params editor -
+ * no capability semantics apply to them. Falls back to the legacy
+ * EVENT_TYPE/SEVERITY-based single condition when no trigger device is
+ * selected, preserving platform-wide rule creation exactly as before.
  */
 export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: CreateRuleModalProps) {
+  const { data: devices = [] } = useActiveDevices();
+
   const [name, setName] = useState('');
   const [priority, setPriority] = useState(1);
   const [enabled, setEnabled] = useState(true);
-  const [conditionField, setConditionField] = useState<RuleField>('DEVICE_ID');
-  const [conditionOperator, setConditionOperator] = useState<RuleOperator>('EQ');
-  const [conditionValue, setConditionValue] = useState(deviceId ?? '');
+  const [cooldownSeconds, setCooldownSeconds] = useState('');
+
+  const [triggerDeviceId, setTriggerDeviceId] = useState(deviceId ?? '');
+  const [conditions, setConditions] = useState<ConditionRow[]>([]);
+
+  // Legacy fallback (no trigger device selected): the original generic
+  // single-condition builder, unchanged.
+  const [legacyField, setLegacyField] = useState<'EVENT_TYPE' | 'SEVERITY'>('EVENT_TYPE');
+  const [legacyOperator, setLegacyOperator] = useState<RuleOperator>('EQ');
+  const [legacyValue, setLegacyValue] = useState('');
+
   const [actionType, setActionType] = useState<typeof ACTION_TYPES[number]>('CREATE_ALERT');
   const [actionParams, setActionParams] = useState('{"severity":"INFO"}');
+  const [targetDeviceId, setTargetDeviceId] = useState('');
+  const [targetCapabilityType, setTargetCapabilityType] = useState<CapabilityType | ''>('');
+  const [commandBoolValue, setCommandBoolValue] = useState(true);
+  const [commandServoAngle, setCommandServoAngle] = useState(90);
+  const [commandRelayChannel, setCommandRelayChannel] = useState<number | ''>('');
+  const [commandRelayState, setCommandRelayState] = useState(true);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const triggerDevice = useMemo(() => devices.find((d) => d.id === triggerDeviceId), [devices, triggerDeviceId]);
+  const readCapabilities = useMemo(() => readCapabilitiesOf(triggerDevice), [triggerDevice]);
+
+  const targetDevice = useMemo(() => devices.find((d) => d.id === targetDeviceId), [devices, targetDeviceId]);
+  const writeCapabilities = useMemo(() => writeCapabilitiesOf(targetDevice), [targetDevice]);
+  const targetCapability = useMemo(
+    () => writeCapabilities.find((c) => c.capabilityType === targetCapabilityType),
+    [writeCapabilities, targetCapabilityType]
+  );
+  const relayChannels: number[] = useMemo(() => {
+    const raw = targetCapability?.metadata?.channels;
+    return Array.isArray(raw) ? (raw as number[]) : [];
+  }, [targetCapability]);
+
+  // Seed one condition row once the trigger device's capabilities are known.
+  useEffect(() => {
+    if (triggerDeviceId && readCapabilities.length > 0 && conditions.length === 0) {
+      setConditions([newConditionRow(readCapabilities[0].capabilityType)]);
+    }
+    if (!triggerDeviceId) {
+      setConditions([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerDeviceId, readCapabilities.length]);
+
+  // Default the action's target device to the trigger device (still overridable).
+  useEffect(() => {
+    if (triggerDeviceId && !targetDeviceId) {
+      setTargetDeviceId(triggerDeviceId);
+    }
+  }, [triggerDeviceId, targetDeviceId]);
+
+  useEffect(() => {
+    if (writeCapabilities.length > 0 && !writeCapabilities.some((c) => c.capabilityType === targetCapabilityType)) {
+      setTargetCapabilityType(writeCapabilities[0].capabilityType);
+    }
+    if (writeCapabilities.length === 0) {
+      setTargetCapabilityType('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetDeviceId, writeCapabilities.length]);
+
+  useEffect(() => {
+    if (targetCapabilityType === 'RELAY' && relayChannels.length > 0 && commandRelayChannel === '') {
+      setCommandRelayChannel(relayChannels[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetCapabilityType, relayChannels.length]);
 
   if (!isOpen) return null;
 
@@ -42,11 +146,20 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
     setName('');
     setPriority(1);
     setEnabled(true);
-    setConditionField('DEVICE_ID');
-    setConditionOperator('EQ');
-    setConditionValue(deviceId ?? '');
+    setCooldownSeconds('');
+    setTriggerDeviceId(deviceId ?? '');
+    setConditions([]);
+    setLegacyField('EVENT_TYPE');
+    setLegacyOperator('EQ');
+    setLegacyValue('');
     setActionType('CREATE_ALERT');
     setActionParams('{"severity":"INFO"}');
+    setTargetDeviceId('');
+    setTargetCapabilityType('');
+    setCommandBoolValue(true);
+    setCommandServoAngle(90);
+    setCommandRelayChannel('');
+    setCommandRelayState(true);
     setError(null);
   };
 
@@ -55,17 +168,93 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
     onClose();
   };
 
+  const addCondition = () => {
+    const used = new Set(conditions.map((c) => c.capabilityType));
+    const nextCapability = readCapabilities.find((c) => !used.has(c.capabilityType))?.capabilityType ?? readCapabilities[0]?.capabilityType ?? '';
+    setConditions((rows) => [...rows, newConditionRow(nextCapability)]);
+  };
+
+  const removeCondition = (id: string) => {
+    setConditions((rows) => rows.filter((r) => r.id !== id));
+  };
+
+  const updateCondition = (id: string, patch: Partial<ConditionRow>) => {
+    setConditions((rows) => rows.map((r) => {
+      if (r.id !== id) return r;
+      const next = { ...r, ...patch };
+      // Switching capability may change numeric<->boolean kind - reset the
+      // operator/value to something valid for the new kind rather than
+      // silently keeping an invalid combination.
+      if (patch.capabilityType && patch.capabilityType !== r.capabilityType) {
+        next.operator = 'EQ';
+        next.value = isBooleanCapability(patch.capabilityType) ? 'true' : '';
+      }
+      return next;
+    }));
+  };
+
+  const buildConditions = (): RuleCondition[] => {
+    if (!triggerDeviceId) {
+      return [{ field: legacyField, operator: legacyOperator, expectedValue: legacyValue }];
+    }
+    const deviceCondition: RuleCondition = { field: 'DEVICE_ID', operator: 'EQ', expectedValue: triggerDeviceId };
+    const capabilityConditions: RuleCondition[] = conditions
+      .filter((c) => c.capabilityType)
+      .map((c) => ({
+        field: 'VALUE',
+        operator: c.operator,
+        expectedValue: c.value,
+        capabilityType: c.capabilityType as CapabilityType,
+      }));
+    return [deviceCondition, ...capabilityConditions];
+  };
+
+  const buildActions = () => {
+    if (actionType !== 'SEND_COMMAND') {
+      try {
+        return [{ actionType, parameters: JSON.parse(actionParams) }];
+      } catch {
+        throw new Error('Action parameters must be valid JSON.');
+      }
+    }
+    if (!targetDeviceId || !targetCapabilityType) {
+      throw new Error('Select a target device and capability for the command.');
+    }
+    let value: unknown;
+    if (targetCapabilityType === 'SERVO') {
+      value = commandServoAngle;
+    } else if (targetCapabilityType === 'RELAY') {
+      if (commandRelayChannel === '') throw new Error('Select a relay channel.');
+      value = { channel: commandRelayChannel, state: commandRelayState };
+    } else {
+      value = commandBoolValue;
+    }
+    return [{
+      actionType: 'SEND_COMMAND',
+      parameters: { deviceId: targetDeviceId, capability: targetCapabilityType, command: 'SET_STATE', value },
+    }];
+  };
+
   const handleSubmit = async () => {
     setError(null);
     if (!name.trim()) {
       setError('Name is required.');
       return;
     }
-    let parameters: Record<string, any>;
+    if (triggerDeviceId && conditions.length === 0) {
+      setError('Add at least one condition.');
+      return;
+    }
+    if (!triggerDeviceId && !legacyValue.trim()) {
+      setError('Condition value is required.');
+      return;
+    }
+
+    let actions;
     try {
-      parameters = JSON.parse(actionParams);
-    } catch {
-      setError('Action parameters must be valid JSON.');
+      actions = buildActions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid action configuration.');
       return;
     }
 
@@ -75,9 +264,10 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
         name: name.trim(),
         enabled,
         priority,
-        conditions: [{ field: conditionField, operator: conditionOperator, expectedValue: conditionValue }],
-        actions: [{ actionType, parameters }],
+        conditions: buildConditions(),
+        actions,
         metadata: {},
+        cooldownSeconds: cooldownSeconds.trim() ? Number(cooldownSeconds) : null,
       });
       reset();
       onCreated();
@@ -89,10 +279,13 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
     }
   };
 
+  const selectClass = "h-9 px-2 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]";
+  const inputClass = "h-9 px-3 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]";
+
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleClose}>
       <div
-        className="rounded-[var(--radius-panel-lg)] shadow-[var(--shadow-glass-lg)] w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        className="rounded-[var(--radius-panel-lg)] shadow-[var(--shadow-glass-lg)] w-full max-w-xl max-h-[90vh] overflow-y-auto"
         style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -111,7 +304,7 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. High Temperature Alert"
-              className="w-full h-9 px-3 text-sm rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
+              className={`w-full ${inputClass}`}
             />
           </div>
 
@@ -122,7 +315,19 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
                 type="number"
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
-                className="w-full h-9 px-3 text-sm rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
+                className={`w-full ${inputClass}`}
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-foundation-muted-fg mb-1 block">Cooldown (seconds, optional)</label>
+              <input
+                type="number"
+                min={1}
+                value={cooldownSeconds}
+                onChange={(e) => setCooldownSeconds(e.target.value)}
+                placeholder="No cooldown"
+                data-testid="cooldown-input"
+                className={`w-full ${inputClass}`}
               />
             </div>
             <div className="flex items-end pb-2">
@@ -134,47 +339,217 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
           </div>
 
           <div>
-            <span className="text-xs text-foundation-muted-fg mb-1 block">Trigger Condition</span>
-            <div className="flex gap-2">
-              <select
-                value={conditionField}
-                onChange={(e) => setConditionField(e.target.value as RuleField)}
-                className="h-9 px-2 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
-              >
-                {FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
-              <select
-                value={conditionOperator}
-                onChange={(e) => setConditionOperator(e.target.value as RuleOperator)}
-                className="h-9 px-2 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
-              >
-                {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-              <input
-                type="text"
-                value={conditionValue}
-                onChange={(e) => setConditionValue(e.target.value)}
-                className="flex-1 h-9 px-3 text-xs font-mono rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
-              />
-            </div>
+            <label className="text-xs text-foundation-muted-fg mb-1 block">Device</label>
+            <select
+              value={triggerDeviceId}
+              disabled={Boolean(deviceId)}
+              onChange={(e) => setTriggerDeviceId(e.target.value)}
+              data-testid="trigger-device-select"
+              className={`w-full ${selectClass}`}
+            >
+              <option value="">Platform-wide (no specific device)</option>
+              {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
           </div>
+
+          {triggerDeviceId ? (
+            <div>
+              <span className="text-xs text-foundation-muted-fg mb-1 block">Conditions (all must match)</span>
+              {readCapabilities.length === 0 && (
+                <p className="text-xs mb-2" style={{ color: 'var(--danger)' }}>
+                  This device has no READ capabilities provisioned.
+                </p>
+              )}
+              <div className="flex flex-col gap-2">
+                {conditions.map((row) => {
+                  const boolKind = row.capabilityType ? isBooleanCapability(row.capabilityType) : false;
+                  const operators = boolKind ? BOOLEAN_OPERATORS : NUMERIC_OPERATORS;
+                  return (
+                    <div key={row.id} className="flex gap-2 items-center">
+                      <select
+                        value={row.capabilityType}
+                        onChange={(e) => updateCondition(row.id, { capabilityType: e.target.value as CapabilityType })}
+                        className={selectClass}
+                        data-testid="condition-capability-select"
+                      >
+                        {readCapabilities.map((c) => (
+                          <option key={c.id} value={c.capabilityType}>{c.capabilityType}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={row.operator}
+                        onChange={(e) => updateCondition(row.id, { operator: e.target.value as RuleOperator })}
+                        className={selectClass}
+                        data-testid="condition-operator-select"
+                      >
+                        {operators.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      {boolKind ? (
+                        <select
+                          value={row.value}
+                          onChange={(e) => updateCondition(row.id, { value: e.target.value })}
+                          className={selectClass}
+                          data-testid="condition-boolean-value-select"
+                        >
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="number"
+                          value={row.value}
+                          onChange={(e) => updateCondition(row.id, { value: e.target.value })}
+                          className={`flex-1 ${inputClass}`}
+                          data-testid="condition-numeric-value-input"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeCondition(row.id)}
+                        disabled={conditions.length <= 1}
+                        className="text-foundation-muted-fg hover:text-[var(--danger)] disabled:opacity-30"
+                        aria-label="Remove condition"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={addCondition}
+                disabled={readCapabilities.length === 0}
+                className="mt-2 flex items-center gap-1 text-xs font-medium disabled:opacity-40"
+                style={{ color: 'var(--accent)' }}
+              >
+                <Plus size={14} /> Add condition
+              </button>
+            </div>
+          ) : (
+            <div>
+              <span className="text-xs text-foundation-muted-fg mb-1 block">Trigger Condition</span>
+              <div className="flex gap-2">
+                <select
+                  value={legacyField}
+                  onChange={(e) => setLegacyField(e.target.value as 'EVENT_TYPE' | 'SEVERITY')}
+                  className={selectClass}
+                >
+                  <option value="EVENT_TYPE">EVENT_TYPE</option>
+                  <option value="SEVERITY">SEVERITY</option>
+                </select>
+                <select
+                  value={legacyOperator}
+                  onChange={(e) => setLegacyOperator(e.target.value as RuleOperator)}
+                  className={selectClass}
+                >
+                  {NUMERIC_OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <input
+                  type="text"
+                  value={legacyValue}
+                  onChange={(e) => setLegacyValue(e.target.value)}
+                  className={`flex-1 font-mono ${inputClass}`}
+                />
+              </div>
+            </div>
+          )}
 
           <div>
             <span className="text-xs text-foundation-muted-fg mb-1 block">Action</span>
             <select
               value={actionType}
               onChange={(e) => setActionType(e.target.value as typeof ACTION_TYPES[number])}
-              className="w-full h-9 px-3 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)] mb-2"
+              data-testid="action-type-select"
+              className={`w-full ${selectClass} mb-2`}
             >
               {ACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <textarea
-              value={actionParams}
-              onChange={(e) => setActionParams(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 text-xs font-mono rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]"
-              placeholder='{"severity":"INFO"}'
-            />
+
+            {actionType === 'SEND_COMMAND' ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <select
+                    value={targetDeviceId}
+                    onChange={(e) => setTargetDeviceId(e.target.value)}
+                    className={`flex-1 ${selectClass}`}
+                    data-testid="action-target-device-select"
+                  >
+                    <option value="">Select target device</option>
+                    {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <select
+                    value={targetCapabilityType}
+                    onChange={(e) => setTargetCapabilityType(e.target.value as CapabilityType)}
+                    className={`flex-1 ${selectClass}`}
+                    data-testid="action-capability-select"
+                  >
+                    <option value="">Select capability</option>
+                    {writeCapabilities.map((c) => <option key={c.id} value={c.capabilityType}>{c.capabilityType}</option>)}
+                  </select>
+                </div>
+                {writeCapabilities.length === 0 && targetDeviceId && (
+                  <p className="text-xs" style={{ color: 'var(--danger)' }}>This device has no WRITE capabilities provisioned.</p>
+                )}
+
+                {targetCapabilityType === 'SERVO' && (
+                  <div>
+                    <label className="text-xs text-foundation-muted-fg mb-1 block">Angle (0-180)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={180}
+                      value={commandServoAngle}
+                      onChange={(e) => setCommandServoAngle(Number(e.target.value))}
+                      className={`w-full ${inputClass}`}
+                      data-testid="command-servo-angle-input"
+                    />
+                  </div>
+                )}
+
+                {targetCapabilityType === 'RELAY' && (
+                  <div className="flex gap-2">
+                    <select
+                      value={commandRelayChannel}
+                      onChange={(e) => setCommandRelayChannel(Number(e.target.value))}
+                      className={selectClass}
+                      data-testid="command-relay-channel-select"
+                    >
+                      {relayChannels.map((ch) => <option key={ch} value={ch}>Channel {ch}</option>)}
+                    </select>
+                    <select
+                      value={String(commandRelayState)}
+                      onChange={(e) => setCommandRelayState(e.target.value === 'true')}
+                      className={selectClass}
+                      data-testid="command-relay-state-select"
+                    >
+                      <option value="true">ON</option>
+                      <option value="false">OFF</option>
+                    </select>
+                  </div>
+                )}
+
+                {(targetCapabilityType === 'LED' || targetCapabilityType === 'FAN' || targetCapabilityType === 'BUZZER') && (
+                  <select
+                    value={String(commandBoolValue)}
+                    onChange={(e) => setCommandBoolValue(e.target.value === 'true')}
+                    className={selectClass}
+                    data-testid="command-boolean-value-select"
+                  >
+                    <option value="true">ON</option>
+                    <option value="false">OFF</option>
+                  </select>
+                )}
+              </div>
+            ) : (
+              <textarea
+                value={actionParams}
+                onChange={(e) => setActionParams(e.target.value)}
+                rows={3}
+                className={`w-full px-3 py-2 text-xs font-mono rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]`}
+                placeholder='{"severity":"INFO"}'
+              />
+            )}
           </div>
 
           {error && <div data-testid="create-rule-error" className="text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}

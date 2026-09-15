@@ -25,8 +25,38 @@ export const CapabilityType = {
   HUMIDITY: 'HUMIDITY',
   MOTION: 'MOTION',
   LED: 'LED',
+  // Phase 11: complete authoritative BOM vocabulary.
+  PRESSURE: 'PRESSURE',
+  GAS: 'GAS',
+  BUTTON: 'BUTTON',
+  RELAY: 'RELAY',
+  SERVO: 'SERVO',
+  FAN: 'FAN',
+  BUZZER: 'BUZZER',
 } as const;
 export type CapabilityType = typeof CapabilityType[keyof typeof CapabilityType];
+
+/** READ capabilities usable as a rule condition source (Phase 13). */
+export const READ_CAPABILITIES: CapabilityType[] = [
+  CapabilityType.TEMPERATURE, CapabilityType.HUMIDITY, CapabilityType.PRESSURE,
+  CapabilityType.GAS, CapabilityType.MOTION, CapabilityType.BUTTON,
+];
+
+/** WRITE capabilities usable as a rule action target (Phase 13). */
+export const WRITE_CAPABILITIES: CapabilityType[] = [
+  CapabilityType.LED, CapabilityType.RELAY, CapabilityType.SERVO, CapabilityType.FAN, CapabilityType.BUZZER,
+];
+
+/**
+ * Phase 13: whether a READ capability's condition value is numeric or
+ * boolean - mirrors the backend's CapabilityValueKind exactly (same 6
+ * capabilities, same split). Drives operator filtering and value-input
+ * type in the rule builder.
+ */
+export const BOOLEAN_CAPABILITIES: CapabilityType[] = [CapabilityType.MOTION, CapabilityType.BUTTON];
+export function isBooleanCapability(type: CapabilityType): boolean {
+  return BOOLEAN_CAPABILITIES.includes(type);
+}
 
 export const CapabilityDirection = {
   READ: 'READ',
@@ -96,14 +126,16 @@ export const ExecutionStatus = {
 export type ExecutionStatus = typeof ExecutionStatus[keyof typeof ExecutionStatus];
 
 /**
- * Tier 5D: request to dispatch a physical command. Only capability=LED,
- * command="SET_STATE" is currently supported by the backend - any other
- * combination is rejected (400/FAILURE), never silently accepted.
+ * Tier 5D / Phase 13: request to dispatch a physical command. Value shape
+ * depends on the target capability - boolean for LED/FAN/BUZZER, an
+ * integer 0-180 for SERVO, {channel,state} for RELAY - validated
+ * server-side (CommandValueValidator); an unsupported capability/command
+ * combination is rejected (FAILURE), never silently accepted.
  */
 export interface CreateDeviceCommandRequest {
   capability: CapabilityType;
   command: string;
-  value: boolean;
+  value: boolean | number | { channel: number; state: boolean };
 }
 
 /**

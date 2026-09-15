@@ -108,4 +108,30 @@ class DeviceCommandServiceTest {
         assertThat(response.message()).isEqualTo("Device is offline");
         assertThat(response.matchId()).isNull();
     }
+
+    // ---------- Phase 13: widened value type (Object, not just Boolean) ----------
+
+    @Test
+    void relayValue_structuredMap_passesThroughUnchangedToActionParameters() {
+        UUID deviceId = UUID.randomUUID();
+        when(deviceRepository.existsById(deviceId)).thenReturn(true);
+        java.util.Map<String, Object> relayValue = java.util.Map.of("channel", 2, "state", true);
+        CreateDeviceCommandRequest request = new CreateDeviceCommandRequest(CapabilityType.RELAY, "SET_STATE", relayValue);
+
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.List<ActionExecutionRequest> requests = invocation.getArgument(0);
+            ActionExecutionRequest actionRequest = requests.get(0);
+            when(actionHistoryRepository.findById(actionRequest.requestId())).thenReturn(Optional.of(
+                    new ActionHistoryRecord(actionRequest.requestId(), null, deviceId, ActionType.SEND_COMMAND,
+                            ExecutionStatus.SUCCESS, actionRequest.parameters(), Instant.now(), "Command published to MQTT")));
+            return null;
+        }).when(actionExecutionEngine).process(any(), any(), any());
+
+        service.dispatchCommand(deviceId, request);
+
+        org.mockito.ArgumentCaptor<java.util.List<ActionExecutionRequest>> requestsCaptor = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(actionExecutionEngine).process(requestsCaptor.capture(), any(), any());
+        assertThat(requestsCaptor.getValue().get(0).parameters()).containsEntry("value", relayValue);
+    }
 }

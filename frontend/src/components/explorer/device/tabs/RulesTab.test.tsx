@@ -52,10 +52,21 @@ function match(overrides: Record<string, any> = {}) {
 
 const emptyMatchesPolling = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
 
-/** Sets the rules-query result; the rule-matches query defaults to a real, honest empty result unless overridden. */
+const deviceWithCapabilities = {
+  id: 'device-a',
+  name: 'ESP32-SIM-001',
+  capabilities: [
+    { id: 'cap-gas', deviceId: 'device-a', capabilityType: 'GAS', direction: 'READ', unit: 'PPM' },
+  ],
+};
+
+/** Sets the rules-query result; the rule-matches and activeDevices queries
+ * (the latter consumed internally by CreateRuleModal) default to real,
+ * honest results unless overridden. */
 function mockPolling(rulesResult: any, matchesResult: any = emptyMatchesPolling) {
   mockUsePolling.mockImplementation((key: any) => {
     if (Array.isArray(key) && key[0] === 'rule-matches') return matchesResult;
+    if (Array.isArray(key) && key[0] === 'activeDevices') return { data: [deviceWithCapabilities], isLoading: false, isError: false };
     return rulesResult;
   });
 }
@@ -156,6 +167,7 @@ describe('RulesTab - device-scoped rules', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /create rule/i })[0]);
     const nameInput = screen.getByPlaceholderText('e.g. High Temperature Alert');
     fireEvent.change(nameInput, { target: { value: 'New Rule' } });
+    fireEvent.change(screen.getByTestId('condition-numeric-value-input'), { target: { value: '500' } });
 
     const createButtons = screen.getAllByRole('button', { name: /create rule/i });
     fireEvent.click(createButtons[createButtons.length - 1]);

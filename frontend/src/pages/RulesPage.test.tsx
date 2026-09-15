@@ -164,11 +164,15 @@ describe('RulesPage - real rules, real matches, no fabrication', () => {
     expect(screen.getByText('Create Rule', { selector: 'h3' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'New Global Rule' } });
+    // No trigger device selected -> legacy platform-wide condition path;
+    // fill in the generic condition value (Phase 13 requires a non-blank one).
+    const legacyValueInputs = screen.getAllByRole('textbox').filter((el) => el.className.includes('font-mono') && el.tagName === 'INPUT');
+    fireEvent.change(legacyValueInputs[0], { target: { value: 'TWIN_UPDATED' } });
     const createButtons = screen.getAllByRole('button', { name: /create rule/i });
     fireEvent.click(createButtons[createButtons.length - 1]);
 
     await waitFor(() => expect(mockCreateRule).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'New Global Rule', conditions: [{ field: 'DEVICE_ID', operator: 'EQ', expectedValue: '' }] })
+      expect.objectContaining({ name: 'New Global Rule', conditions: [{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }] })
     ));
     await waitFor(() => expect(refetch).toHaveBeenCalled());
   });

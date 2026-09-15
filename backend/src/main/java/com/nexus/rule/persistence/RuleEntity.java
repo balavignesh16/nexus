@@ -53,11 +53,17 @@ public class RuleEntity {
     @Column(name = "metadata", columnDefinition = "jsonb")
     private Map<String, String> metadata;
 
+    // Phase 13: nullable - null means no cooldown (every pre-Phase-13 rule,
+    // and any new rule that doesn't set one), matching Rule.cooldownSeconds.
+    @Column(name = "cooldown_seconds")
+    private Integer cooldownSeconds;
+
     protected RuleEntity() {
     }
 
     public RuleEntity(UUID ruleId, String name, boolean enabled, int priority,
-                       List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata) {
+                       List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata,
+                       Integer cooldownSeconds) {
         this.ruleId = ruleId;
         this.name = name;
         this.enabled = enabled;
@@ -65,6 +71,7 @@ public class RuleEntity {
         this.conditions = conditions;
         this.actions = actions;
         this.metadata = metadata;
+        this.cooldownSeconds = cooldownSeconds;
     }
 
     public static RuleEntity fromDomain(Rule rule) {
@@ -75,12 +82,13 @@ public class RuleEntity {
                 rule.priority(),
                 rule.conditions(),
                 rule.actions(),
-                rule.metadata()
+                rule.metadata(),
+                rule.cooldownSeconds()
         );
     }
 
     public Rule toDomain() {
-        return new Rule(ruleId, name, enabled, priority, conditions, actions, metadata);
+        return new Rule(ruleId, name, enabled, priority, conditions, actions, metadata, cooldownSeconds);
     }
 
     public UUID ruleId() {
@@ -109,5 +117,9 @@ public class RuleEntity {
 
     public Map<String, String> getMetadata() {
         return metadata;
+    }
+
+    public Integer getCooldownSeconds() {
+        return cooldownSeconds;
     }
 }
