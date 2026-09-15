@@ -95,7 +95,7 @@ class DeviceCapabilityIntegrationTest {
     }
 
     private UUID createDevice(String serialNumber) throws Exception {
-        CreateDeviceRequest request = new CreateDeviceRequest("Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-1", serialNumber, "Desc");
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-1", serialNumber, "Desc", null);
         String body = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -311,6 +311,151 @@ class DeviceCapabilityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.capabilities.length()").value(1))
                 .andExpect(jsonPath("$.capabilities[0].capabilityType").value("TEMPERATURE"));
+    }
+
+    // ---------- Phase 11: complete BOM capability vocabulary ----------
+    //
+    // Vocabulary/serialization round-trip only - no command execution, no
+    // simulator, no firmware behavior. Confirms each new CapabilityType
+    // enum value is accepted by the real API and persisted/returned
+    // correctly, exactly like the existing TEMPERATURE/HUMIDITY/MOTION/LED
+    // values already are.
+
+    @Test
+    void newCapabilityType_pressure_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-PRESSURE");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.PRESSURE, CapabilityDirection.READ, "HPA", null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("PRESSURE"))
+                .andExpect(jsonPath("$.direction").value("READ"))
+                .andExpect(jsonPath("$.unit").value("HPA"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.PRESSURE);
+    }
+
+    @Test
+    void newCapabilityType_gas_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-GAS");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.GAS, CapabilityDirection.READ, "PPM", null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("GAS"))
+                .andExpect(jsonPath("$.direction").value("READ"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.GAS);
+    }
+
+    @Test
+    void newCapabilityType_button_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-BUTTON");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.BUTTON, CapabilityDirection.READ, null, null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("BUTTON"))
+                .andExpect(jsonPath("$.direction").value("READ"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.BUTTON);
+    }
+
+    @Test
+    void newCapabilityType_relay_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-RELAY");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.RELAY, CapabilityDirection.WRITE, null, null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("RELAY"))
+                .andExpect(jsonPath("$.direction").value("WRITE"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.RELAY);
+    }
+
+    @Test
+    void newCapabilityType_servo_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-SERVO");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.SERVO, CapabilityDirection.WRITE, "DEGREES", null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("SERVO"))
+                .andExpect(jsonPath("$.direction").value("WRITE"))
+                .andExpect(jsonPath("$.unit").value("DEGREES"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.SERVO);
+    }
+
+    @Test
+    void newCapabilityType_fan_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-FAN");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.FAN, CapabilityDirection.WRITE, null, null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("FAN"))
+                .andExpect(jsonPath("$.direction").value("WRITE"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.FAN);
+    }
+
+    @Test
+    void newCapabilityType_buzzer_roundTripsThroughRealApi() throws Exception {
+        UUID deviceId = createDevice("SN-CAP-BUZZER");
+        CreateDeviceCapabilityRequest request = new CreateDeviceCapabilityRequest(CapabilityType.BUZZER, CapabilityDirection.WRITE, null, null);
+
+        mockMvc.perform(post("/api/v1/devices/{deviceId}/capabilities", deviceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.capabilityType").value("BUZZER"))
+                .andExpect(jsonPath("$.direction").value("WRITE"));
+
+        assertThat(capabilityRepository.findByDeviceId(deviceId))
+                .hasSize(1)
+                .allMatch(c -> c.getCapabilityType() == CapabilityType.BUZZER);
+    }
+
+    @Test
+    void multiCapabilityEsp32LikeDevice_bme280PlusPirPlusLed_allCapabilitiesCoexist() throws Exception {
+        // Illustrates the approved architecture: ESP32 = one Device,
+        // attached physical functions = DeviceCapability rows.
+        UUID deviceId = createDevice("SN-CAP-ESP32-NODE");
+        capabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.TEMPERATURE, CapabilityDirection.READ, "CELSIUS", null));
+        capabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.HUMIDITY, CapabilityDirection.READ, "PERCENT", null));
+        capabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.PRESSURE, CapabilityDirection.READ, "HPA", null));
+        capabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.MOTION, CapabilityDirection.READ, null, null));
+        capabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.LED, CapabilityDirection.WRITE, null, null));
+
+        mockMvc.perform(get("/api/v1/devices/{deviceId}/capabilities", deviceId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(5));
     }
 
     // ---------- N+1 verification on collection endpoints ----------

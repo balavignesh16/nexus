@@ -61,7 +61,7 @@ class DigitalTwinServiceTest {
     void updateTwin_noExistingTwin_createsAndPersistsNewTwin() {
         UUID deviceId = UUID.randomUUID();
         Instant timestamp = Instant.now();
-        when(registry.get(deviceId)).thenReturn(Optional.empty());
+        when(registry.get(deviceId, "TEMPERATURE_SENSOR")).thenReturn(Optional.empty());
 
         TelemetryRequest request = new TelemetryRequest(deviceId, timestamp, "TEMPERATURE_SENSOR", 22.5, "CELSIUS");
 
@@ -95,7 +95,7 @@ class DigitalTwinServiceTest {
         Instant later = Instant.now();
 
         DigitalTwin existing = new DigitalTwin(deviceId, earlier, "TEMPERATURE_SENSOR", 20.0, "CELSIUS", earlier, java.util.Map.of());
-        when(registry.get(deviceId)).thenReturn(Optional.of(existing));
+        when(registry.get(deviceId, "TEMPERATURE_SENSOR")).thenReturn(Optional.of(existing));
 
         TelemetryRequest request = new TelemetryRequest(deviceId, later, "TEMPERATURE_SENSOR", 25.0, "CELSIUS");
 
@@ -119,7 +119,7 @@ class DigitalTwinServiceTest {
         Instant older = current.minus(1, ChronoUnit.MINUTES);
 
         DigitalTwin existing = new DigitalTwin(deviceId, current, "TEMPERATURE_SENSOR", 20.0, "CELSIUS", current, java.util.Map.of());
-        when(registry.get(deviceId)).thenReturn(Optional.of(existing));
+        when(registry.get(deviceId, "TEMPERATURE_SENSOR")).thenReturn(Optional.of(existing));
 
         TelemetryRequest staleRequest = new TelemetryRequest(deviceId, older, "TEMPERATURE_SENSOR", 99.0, "CELSIUS");
 
@@ -139,7 +139,7 @@ class DigitalTwinServiceTest {
         Instant timestamp = Instant.now();
 
         DigitalTwin existing = new DigitalTwin(deviceId, timestamp, "TEMPERATURE_SENSOR", 20.0, "CELSIUS", timestamp, java.util.Map.of());
-        when(registry.get(deviceId)).thenReturn(Optional.of(existing));
+        when(registry.get(deviceId, "TEMPERATURE_SENSOR")).thenReturn(Optional.of(existing));
 
         TelemetryRequest sameTimestampRequest = new TelemetryRequest(deviceId, timestamp, "TEMPERATURE_SENSOR", 50.0, "CELSIUS");
 
@@ -182,6 +182,68 @@ class DigitalTwinServiceTest {
     }
 
     // ==================================================================
+    // Phase 11: multi-capability correctness - updateTwin() must scope its
+    // out-of-order decision to the SAME real sensorType, never to the
+    // device as a whole, so one capability's reading can never suppress
+    // or be confused with another's.
+    // ==================================================================
+
+    @Test
+    void updateTwin_differentSensorTypesForSameDevice_eachScopedIndependently() {
+        UUID deviceId = UUID.randomUUID();
+        Instant t1 = Instant.now();
+        Instant t2 = t1.plusSeconds(1);
+        Instant t3 = t1.plusSeconds(2);
+
+        // No prior state for any of the three capabilities.
+        when(registry.get(deviceId, "TEMPERATURE")).thenReturn(Optional.empty());
+        when(registry.get(deviceId, "HUMIDITY")).thenReturn(Optional.empty());
+        when(registry.get(deviceId, "PRESSURE")).thenReturn(Optional.empty());
+
+        service.updateTwin(new TelemetryRequest(deviceId, t1, "TEMPERATURE", 25.0, "CELSIUS"), "corr-temp");
+        service.updateTwin(new TelemetryRequest(deviceId, t2, "HUMIDITY", 60.0, "PERCENT"), "corr-hum");
+        service.updateTwin(new TelemetryRequest(deviceId, t3, "PRESSURE", 1012.0, "HPA"), "corr-pres");
+
+        // Each update queried its OWN sensorType, never another's.
+        verify(registry).get(deviceId, "TEMPERATURE");
+        verify(registry).get(deviceId, "HUMIDITY");
+        verify(registry).get(deviceId, "PRESSURE");
+        verify(registry, never()).get(eq(deviceId), eq("GAS"));
+
+        // All three were persisted - none was rejected as "out of order"
+        // merely because a different capability had already reported for
+        // this device.
+        ArgumentCaptor<DigitalTwin> twinCaptor = ArgumentCaptor.forClass(DigitalTwin.class);
+        verify(registry, times(3)).put(twinCaptor.capture());
+        List<DigitalTwin> persisted = twinCaptor.getAllValues();
+        assertTrue(persisted.stream().anyMatch(t -> t.latestSensorType().equals("TEMPERATURE") && t.latestValue() == 25.0));
+        assertTrue(persisted.stream().anyMatch(t -> t.latestSensorType().equals("HUMIDITY") && t.latestValue() == 60.0));
+        assertTrue(persisted.stream().anyMatch(t -> t.latestSensorType().equals("PRESSURE") && t.latestValue() == 1012.0));
+    }
+
+    @Test
+    void updateTwin_olderTemperatureAfterNewerHumidity_temperatureStillAccepted() {
+        // The crux of the Phase 11 fix: a HUMIDITY reading newer than an
+        // about-to-arrive TEMPERATURE reading must never cause that
+        // TEMPERATURE reading to be rejected as "out of order" - they are
+        // independent capabilities, not a shared device-level timeline.
+        UUID deviceId = UUID.randomUUID();
+        Instant humidityTimestamp = Instant.now();
+        Instant temperatureTimestamp = humidityTimestamp.minusSeconds(10); // earlier than HUMIDITY, but TEMPERATURE has no prior state of its own
+
+        when(registry.get(deviceId, "HUMIDITY")).thenReturn(Optional.empty());
+        service.updateTwin(new TelemetryRequest(deviceId, humidityTimestamp, "HUMIDITY", 60.0, "PERCENT"), "corr-hum");
+
+        when(registry.get(deviceId, "TEMPERATURE")).thenReturn(Optional.empty());
+        service.updateTwin(new TelemetryRequest(deviceId, temperatureTimestamp, "TEMPERATURE", 25.0, "CELSIUS"), "corr-temp");
+
+        ArgumentCaptor<DigitalTwin> twinCaptor = ArgumentCaptor.forClass(DigitalTwin.class);
+        verify(registry, times(2)).put(twinCaptor.capture());
+        assertTrue(twinCaptor.getAllValues().stream().anyMatch(t -> t.latestSensorType().equals("TEMPERATURE") && t.latestValue() == 25.0),
+                "TEMPERATURE must be accepted - it was never compared against HUMIDITY's timestamp");
+    }
+
+    // ==================================================================
     // Tier 3 Phase 5: Digital Twin concurrency correctness.
     //
     // A Mockito mock cannot deterministically coordinate two threads
@@ -214,9 +276,29 @@ class DigitalTwinServiceTest {
 
         @Override
         public Optional<DigitalTwin> get(UUID deviceId) {
-            Optional<DigitalTwin> result = Optional.ofNullable(store.get(deviceId));
+            return Optional.ofNullable(store.get(deviceId));
+        }
+
+        @Override
+        public Optional<DigitalTwin> get(UUID deviceId, String sensorType) {
+            // DigitalTwinService.updateTwin() calls this per-sensorType
+            // overload for its out-of-order decision (Phase 11) - the
+            // onGet hook must fire here, not the device-only overload
+            // above, so these concurrency tests still observe exactly
+            // when updateTwin() enters its critical section. Every test
+            // in this class uses a single, consistent sensorType per
+            // device, so filtering by it is behaviorally identical to the
+            // old device-only lookup.
+            Optional<DigitalTwin> result = Optional.ofNullable(store.get(deviceId))
+                    .filter(twin -> twin.latestSensorType().equals(sensorType));
             onGet.accept(deviceId);
             return result;
+        }
+
+        @Override
+        public List<DigitalTwin> getAllForDevice(UUID deviceId) {
+            DigitalTwin twin = store.get(deviceId);
+            return twin == null ? List.of() : List.of(twin);
         }
 
         @Override

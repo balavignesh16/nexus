@@ -107,7 +107,7 @@ class RetentionManagerExecutionTest {
         Site site = siteRepository.save(new Site(UUID.randomUUID(), "Site", "Desc", Instant.now(), Instant.now()));
         Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "B1", "Desc", Instant.now(), Instant.now()));
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "S1", "Desc", Instant.now(), Instant.now()));
-        device = new Device(UUID.randomUUID(), space, "Device A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "SN-RET-1", "D");
+        device = new Device(UUID.randomUUID(), space, "Device A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "SN-RET-1", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         device.update("Device A", DeviceStatus.ACTIVE, "D");
         device = deviceRepository.save(device);
     }

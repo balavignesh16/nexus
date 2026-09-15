@@ -85,7 +85,7 @@ public class ActionIntegrationTest {
         UUID spaceId = spaceService.createSpace(bldgId, new CreateSpaceRequest("Space X", "Desc")).id();
 
         deviceId = deviceService.createDevice(spaceId, new CreateDeviceRequest(
-                "Test Device", DeviceType.TEMPERATURE_SENSOR, "NEXUS", "M1", UUID.randomUUID().toString(), "Desc"
+                "Test Device", DeviceType.TEMPERATURE_SENSOR, "NEXUS", "M1", UUID.randomUUID().toString(), "Desc", null
         )).id();
         deviceService.updateDevice(deviceId, new UpdateDeviceRequest("Test Device", DeviceStatus.ACTIVE, "Desc"));
     }

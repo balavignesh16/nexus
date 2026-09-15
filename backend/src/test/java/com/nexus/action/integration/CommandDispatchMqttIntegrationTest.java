@@ -132,7 +132,7 @@ class CommandDispatchMqttIntegrationTest {
         Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "Building", "desc", now, now));
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "Space", "desc", now, now));
         Device device = deviceRepository.save(new Device(UUID.randomUUID(), space, "ESP-Test", DeviceType.CUSTOM,
-                "Acme", "T1", "SN-CMD-" + UUID.randomUUID(), "desc"));
+                "Acme", "T1", "SN-CMD-" + UUID.randomUUID(), "desc", com.nexus.device.domain.DeviceMode.SIMULATED));
         deviceId = device.getId();
 
         deviceCapabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId, CapabilityType.LED, CapabilityDirection.WRITE, null, null));

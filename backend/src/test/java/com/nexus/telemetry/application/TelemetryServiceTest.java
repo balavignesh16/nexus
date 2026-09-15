@@ -43,7 +43,7 @@ class TelemetryServiceTest {
     @Test
     void processTelemetry_WhenDeviceActive_SavesAndReturns() {
         UUID deviceId = UUID.randomUUID();
-        Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc");
+        Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc", com.nexus.device.domain.DeviceMode.SIMULATED);
         mockDevice.update("Sensor", DeviceStatus.ACTIVE, "Desc"); // Ensure it's active
 
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(mockDevice));
@@ -63,7 +63,7 @@ class TelemetryServiceTest {
     @Test
     void processTelemetry_WhenDeviceInactive_ThrowsException() {
         UUID deviceId = UUID.randomUUID();
-        Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc");
+        Device mockDevice = new Device(deviceId, mock(Space.class), "Sensor", DeviceType.TEMPERATURE_SENSOR, "Man", "Mod", "123", "Desc", com.nexus.device.domain.DeviceMode.SIMULATED);
         mockDevice.update("Sensor", DeviceStatus.OFFLINE, "Desc"); // Inactive
 
         when(deviceRepository.findById(deviceId)).thenReturn(Optional.of(mockDevice));

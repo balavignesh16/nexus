@@ -104,9 +104,9 @@ class AnalyticsControllerIntegrationTest {
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "S1", "d", now, now));
 
         Device deviceOnline = deviceRepository.save(new Device(UUID.randomUUID(), space, "Temp Sensor", DeviceType.TEMPERATURE_SENSOR,
-                "Acme", "T1", "SN-ANALYTICS-1", "d"));
+                "Acme", "T1", "SN-ANALYTICS-1", "d", com.nexus.device.domain.DeviceMode.SIMULATED));
         Device deviceUnknown = deviceRepository.save(new Device(UUID.randomUUID(), space, "Gas Sensor", DeviceType.GAS_SENSOR,
-                "Acme", "G1", "SN-ANALYTICS-2", "d"));
+                "Acme", "G1", "SN-ANALYTICS-2", "d", com.nexus.device.domain.DeviceMode.SIMULATED));
         deviceOnlineId = deviceOnline.getId();
         deviceUnknownId = deviceUnknown.getId();
 

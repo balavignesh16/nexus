@@ -11,6 +11,7 @@ import com.nexus.site.persistence.SiteRepository;
 import com.nexus.space.domain.Space;
 import com.nexus.space.persistence.SpaceRepository;
 import com.nexus.twin.domain.DigitalTwin;
+import com.nexus.twin.domain.DigitalTwinId;
 import com.nexus.twin.domain.DigitalTwinRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,17 +91,23 @@ class InMemoryDigitalTwinRegistryTest {
         Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "B1", "Desc", Instant.now(), Instant.now()));
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "S1", "Desc", Instant.now(), Instant.now()));
 
-        device = new Device(UUID.randomUUID(), space, "Device A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "SN-1", "D");
+        device = new Device(UUID.randomUUID(), space, "Device A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "SN-1", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         device.update("Device A", DeviceStatus.ACTIVE, "D");
         device = deviceRepository.save(device);
 
-        secondDevice = new Device(UUID.randomUUID(), space, "Device B", DeviceType.GAS_SENSOR, "M", "M", "SN-2", "D");
+        secondDevice = new Device(UUID.randomUUID(), space, "Device B", DeviceType.GAS_SENSOR, "M", "M", "SN-2", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         secondDevice.update("Device B", DeviceStatus.ACTIVE, "D");
         secondDevice = deviceRepository.save(secondDevice);
     }
 
+    private static final String SENSOR_TYPE = "TEMPERATURE_SENSOR";
+
     private DigitalTwin twinFor(UUID deviceId, Instant timestamp, double value) {
-        return new DigitalTwin(deviceId, timestamp, "TEMPERATURE_SENSOR", value, "CELSIUS", timestamp, Map.of());
+        return new DigitalTwin(deviceId, timestamp, SENSOR_TYPE, value, "CELSIUS", timestamp, Map.of());
+    }
+
+    private DigitalTwinId idFor(UUID deviceId) {
+        return new DigitalTwinId(deviceId, SENSOR_TYPE);
     }
 
     @Test
@@ -115,7 +122,7 @@ class InMemoryDigitalTwinRegistryTest {
         registry.put(twin);
 
         // Bypass the cache entirely - query the real repository directly.
-        Optional<DigitalTwin> fromDb = digitalTwinRepository.findById(device.getId());
+        Optional<DigitalTwin> fromDb = digitalTwinRepository.findById(idFor(device.getId()));
         assertTrue(fromDb.isPresent(), "twin must be persisted to the real database");
         assertEquals(23.5, fromDb.get().latestValue());
         assertEquals(now, fromDb.get().latestTimestamp());
@@ -173,7 +180,7 @@ class InMemoryDigitalTwinRegistryTest {
         registry.remove(device.getId());
 
         assertTrue(registry.get(device.getId()).isEmpty(), "twin must be gone from the cache");
-        assertTrue(digitalTwinRepository.findById(device.getId()).isEmpty(), "twin must be gone from the database");
+        assertTrue(digitalTwinRepository.findById(idFor(device.getId())).isEmpty(), "twin must be gone from the database");
     }
 
     @Test
@@ -200,8 +207,100 @@ class InMemoryDigitalTwinRegistryTest {
         registry.put(twinFor(device.getId(), later, 99.0));
 
         assertEquals(99.0, registry.get(device.getId()).orElseThrow().latestValue());
-        assertEquals(99.0, digitalTwinRepository.findById(device.getId()).orElseThrow().latestValue());
-        // Only one row should exist for this device (primary key = device_id).
+        assertEquals(99.0, digitalTwinRepository.findById(idFor(device.getId())).orElseThrow().latestValue());
+        // Only one row should exist: both puts share the same (device_id,
+        // latest_sensor_type) composite key, so the second is a real UPDATE
+        // of the same row, not a new INSERT.
         assertEquals(1, digitalTwinRepository.count());
+    }
+
+    // ---- Phase 11: multi-capability persistence correctness ----
+
+    @Test
+    void multiCapability_sequentialUpdatesForDifferentSensorTypes_retainAllRowsIndependently() {
+        InMemoryDigitalTwinRegistry registry = new InMemoryDigitalTwinRegistry(digitalTwinRepository);
+        Instant t1 = Instant.now();
+        Instant t2 = t1.plusSeconds(1);
+        Instant t3 = t1.plusSeconds(2);
+
+        registry.put(new DigitalTwin(device.getId(), t1, "TEMPERATURE", 25.0, "CELSIUS", t1, Map.of()));
+        registry.put(new DigitalTwin(device.getId(), t2, "HUMIDITY", 60.0, "PERCENT", t2, Map.of()));
+        registry.put(new DigitalTwin(device.getId(), t3, "PRESSURE", 1012.0, "HPA", t3, Map.of()));
+
+        // None overwrote another - all three independently retrievable.
+        assertEquals(25.0, registry.get(device.getId(), "TEMPERATURE").orElseThrow().latestValue());
+        assertEquals(60.0, registry.get(device.getId(), "HUMIDITY").orElseThrow().latestValue());
+        assertEquals(1012.0, registry.get(device.getId(), "PRESSURE").orElseThrow().latestValue());
+
+        // Real persistence, not just cache.
+        assertEquals(25.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "TEMPERATURE")).orElseThrow().latestValue());
+        assertEquals(60.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "HUMIDITY")).orElseThrow().latestValue());
+        assertEquals(1012.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "PRESSURE")).orElseThrow().latestValue());
+
+        // The device-level (no sensorType) lookup returns the most recent
+        // across all capabilities - PRESSURE, since it was updated last.
+        DigitalTwin representative = registry.get(device.getId()).orElseThrow();
+        assertEquals("PRESSURE", representative.latestSensorType());
+        assertEquals(1012.0, representative.latestValue());
+    }
+
+    @Test
+    void multiCapability_listAllReturnsOneRepresentativeRowPerDevice_notOnePerCapability() {
+        InMemoryDigitalTwinRegistry registry = new InMemoryDigitalTwinRegistry(digitalTwinRepository);
+        Instant t1 = Instant.now();
+        Instant t2 = t1.plusSeconds(1);
+        Instant t3 = t1.plusSeconds(2);
+
+        // Device A: three capabilities.
+        registry.put(new DigitalTwin(device.getId(), t1, "TEMPERATURE", 25.0, "CELSIUS", t1, Map.of()));
+        registry.put(new DigitalTwin(device.getId(), t2, "HUMIDITY", 60.0, "PERCENT", t2, Map.of()));
+        registry.put(new DigitalTwin(device.getId(), t3, "PRESSURE", 1012.0, "HPA", t3, Map.of()));
+        // Device B: one capability.
+        registry.put(new DigitalTwin(secondDevice.getId(), t1, "GAS_SENSOR", 400.0, "PPM", t1, Map.of()));
+
+        List<DigitalTwin> all = registry.listAll();
+
+        assertEquals(2, all.size(), "one representative row per device, never one row per capability");
+        assertTrue(all.stream().anyMatch(t -> t.deviceId().equals(device.getId()) && t.latestSensorType().equals("PRESSURE")));
+        assertTrue(all.stream().anyMatch(t -> t.deviceId().equals(secondDevice.getId()) && t.latestSensorType().equals("GAS_SENSOR")));
+    }
+
+    @Test
+    void multiCapability_outOfOrderProtectionIsScopedPerSensorType() {
+        // This exercises the registry only (DigitalTwinService owns the
+        // actual out-of-order decision); it confirms the registry gives
+        // the service the real per-capability lookup it needs to make
+        // that decision correctly - a newer TEMPERATURE reading must not
+        // be compared against an unrelated HUMIDITY reading's timestamp.
+        InMemoryDigitalTwinRegistry registry = new InMemoryDigitalTwinRegistry(digitalTwinRepository);
+        Instant tHumidityNewer = Instant.now();
+        Instant tTemperatureOlder = tHumidityNewer.minusSeconds(10);
+
+        registry.put(new DigitalTwin(device.getId(), tHumidityNewer, "HUMIDITY", 60.0, "PERCENT", tHumidityNewer, Map.of()));
+
+        // A TEMPERATURE reading, timestamped before HUMIDITY's, must still
+        // be visible as a genuinely new TEMPERATURE row - the two sensor
+        // types occupy independent identity, not a shared device-level one.
+        assertTrue(registry.get(device.getId(), "TEMPERATURE").isEmpty(), "no TEMPERATURE row exists yet");
+        registry.put(new DigitalTwin(device.getId(), tTemperatureOlder, "TEMPERATURE", 25.0, "CELSIUS", tTemperatureOlder, Map.of()));
+        assertEquals(25.0, registry.get(device.getId(), "TEMPERATURE").orElseThrow().latestValue());
+        assertEquals(60.0, registry.get(device.getId(), "HUMIDITY").orElseThrow().latestValue());
+    }
+
+    @Test
+    void multiCapability_survivesHydrationAfterRestart() {
+        InMemoryDigitalTwinRegistry writerRegistry = new InMemoryDigitalTwinRegistry(digitalTwinRepository);
+        Instant t1 = Instant.now();
+        Instant t2 = t1.plusSeconds(1);
+        writerRegistry.put(new DigitalTwin(device.getId(), t1, "TEMPERATURE", 25.0, "CELSIUS", t1, Map.of()));
+        writerRegistry.put(new DigitalTwin(device.getId(), t2, "HUMIDITY", 60.0, "PERCENT", t2, Map.of()));
+
+        InMemoryDigitalTwinRegistry freshRegistry = new InMemoryDigitalTwinRegistry(digitalTwinRepository);
+        freshRegistry.init();
+
+        List<DigitalTwin> hydrated = freshRegistry.getAllForDevice(device.getId());
+        assertEquals(2, hydrated.size(), "both capability rows must survive a cache-clear/reload (restart) cycle");
+        assertTrue(hydrated.stream().anyMatch(t -> t.latestSensorType().equals("TEMPERATURE") && t.latestValue() == 25.0));
+        assertTrue(hydrated.stream().anyMatch(t -> t.latestSensorType().equals("HUMIDITY") && t.latestValue() == 60.0));
     }
 }

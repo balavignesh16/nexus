@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexus.device.api.dto.CreateDeviceRequest;
 import com.nexus.device.api.dto.UpdateDeviceRequest;
 import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.DeviceStatus;
 import com.nexus.device.domain.DeviceType;
@@ -100,7 +101,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void getAllDevices_shouldReturn200WithSeededDevices() throws Exception {
         CreateDeviceRequest request = new CreateDeviceRequest(
-            "Sensor", DeviceType.GAS_SENSOR, "Acme", "V1", "SN-ALL-1", "Desc"
+            "Sensor", DeviceType.GAS_SENSOR, "Acme", "V1", "SN-ALL-1", "Desc", null
         );
         mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -127,7 +128,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void createDevice_shouldReturn201() throws Exception {
         CreateDeviceRequest request = new CreateDeviceRequest(
-            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc"
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc", null
         );
 
         mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
@@ -140,10 +141,79 @@ class DeviceControllerIntegrationTest {
                 .andExpect(jsonPath("$.createdBy").value("system"));
     }
 
+    // ---------- Phase 11: DeviceMode backward-compatible contract ----------
+
+    @Test
+    void createDevice_modeOmitted_defaultsToSimulated() throws Exception {
+        CreateDeviceRequest request = new CreateDeviceRequest(
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-MODE-OMITTED", "Desc", null
+        );
+
+        mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mode").value("SIMULATED"));
+    }
+
+    @Test
+    void createDevice_modeExplicitlySimulated_isPreserved() throws Exception {
+        CreateDeviceRequest request = new CreateDeviceRequest(
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-MODE-SIM", "Desc", DeviceMode.SIMULATED
+        );
+
+        mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mode").value("SIMULATED"));
+    }
+
+    @Test
+    void createDevice_modeExplicitlyReal_isPreserved() throws Exception {
+        CreateDeviceRequest request = new CreateDeviceRequest(
+            "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-MODE-REAL", "Desc", DeviceMode.REAL
+        );
+
+        mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mode").value("REAL"));
+    }
+
+    @Test
+    void createDevice_invalidMode_returns400() throws Exception {
+        String body = "{\"name\":\"Sensor\",\"deviceType\":\"CUSTOM\",\"manufacturer\":\"Acme\",\"model\":\"V1\"," +
+                "\"serialNumber\":\"SN-MODE-INVALID\",\"description\":\"Desc\",\"mode\":\"NOT_A_REAL_MODE\"}";
+
+        mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getDevice_afterCreationWithoutMode_stillReportsSimulatedOnGet() throws Exception {
+        CreateDeviceRequest request = new CreateDeviceRequest(
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-MODE-GET", "Desc", null
+        );
+        String createResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = objectMapper.readTree(createResponse).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/devices/{id}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mode").value("SIMULATED"));
+    }
+
     @Test
     void createDevice_shouldReturn409_whenSerialNumberDuplicate() throws Exception {
         CreateDeviceRequest request = new CreateDeviceRequest(
-            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc"
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc", null
         );
         
         mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
@@ -161,7 +231,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void deleteDevice_shouldReturn204() throws Exception {
         CreateDeviceRequest request = new CreateDeviceRequest(
-            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc"
+            "Sensor", DeviceType.TEMPERATURE_SENSOR, "Acme", "V1", "SN-1", "Desc", null
         );
         String response = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -200,7 +270,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void sendDeviceCommand_missingRequiredField_returns400() throws Exception {
         CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
-                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-400", "Desc");
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-400", "Desc", null);
         String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(deviceRequest)))
@@ -223,7 +293,7 @@ class DeviceControllerIntegrationTest {
         // must be honestly reported as FAILURE (never a fabricated
         // SUCCESS), even though the REST call itself succeeds (201).
         CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
-                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-NOBROKER", "Desc");
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CMD-NOBROKER", "Desc", null);
         String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(deviceRequest)))
@@ -245,7 +315,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void getDeviceConnectivity_neverObserved_returnsTruthfulUnknown_notFabricatedOnlineOrOffline() throws Exception {
         CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
-                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-UNKNOWN", "Desc");
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-UNKNOWN", "Desc", null);
         String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(deviceRequest)))
@@ -262,7 +332,7 @@ class DeviceControllerIntegrationTest {
     @Test
     void getDeviceConnectivity_observedOnline_returnsTruthfulOnlineWithTimestamp() throws Exception {
         CreateDeviceRequest deviceRequest = new CreateDeviceRequest(
-                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-ONLINE", "Desc");
+                "Sensor", DeviceType.CUSTOM, "Acme", "V1", "SN-CONN-ONLINE", "Desc", null);
         String deviceResponse = mockMvc.perform(post("/api/v1/spaces/{spaceId}/devices", spaceId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(deviceRequest)))

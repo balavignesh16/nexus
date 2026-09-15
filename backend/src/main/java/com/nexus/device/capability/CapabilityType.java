@@ -15,5 +15,19 @@ public enum CapabilityType {
     TEMPERATURE,
     HUMIDITY,
     MOTION,
-    LED
+    LED,
+
+    // Phase 11: complete authoritative BOM vocabulary. Adding these enum
+    // values establishes a stable capability contract for Phase 12
+    // (simulation) and Phase 13 (rules/actions) - it does not itself
+    // implement any command dispatch, validation, or simulated/firmware
+    // behavior for them. WRITE-direction values here are metadata only,
+    // exactly like LED already is (see CapabilityDirection).
+    PRESSURE,
+    GAS,
+    BUTTON,
+    RELAY,
+    SERVO,
+    FAN,
+    BUZZER
 }

@@ -91,11 +91,11 @@ class TelemetryControllerIntegrationTest {
         Space space = new Space(UUID.randomUUID(), building, "S1", "Desc", Instant.now(), Instant.now());
         space = spaceRepository.save(space);
 
-        activeDevice = new Device(UUID.randomUUID(), space, "A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "1", "D");
+        activeDevice = new Device(UUID.randomUUID(), space, "A", DeviceType.TEMPERATURE_SENSOR, "M", "M", "1", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         activeDevice.update("A", DeviceStatus.ACTIVE, "D");
         activeDevice = deviceRepository.save(activeDevice);
         
-        inactiveDevice = new Device(UUID.randomUUID(), space, "I", DeviceType.TEMPERATURE_SENSOR, "M", "M", "2", "D");
+        inactiveDevice = new Device(UUID.randomUUID(), space, "I", DeviceType.TEMPERATURE_SENSOR, "M", "M", "2", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         inactiveDevice.update("I", DeviceStatus.OFFLINE, "D");
         inactiveDevice = deviceRepository.save(inactiveDevice);
     }

@@ -10,6 +10,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "digital_twins")
+@IdClass(DigitalTwinId.class)
 public class DigitalTwin {
 
     @Id
@@ -19,7 +20,12 @@ public class DigitalTwin {
     @Column(name = "latest_timestamp", nullable = false)
     private Instant latestTimestamp;
 
-    @Column(name = "latest_sensor_type")
+    // Phase 11: part of the composite identity (deviceId, latestSensorType)
+    // - a device reporting multiple real sensor types now retains one
+    // persisted row per sensorType, instead of the newest overwriting all
+    // others. Always populated (see V13 migration for the non-null proof).
+    @Id
+    @Column(name = "latest_sensor_type", nullable = false)
     private String latestSensorType;
 
     @Column(name = "latest_value")

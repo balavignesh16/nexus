@@ -6,6 +6,7 @@ import com.nexus.device.api.dto.UpdateDeviceRequest;
 import com.nexus.device.capability.DeviceCapabilityService;
 import com.nexus.device.capability.api.dto.DeviceCapabilityResponse;
 import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.exception.DeviceNotFoundException;
 import com.nexus.device.domain.exception.DeviceSerialNumberExistsException;
@@ -71,6 +72,11 @@ public class DeviceService {
             throw new DeviceSerialNumberExistsException(request.serialNumber());
         }
 
+        // Phase 11: omitted mode defaults to SIMULATED - keeps the existing
+        // Python simulator and any pre-Phase-11 API client working
+        // unmodified, while the persisted column itself remains NOT NULL.
+        DeviceMode resolvedMode = request.mode() != null ? request.mode() : DeviceMode.SIMULATED;
+
         Device device = new Device(
                 UUID.randomUUID(),
                 space,
@@ -79,7 +85,8 @@ public class DeviceService {
                 request.manufacturer(),
                 request.model(),
                 request.serialNumber(),
-                request.description()
+                request.description(),
+                resolvedMode
         );
 
         Device savedDevice = deviceRepository.save(device);

@@ -2,6 +2,7 @@ package com.nexus.device.api.dto;
 
 import com.nexus.device.capability.api.dto.DeviceCapabilityResponse;
 import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceStatus;
 import com.nexus.device.domain.DeviceType;
 
@@ -18,6 +19,7 @@ public record DeviceResponse(
     String model,
     String serialNumber,
     DeviceStatus status,
+    DeviceMode mode,
     String description,
     Instant createdAt,
     Instant updatedAt,
@@ -41,6 +43,7 @@ public record DeviceResponse(
             device.getModel(),
             device.getSerialNumber(),
             device.getStatus(),
+            device.getMode(),
             device.getDescription(),
             device.getCreatedAt(),
             device.getUpdatedAt(),

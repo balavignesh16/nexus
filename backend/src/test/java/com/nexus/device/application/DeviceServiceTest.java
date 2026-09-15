@@ -5,6 +5,7 @@ import com.nexus.device.api.dto.DeviceResponse;
 import com.nexus.device.api.dto.UpdateDeviceRequest;
 import com.nexus.device.capability.DeviceCapabilityService;
 import com.nexus.device.domain.Device;
+import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.DeviceStatus;
 import com.nexus.device.domain.DeviceType;
@@ -50,10 +51,10 @@ class DeviceServiceTest {
     @Test
     void createDevice_shouldReturnResponse() {
         UUID spaceId = UUID.randomUUID();
-        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc");
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc", DeviceMode.REAL);
         Space space = mock(Space.class);
         when(space.getId()).thenReturn(spaceId);
-        
+
         when(spaceRepository.findById(spaceId)).thenReturn(Optional.of(space));
         when(deviceRepository.existsBySerialNumber("SN-12345")).thenReturn(false);
         when(deviceRepository.save(any(Device.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -63,14 +64,47 @@ class DeviceServiceTest {
         assertThat(response).isNotNull();
         assertThat(response.name()).isEqualTo("Sensor 1");
         assertThat(response.serialNumber()).isEqualTo("SN-12345");
+        assertThat(response.mode()).isEqualTo(DeviceMode.REAL);
         assertThat(response.createdBy()).isEqualTo("system");
         assertThat(response.updatedBy()).isEqualTo("system");
     }
 
     @Test
+    void createDevice_omittedMode_defaultsToSimulated() {
+        UUID spaceId = UUID.randomUUID();
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc", null);
+        Space space = mock(Space.class);
+        when(space.getId()).thenReturn(spaceId);
+
+        when(spaceRepository.findById(spaceId)).thenReturn(Optional.of(space));
+        when(deviceRepository.existsBySerialNumber("SN-12345")).thenReturn(false);
+        when(deviceRepository.save(any(Device.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        DeviceResponse response = deviceService.createDevice(spaceId, request);
+
+        assertThat(response.mode()).isEqualTo(DeviceMode.SIMULATED);
+    }
+
+    @Test
+    void createDevice_explicitSimulatedMode_isPreserved() {
+        UUID spaceId = UUID.randomUUID();
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc", DeviceMode.SIMULATED);
+        Space space = mock(Space.class);
+        when(space.getId()).thenReturn(spaceId);
+
+        when(spaceRepository.findById(spaceId)).thenReturn(Optional.of(space));
+        when(deviceRepository.existsBySerialNumber("SN-12345")).thenReturn(false);
+        when(deviceRepository.save(any(Device.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        DeviceResponse response = deviceService.createDevice(spaceId, request);
+
+        assertThat(response.mode()).isEqualTo(DeviceMode.SIMULATED);
+    }
+
+    @Test
     void createDevice_shouldThrowException_whenSpaceNotFound() {
         UUID spaceId = UUID.randomUUID();
-        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc");
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc", null);
 
         when(spaceRepository.findById(spaceId)).thenReturn(Optional.empty());
 
@@ -81,9 +115,9 @@ class DeviceServiceTest {
     @Test
     void createDevice_shouldThrowException_whenSerialNumberExists() {
         UUID spaceId = UUID.randomUUID();
-        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc");
+        CreateDeviceRequest request = new CreateDeviceRequest("Sensor 1", DeviceType.TEMPERATURE_SENSOR, "Acme", "T-100", "SN-12345", "Desc", null);
         Space space = mock(Space.class);
-        
+
         when(spaceRepository.findById(spaceId)).thenReturn(Optional.of(space));
         when(deviceRepository.existsBySerialNumber("SN-12345")).thenReturn(true);
 
@@ -96,7 +130,7 @@ class DeviceServiceTest {
         UUID spaceId = UUID.randomUUID();
         Space space = mock(Space.class);
         when(space.getId()).thenReturn(spaceId);
-        Device d1 = new Device(UUID.randomUUID(), space, "D1", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null);
+        Device d1 = new Device(UUID.randomUUID(), space, "D1", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         
         when(spaceRepository.existsById(spaceId)).thenReturn(true);
         when(deviceRepository.findBySpaceId(spaceId)).thenReturn(List.of(d1));
@@ -121,13 +155,13 @@ class DeviceServiceTest {
         Space space1 = mock(Space.class);
         Space space2 = mock(Space.class);
 
-        Device registered = new Device(UUID.randomUUID(), space1, "Registered Device", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null);
+        Device registered = new Device(UUID.randomUUID(), space1, "Registered Device", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         // status defaults to REGISTERED
 
-        Device active = new Device(UUID.randomUUID(), space1, "Active Device", DeviceType.GAS_SENSOR, "Acme", "M2", "SN2", null);
+        Device active = new Device(UUID.randomUUID(), space1, "Active Device", DeviceType.GAS_SENSOR, "Acme", "M2", "SN2", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         active.update("Active Device", DeviceStatus.ACTIVE, null);
 
-        Device offline = new Device(UUID.randomUUID(), space2, "Offline Device", DeviceType.MOTION_SENSOR, "Acme", "M3", "SN3", null);
+        Device offline = new Device(UUID.randomUUID(), space2, "Offline Device", DeviceType.MOTION_SENSOR, "Acme", "M3", "SN3", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         offline.update("Offline Device", DeviceStatus.OFFLINE, null);
 
         when(deviceRepository.findAll()).thenReturn(List.of(registered, active, offline));
@@ -154,7 +188,7 @@ class DeviceServiceTest {
     void getDevice_shouldReturnResponse() {
         UUID id = UUID.randomUUID();
         Space space = mock(Space.class);
-        Device device = new Device(id, space, "D1", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null);
+        Device device = new Device(id, space, "D1", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         
         when(deviceRepository.findById(id)).thenReturn(Optional.of(device));
 
@@ -176,7 +210,7 @@ class DeviceServiceTest {
     void updateDevice_shouldUpdateFields() {
         UUID id = UUID.randomUUID();
         Space space = mock(Space.class);
-        Device existing = new Device(id, space, "Old", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null);
+        Device existing = new Device(id, space, "Old", DeviceType.TEMPERATURE_SENSOR, "Acme", "M1", "SN1", null, com.nexus.device.domain.DeviceMode.SIMULATED);
         
         when(deviceRepository.findById(id)).thenReturn(Optional.of(existing));
         when(deviceRepository.save(any(Device.class))).thenAnswer(inv -> inv.getArgument(0));

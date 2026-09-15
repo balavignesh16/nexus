@@ -79,7 +79,7 @@ class InMemoryDeviceConnectivityRegistryTest {
         Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "Test Building", "desc", now, now));
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "Test Space", "desc", now, now));
         Device device = deviceRepository.save(new Device(UUID.randomUUID(), space, "Test Device",
-                DeviceType.TEMPERATURE_SENSOR, "Acme", "T1", "SN-" + UUID.randomUUID(), "desc"));
+                DeviceType.TEMPERATURE_SENSOR, "Acme", "T1", "SN-" + UUID.randomUUID(), "desc", com.nexus.device.domain.DeviceMode.SIMULATED));
         deviceId = device.getId();
     }
 

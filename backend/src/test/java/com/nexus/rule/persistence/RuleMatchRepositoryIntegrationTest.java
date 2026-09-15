@@ -95,7 +95,7 @@ class RuleMatchRepositoryIntegrationTest {
         Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "B1", "d", now, now));
         Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "S1", "d", now, now));
         Device device = deviceRepository.save(new Device(UUID.randomUUID(), space, "Device " + serialSuffix,
-                DeviceType.TEMPERATURE_SENSOR, "Acme", "T1", "SN-RULEMATCH-" + serialSuffix, "d"));
+                DeviceType.TEMPERATURE_SENSOR, "Acme", "T1", "SN-RULEMATCH-" + serialSuffix, "d", com.nexus.device.domain.DeviceMode.SIMULATED));
         return device.getId();
     }
 

@@ -35,6 +35,10 @@ public class Device {
     @Column(nullable = false, length = 50)
     private DeviceStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DeviceMode mode;
+
     @Column(length = 500)
     private String description;
 
@@ -52,7 +56,7 @@ public class Device {
 
     protected Device() {}
 
-    public Device(UUID id, Space space, String name, DeviceType deviceType, String manufacturer, String model, String serialNumber, String description) {
+    public Device(UUID id, Space space, String name, DeviceType deviceType, String manufacturer, String model, String serialNumber, String description, DeviceMode mode) {
         this.id = id;
         this.space = space;
         this.name = name;
@@ -61,6 +65,7 @@ public class Device {
         this.model = model;
         this.serialNumber = serialNumber;
         this.status = DeviceStatus.REGISTERED;
+        this.mode = mode;
         this.description = description;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
@@ -76,6 +81,7 @@ public class Device {
     public String getModel() { return model; }
     public String getSerialNumber() { return serialNumber; }
     public DeviceStatus getStatus() { return status; }
+    public DeviceMode getMode() { return mode; }
     public String getDescription() { return description; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

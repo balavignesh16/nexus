@@ -103,7 +103,7 @@ class TelemetryQueryServiceTest {
     }
 
     private Device createActiveDevice(UUID deviceId) {
-        Device device = new Device(deviceId, null, "Sensor", com.nexus.device.domain.DeviceType.TEMPERATURE_SENSOR, "M", "M", "1", "D");
+        Device device = new Device(deviceId, null, "Sensor", com.nexus.device.domain.DeviceType.TEMPERATURE_SENSOR, "M", "M", "1", "D", com.nexus.device.domain.DeviceMode.SIMULATED);
         device.update("Sensor", com.nexus.device.domain.DeviceStatus.ACTIVE, "D");
         return device;
     }

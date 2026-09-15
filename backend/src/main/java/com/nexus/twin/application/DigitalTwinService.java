@@ -91,7 +91,11 @@ public class DigitalTwinService {
         long stageStart;
 
         synchronized (lock) {
-            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId);
+            // Phase 11: out-of-order protection is scoped to the same real
+            // sensorType - a newer HUMIDITY reading must never be compared
+            // against (or overwrite) an unrelated TEMPERATURE reading's
+            // timestamp/state for the same device.
+            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId, request.sensorType());
 
             if (currentTwinOpt.isPresent()) {
                 DigitalTwin currentTwin = currentTwinOpt.get();
