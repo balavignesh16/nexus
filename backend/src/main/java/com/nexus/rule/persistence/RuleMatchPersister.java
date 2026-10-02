@@ -72,6 +72,13 @@ public class RuleMatchPersister {
         if (conditionEvidence.stateTimestamp() != null) {
             map.put("stateTimestamp", conditionEvidence.stateTimestamp().toString());
         }
+        if (conditionEvidence.capabilityKey() != null) {
+            map.put("capabilityKey", conditionEvidence.capabilityKey());
+            map.put("definitionId", conditionEvidence.definitionId());
+            map.put("bindingId", conditionEvidence.bindingId());
+            map.put("valueType", conditionEvidence.valueType());
+            map.put("unit", conditionEvidence.unit());
+        }
         return map;
     }
 }
