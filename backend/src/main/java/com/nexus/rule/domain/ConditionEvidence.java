@@ -22,10 +22,16 @@ public record ConditionEvidence(
     String expectedValue,
     Object actualValue,
     boolean conditionMet,
-    Instant stateTimestamp
+    Instant stateTimestamp,
+    String capabilityKey,
+    java.util.UUID definitionId,
+    java.util.UUID bindingId,
+    String valueType,
+    String unit
 ) {
     public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue,
                               Object actualValue, boolean conditionMet) {
-        this(field, operator, expectedValue, actualValue, conditionMet, null);
+        this(field, operator, expectedValue, actualValue, conditionMet, null,null,null,null,null,null);
     }
+    public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null);}
 }

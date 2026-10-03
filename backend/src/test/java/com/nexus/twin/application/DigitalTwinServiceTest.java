@@ -170,6 +170,19 @@ class DigitalTwinServiceTest {
     }
 
     @Test
+    void getTwinCapabilities_returnsEveryCapabilityForDevice() {
+        UUID deviceId = UUID.randomUUID();
+        DigitalTwin temperature = new DigitalTwin(deviceId, Instant.now(), "TEMPERATURE", 21.0, "CELSIUS", Instant.now(), Map.of());
+        DigitalTwin humidity = new DigitalTwin(deviceId, Instant.now(), "HUMIDITY", 55.0, "PERCENT", Instant.now(), Map.of());
+        when(registry.getAllForDevice(deviceId)).thenReturn(List.of(temperature, humidity));
+
+        List<DigitalTwin> result = service.getTwinCapabilities(deviceId);
+
+        assertEquals(List.of(temperature, humidity), result);
+        verify(registry).getAllForDevice(deviceId);
+    }
+
+    @Test
     void getAllTwins_delegatesToRegistryListAll() {
         DigitalTwin twin1 = new DigitalTwin(UUID.randomUUID(), Instant.now(), "TEMPERATURE_SENSOR", 1.0, "CELSIUS", Instant.now(), java.util.Map.of());
         DigitalTwin twin2 = new DigitalTwin(UUID.randomUUID(), Instant.now(), "GAS_SENSOR", 2.0, "PPM", Instant.now(), java.util.Map.of());

@@ -10,4 +10,5 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     boolean existsBySerialNumber(String serialNumber);
     boolean existsBySerialNumberAndIdNot(String serialNumber, UUID id);
     List<Device> findByStatus(DeviceStatus status);
+    boolean existsByDeviceTemplateId(UUID templateId);
 }

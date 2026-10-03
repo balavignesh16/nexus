@@ -211,6 +211,19 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             return;
         }
 
+        // Preserve the established legacy wire contract while allowing the
+        // additive generic shape. Legacy payloads remain numeric and require
+        // sensorType/unit; generic payloads identify capabilityKey and are
+        // type-checked centrally after runtime resolution.
+        boolean generic = request.capabilityKey() != null && !request.capabilityKey().isBlank();
+        if (!generic && (request.sensorType() == null || request.sensorType().isBlank()
+                || request.unit() == null || request.unit().isBlank()
+                || !(request.value() instanceof Number))) {
+            log.warn("Invalid legacy telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
+            acknowledgeQuietly(message);
+            return;
+        }
+
         // 3. Topic vs Payload Validation
         String[] parts = topic.split("/");
         if (parts.length >= 3) {
@@ -230,6 +243,9 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             telemetryService.processTelemetry(request);
             log.debug("Successfully processed MQTT telemetry for device {}", request.deviceId());
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
+        } catch (com.nexus.device.onboarding.OnboardingTelemetryRejectedException e) {
+            log.warn("Rejected onboarding telemetry on topic {}: {}. Acknowledging and dropping.", topic, e.getMessage());
+            acknowledgeQuietly(message);
         } catch (Exception e) {
             log.error("Error processing MQTT message from topic {}. Did NOT ack. Message will be retried.", topic, e);
             throw new RuntimeException("MQTT processing failed, triggering retry", e);

@@ -48,17 +48,20 @@ public class DeviceCommandService {
             throw new DeviceNotFoundException(deviceId);
         }
 
+        if (request.capability() == null && (request.capabilityKey() == null || request.capabilityKey().isBlank())) {
+            throw new IllegalArgumentException("capability or capabilityKey is required");
+        }
         UUID requestId = UUID.randomUUID();
+        Map<String,Object> parameters = new java.util.LinkedHashMap<>();
+        parameters.put("deviceId", deviceId.toString());
+        if(request.capability()!=null) parameters.put("capability",request.capability().name());
+        if(request.capabilityKey()!=null) parameters.put("capabilityKey",request.capabilityKey());
+        parameters.put("command",request.command()); parameters.put("value",request.value());
         ActionExecutionRequest actionRequest = new ActionExecutionRequest(
                 requestId,
                 null, // no RuleMatch - this is a manually triggered command
                 ActionType.SEND_COMMAND,
-                Map.of(
-                        "deviceId", deviceId.toString(),
-                        "capability", request.capability().name(),
-                        "command", request.command(),
-                        "value", request.value()
-                )
+                parameters
         );
 
         // ActionExecutionEngine.process()'s internal event publication is

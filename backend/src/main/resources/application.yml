@@ -29,7 +29,7 @@ mqtt:
   broker:
     url: tcp://${MQTT_HOST:localhost}:${MQTT_PORT:1883}
   client:
-    id: nexus-backend-sub
+    id: ${MQTT_CLIENT_ID:nexus-backend-sub}
   topic:
     telemetry: nexus/devices/+/telemetry
     status: nexus/devices/+/status

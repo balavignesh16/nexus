@@ -1,0 +1,11 @@
+package com.nexus.device.capability.definition.validation;
+
+public enum CapabilityValidationCode {
+    CAPABILITY_TYPE_MISMATCH,
+    CAPABILITY_VALUE_OUT_OF_RANGE,
+    CAPABILITY_ENUM_VALUE_INVALID,
+    CAPABILITY_UNIT_INVALID,
+    CAPABILITY_DIRECTION_INVALID,
+    CAPABILITY_COMMAND_UNSUPPORTED,
+    CAPABILITY_OBJECT_INVALID
+}

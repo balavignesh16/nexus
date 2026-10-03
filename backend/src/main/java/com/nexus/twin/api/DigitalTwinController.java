@@ -21,10 +21,11 @@ public class DigitalTwinController {
 
     @GetMapping("/devices/{deviceId}/twin")
     public ResponseEntity<DigitalTwinResponse> getTwin(@PathVariable UUID deviceId) {
-        return twinService.getTwin(deviceId)
-                .map(DigitalTwinResponse::from)
-                .map(ResponseEntity::ok)
-                .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("DigitalTwin", deviceId.toString()));
+        List<com.nexus.twin.domain.DigitalTwin> states = twinService.getTwinCapabilities(deviceId);
+        if (states.isEmpty()) {
+            throw new com.nexus.shared.exception.ResourceNotFoundException("DigitalTwin", deviceId.toString());
+        }
+        return ResponseEntity.ok(DigitalTwinResponse.from(states));
     }
 
     @GetMapping("/twins")
@@ -32,8 +33,13 @@ public class DigitalTwinController {
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
         
         List<DigitalTwinResponse> twins = twinService.getAllTwins().stream()
-                .map(DigitalTwinResponse::from)
                 .limit(limit)
+                .map(twin -> {
+                    List<com.nexus.twin.domain.DigitalTwin> states = twinService.getTwinCapabilities(twin.deviceId());
+                    // A concurrent device removal must not turn a list request
+                    // into a 500 after this representative snapshot was read.
+                    return DigitalTwinResponse.from(states.isEmpty() ? List.of(twin) : states);
+                })
                 .collect(Collectors.toList());
                 
         return ResponseEntity.ok(twins);

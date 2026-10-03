@@ -15,9 +15,12 @@ public record RuleCondition(
     RuleField field,
     RuleOperator operator,
     String expectedValue,
-    CapabilityType capabilityType
+    CapabilityType capabilityType,
+    String capabilityKey,
+    String unit
 ) {
     public RuleCondition(RuleField field, RuleOperator operator, String expectedValue) {
-        this(field, operator, expectedValue, null);
+        this(field, operator, expectedValue, null, null, null);
     }
+    public RuleCondition(RuleField field,RuleOperator operator,String expectedValue,CapabilityType capabilityType){this(field,operator,expectedValue,capabilityType,null,null);}
 }

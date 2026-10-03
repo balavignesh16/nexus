@@ -83,12 +83,29 @@ public class RuleEvaluator {
     }
 
     private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event, UUID resolvedDeviceId) {
+        if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(condition,resolvedDeviceId);
         if (condition.capabilityType() != null) {
             return evaluateCapabilityCondition(condition, resolvedDeviceId);
         }
         Object actualValue = extractActualValue(condition, event);
         boolean conditionMet = evaluateConditionMet(condition, actualValue);
         return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), actualValue, conditionMet);
+    }
+
+    private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId){
+        if(deviceId==null)return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),MISSING,false,null,condition.capabilityKey(),null,null,null,condition.unit());
+        Optional<DigitalTwin> found=digitalTwinRegistry.getAllForDevice(deviceId).stream().filter(t->condition.capabilityKey().equals(t.capabilityKey())||condition.capabilityKey().equalsIgnoreCase(t.latestSensorType())).findFirst();
+        if(found.isEmpty()||found.get().typedValue()==null)return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),MISSING,false,found.map(DigitalTwin::latestTimestamp).orElse(null),condition.capabilityKey(),null,null,null,condition.unit());
+        DigitalTwin twin=found.get(); Object actual=twin.typedValue(); boolean met=evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
+        return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met,twin.latestTimestamp(),condition.capabilityKey(),twin.capabilityDefinitionId(),twin.bindingId(),twin.valueType()==null?null:twin.valueType().name(),condition.unit()!=null?condition.unit():twin.latestUnit());
+    }
+
+    private boolean evaluateGeneric(Object actual,String expected,com.nexus.rule.domain.RuleOperator op,com.nexus.device.capability.definition.CapabilityValueType type){
+        if(type==null||actual==null)return false;
+        if(type==com.nexus.device.capability.definition.CapabilityValueType.NUMBER){try{var a=new java.math.BigDecimal(actual.toString());var e=new java.math.BigDecimal(expected);int c=a.compareTo(e);return switch(op){case EQ->c==0;case NE->c!=0;case GT->c>0;case GTE->c>=0;case LT->c<0;case LTE->c<=0;};}catch(Exception x){return false;}}
+        if(type==com.nexus.device.capability.definition.CapabilityValueType.BOOLEAN){if(!"true".equalsIgnoreCase(expected)&&!"false".equalsIgnoreCase(expected))return false;boolean eq=actual.equals(Boolean.valueOf(expected));return op==com.nexus.rule.domain.RuleOperator.EQ?eq:op==com.nexus.rule.domain.RuleOperator.NE&&!eq;}
+        if(type==com.nexus.device.capability.definition.CapabilityValueType.STRING||type==com.nexus.device.capability.definition.CapabilityValueType.ENUM){boolean eq=actual.equals(expected);return op==com.nexus.rule.domain.RuleOperator.EQ?eq:op==com.nexus.rule.domain.RuleOperator.NE&&!eq;}
+        return false;
     }
 
     /**

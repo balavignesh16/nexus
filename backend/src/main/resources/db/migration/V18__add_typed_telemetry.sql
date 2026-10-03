@@ -1,0 +1,12 @@
+ALTER TABLE telemetry_history ADD COLUMN capability_definition_id UUID REFERENCES capability_definitions(id) ON DELETE RESTRICT;
+ALTER TABLE telemetry_history ADD COLUMN binding_id UUID REFERENCES device_capability_bindings(id) ON DELETE RESTRICT;
+ALTER TABLE telemetry_history ADD COLUMN capability_key VARCHAR(100);
+ALTER TABLE telemetry_history ADD COLUMN value_type VARCHAR(20);
+ALTER TABLE telemetry_history ADD COLUMN numeric_value NUMERIC;
+ALTER TABLE telemetry_history ADD COLUMN boolean_value BOOLEAN;
+ALTER TABLE telemetry_history ADD COLUMN string_value TEXT;
+ALTER TABLE telemetry_history ADD COLUMN object_value JSONB;
+ALTER TABLE telemetry_history ADD COLUMN resolution_source VARCHAR(20);
+UPDATE telemetry_history SET value_type='NUMBER', numeric_value="value", capability_key=LOWER(sensor_type), resolution_source='LEGACY_ADAPTER';
+ALTER TABLE telemetry_history ALTER COLUMN "value" DROP NOT NULL;
+CREATE INDEX idx_telemetry_capability_key ON telemetry_history(device_id, capability_key, timestamp DESC);

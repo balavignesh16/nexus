@@ -20,6 +20,12 @@ import java.time.Instant;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(com.nexus.device.onboarding.OnboardingConflictException.class)
+    public ResponseEntity<ErrorResponse> handleOnboardingConflict(com.nexus.device.onboarding.OnboardingConflictException ex) {
+        return new ResponseEntity<>(new ErrorResponse(HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(), ex.getMessage(), Instant.now()), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(com.nexus.site.application.SiteHasBuildingsException.class)
     public ResponseEntity<ErrorResponse> handleSiteHasBuildingsException(com.nexus.site.application.SiteHasBuildingsException ex) {
         ErrorResponse errorResponse = new ErrorResponse(

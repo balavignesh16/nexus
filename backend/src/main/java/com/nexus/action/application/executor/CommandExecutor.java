@@ -21,6 +21,12 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.nexus.device.binding.runtime.RuntimeCapabilityResolver;
+import com.nexus.device.binding.runtime.CapabilityResolutionSource;
+import com.nexus.device.capability.definition.validation.CapabilityOperation;
+import com.nexus.device.capability.definition.validation.CapabilityValueValidator;
+import com.nexus.device.binding.BindingConstraintService;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -72,17 +78,46 @@ public class CommandExecutor implements ActionExecutor {
     private final DeviceConnectivityRegistry deviceConnectivityRegistry;
     private final MqttClient mqttClient;
     private final ObjectMapper objectMapper;
+    private final RuntimeCapabilityResolver capabilityResolver;
+    private final CapabilityValueValidator capabilityValueValidator;
+    private final BindingConstraintService bindingConstraints;
 
     public CommandExecutor(DeviceRepository deviceRepository,
                             DeviceCapabilityRepository deviceCapabilityRepository,
                             DeviceConnectivityRegistry deviceConnectivityRegistry,
                             MqttClient mqttClient,
                             ObjectMapper objectMapper) {
+        this(deviceRepository, deviceCapabilityRepository, deviceConnectivityRegistry, mqttClient, objectMapper, null, null);
+    }
+
+    public CommandExecutor(DeviceRepository deviceRepository,
+                            DeviceCapabilityRepository deviceCapabilityRepository,
+                            DeviceConnectivityRegistry deviceConnectivityRegistry,
+                            MqttClient mqttClient,
+                            ObjectMapper objectMapper,
+                            RuntimeCapabilityResolver capabilityResolver,
+                            CapabilityValueValidator capabilityValueValidator) {
+        this(deviceRepository, deviceCapabilityRepository, deviceConnectivityRegistry, mqttClient,
+                objectMapper, capabilityResolver, capabilityValueValidator, null);
+    }
+
+    @Autowired
+    public CommandExecutor(DeviceRepository deviceRepository,
+                            DeviceCapabilityRepository deviceCapabilityRepository,
+                            DeviceConnectivityRegistry deviceConnectivityRegistry,
+                            MqttClient mqttClient,
+                            ObjectMapper objectMapper,
+                            RuntimeCapabilityResolver capabilityResolver,
+                            CapabilityValueValidator capabilityValueValidator,
+                            BindingConstraintService bindingConstraints) {
         this.deviceRepository = deviceRepository;
         this.deviceCapabilityRepository = deviceCapabilityRepository;
         this.deviceConnectivityRegistry = deviceConnectivityRegistry;
         this.mqttClient = mqttClient;
         this.objectMapper = objectMapper;
+        this.capabilityResolver = capabilityResolver;
+        this.capabilityValueValidator = capabilityValueValidator;
+        this.bindingConstraints = bindingConstraints;
     }
 
     @Override
@@ -113,23 +148,45 @@ public class CommandExecutor implements ActionExecutor {
         }
 
         String capability = asString(parameters.get("capability"));
-        CapabilityType capabilityType = parseCapabilityType(capability);
-        if (capabilityType == null) {
-            return failure(request, "Unknown capability: " + capability);
+        String capabilityKey = asString(parameters.get("capabilityKey"));
+        boolean genericBindingResolved = false;
+        if (capabilityResolver != null && (capabilityKey != null || capability != null)) {
+            try {
+                var resolved = capabilityResolver.resolve(deviceId, capabilityKey != null ? capabilityKey : capability, CapabilityDirection.WRITE);
+                if (capabilityKey != null && capability != null
+                        && !capabilityResolver.resolve(deviceId, capability, CapabilityDirection.WRITE).definition().getId().equals(resolved.definition().getId())) {
+                    return failure(request, "capability and capabilityKey conflict");
+                }
+                String command = asString(parameters.get("command"));
+                Object value = parameters.get("value");
+                var result = capabilityValueValidator.validate(resolved.definition(), value, resolved.effectiveUnit(), CapabilityOperation.COMMAND, command);
+                if (!result.isValid()) return failure(request, result.errors().getFirst().message());
+                if (bindingConstraints != null && resolved.binding() != null)
+                    bindingConstraints.validateValue(resolved.definition(), resolved.binding().getConfiguration(), value);
+                genericBindingResolved = resolved.resolutionSource() == CapabilityResolutionSource.GENERIC_BINDING;
+                String external = resolved.binding() == null ? null : asString(resolved.binding().getExternalIdentifiers().get("commandCapability"));
+                capability = external != null ? external : resolved.definition().getKey().toUpperCase(java.util.Locale.ROOT);
+            } catch (RuntimeException exception) {
+                return failure(request, exception.getMessage());
+            }
         }
-
-        Optional<DeviceCapability> deviceCapability = deviceCapabilityRepository
-                .findByDeviceIdAndCapabilityTypeAndDirection(deviceId, capabilityType, CapabilityDirection.WRITE);
-        if (deviceCapability.isEmpty()) {
-            return failure(request, "Device " + deviceId + " is not authorized for " + capabilityType + " WRITE");
-        }
-
         String command = asString(parameters.get("command"));
         Object value = parameters.get("value");
-        try {
-            CommandValueValidator.validate(capabilityType, deviceCapability.get(), command, value);
-        } catch (CommandValueValidator.CommandValidationException e) {
-            return failure(request, "Unsupported command: capability=" + capability + " command=" + command + " - " + e.getMessage());
+        if (!genericBindingResolved) {
+            CapabilityType capabilityType = parseCapabilityType(capability);
+            if (capabilityType == null) {
+                return failure(request, "Unknown capability: " + capability);
+            }
+            Optional<DeviceCapability> deviceCapability = deviceCapabilityRepository
+                    .findByDeviceIdAndCapabilityTypeAndDirection(deviceId, capabilityType, CapabilityDirection.WRITE);
+            if (deviceCapability.isEmpty()) {
+                return failure(request, "Device " + deviceId + " is not authorized for " + capabilityType + " WRITE");
+            }
+            try {
+                CommandValueValidator.validate(capabilityType, deviceCapability.get(), command, value);
+            } catch (CommandValueValidator.CommandValidationException e) {
+                return failure(request, "Unsupported command: capability=" + capability + " command=" + command + " - " + e.getMessage());
+            }
         }
 
         DeviceConnectivityStatus connectivity = deviceConnectivityRegistry.get(deviceId)

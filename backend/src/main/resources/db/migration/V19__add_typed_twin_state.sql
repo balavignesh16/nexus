@@ -1,0 +1,10 @@
+ALTER TABLE digital_twins ADD COLUMN capability_definition_id UUID REFERENCES capability_definitions(id) ON DELETE RESTRICT;
+ALTER TABLE digital_twins ADD COLUMN binding_id UUID REFERENCES device_capability_bindings(id) ON DELETE RESTRICT;
+ALTER TABLE digital_twins ADD COLUMN capability_key VARCHAR(100);
+ALTER TABLE digital_twins ADD COLUMN value_type VARCHAR(20);
+ALTER TABLE digital_twins ADD COLUMN numeric_value NUMERIC;
+ALTER TABLE digital_twins ADD COLUMN boolean_value BOOLEAN;
+ALTER TABLE digital_twins ADD COLUMN string_value TEXT;
+ALTER TABLE digital_twins ADD COLUMN object_value JSONB;
+ALTER TABLE digital_twins ADD COLUMN resolution_source VARCHAR(20);
+UPDATE digital_twins SET value_type='NUMBER', numeric_value=latest_value, capability_key=LOWER(latest_sensor_type), resolution_source='LEGACY_ADAPTER';

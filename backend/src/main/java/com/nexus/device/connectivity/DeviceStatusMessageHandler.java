@@ -1,10 +1,12 @@
 package com.nexus.device.connectivity;
 
 import com.nexus.device.domain.DeviceRepository;
+import com.nexus.device.onboarding.OnboardingLifecycleService;
 import com.nexus.realtime.RealtimePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -34,13 +36,23 @@ public class DeviceStatusMessageHandler {
     private final DeviceRepository deviceRepository;
     private final DeviceConnectivityRegistry connectivityRegistry;
     private final RealtimePublisher realtimePublisher;
+    private final OnboardingLifecycleService onboarding;
 
     public DeviceStatusMessageHandler(DeviceRepository deviceRepository,
                                        DeviceConnectivityRegistry connectivityRegistry,
                                        RealtimePublisher realtimePublisher) {
+        this(deviceRepository, connectivityRegistry, realtimePublisher, null);
+    }
+
+    @Autowired
+    public DeviceStatusMessageHandler(DeviceRepository deviceRepository,
+                                       DeviceConnectivityRegistry connectivityRegistry,
+                                       RealtimePublisher realtimePublisher,
+                                       OnboardingLifecycleService onboarding) {
         this.deviceRepository = deviceRepository;
         this.connectivityRegistry = connectivityRegistry;
         this.realtimePublisher = realtimePublisher;
+        this.onboarding = onboarding;
     }
 
     public void handle(String topic, byte[] payload) {
@@ -66,6 +78,7 @@ public class DeviceStatusMessageHandler {
         }
 
         boolean changed = connectivityRegistry.applyObservedStatus(deviceId, status);
+        if (status == DeviceConnectivityStatus.ONLINE && onboarding != null) onboarding.observedOnline(deviceId);
         if (changed) {
             realtimePublisher.publishDeviceConnectivity(deviceId, status.name());
             log.debug("Device {} connectivity changed to {}", deviceId, status);

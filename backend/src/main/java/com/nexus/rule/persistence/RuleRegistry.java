@@ -14,6 +14,8 @@ import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.domain.RuleOperator;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.nexus.rule.application.RuleCapabilityValidator;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -31,12 +33,19 @@ public class RuleRegistry {
     private final RuleRepository repository;
     private final DeviceCapabilityRepository deviceCapabilityRepository;
     private final DeviceRepository deviceRepository;
+    private final RuleCapabilityValidator genericValidator;
 
     public RuleRegistry(RuleRepository repository, DeviceCapabilityRepository deviceCapabilityRepository,
                          DeviceRepository deviceRepository) {
+        this(repository,deviceCapabilityRepository,deviceRepository,null);
+    }
+    @Autowired
+    public RuleRegistry(RuleRepository repository, DeviceCapabilityRepository deviceCapabilityRepository,
+                         DeviceRepository deviceRepository,RuleCapabilityValidator genericValidator) {
         this.repository = repository;
         this.deviceCapabilityRepository = deviceCapabilityRepository;
         this.deviceRepository = deviceRepository;
+        this.genericValidator = genericValidator;
     }
 
     /**
@@ -145,6 +154,7 @@ public class RuleRegistry {
 
         validateCapabilityAwareConditions(rule);
         validateSendCommandActions(rule);
+        if (genericValidator != null) genericValidator.validate(rule);
     }
 
     /**
@@ -178,6 +188,7 @@ public class RuleRegistry {
             }
 
             Object capabilityRaw = parameters.get("capability");
+            if (capabilityRaw == null && parameters.get("capabilityKey") != null) continue;
             CapabilityType capabilityType;
             try {
                 capabilityType = CapabilityType.valueOf(String.valueOf(capabilityRaw));

@@ -4,6 +4,7 @@ import com.nexus.space.domain.Space;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
+import com.nexus.device.template.DeviceTemplate;
 
 @Entity
 @Table(name = "devices")
@@ -38,6 +39,13 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DeviceMode mode;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "device_template_id")
+    private DeviceTemplate deviceTemplate;
+
+    @Column(name = "device_template_version")
+    private Long deviceTemplateVersion;
 
     @Column(length = 500)
     private String description;
@@ -83,6 +91,8 @@ public class Device {
     public DeviceStatus getStatus() { return status; }
     public DeviceMode getMode() { return mode; }
     public String getDescription() { return description; }
+    public DeviceTemplate getDeviceTemplate() { return deviceTemplate; }
+    public Long getDeviceTemplateVersion() { return deviceTemplateVersion; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public String getCreatedBy() { return createdBy; }
@@ -94,5 +104,18 @@ public class Device {
         this.description = description;
         this.updatedAt = Instant.now();
         this.updatedBy = "system";
+    }
+
+    public void attachTemplate(DeviceTemplate template) {
+        if (this.deviceTemplate != null) throw new IllegalStateException("Device template is immutable once assigned");
+        this.deviceTemplate = template;
+        this.deviceTemplateVersion = template.getVersion();
+        this.updatedAt = Instant.now();
+    }
+
+    public void activate() {
+        if (status != DeviceStatus.REGISTERED) throw new IllegalStateException("Only registered devices can be activated by onboarding");
+        status = DeviceStatus.ACTIVE;
+        updatedAt = Instant.now();
     }
 }

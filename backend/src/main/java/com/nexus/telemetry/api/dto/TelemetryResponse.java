@@ -10,8 +10,11 @@ public record TelemetryResponse(
         UUID deviceId,
         Instant timestamp,
         String sensorType,
-        double value,
-        String unit
+        Double value,
+        String unit,
+        String capabilityKey,
+        String valueType,
+        Object typedValue
 ) {
     public static TelemetryResponse from(TelemetryRecord record) {
         return new TelemetryResponse(
@@ -20,7 +23,8 @@ public record TelemetryResponse(
                 record.getTimestamp(),
                 record.getSensorType(),
                 record.getValue(),
-                record.getUnit()
+                record.getUnit(), record.getCapabilityKey(),
+                record.getValueType() == null ? "NUMBER" : record.getValueType().name(), record.getTypedValue()
         );
     }
 }

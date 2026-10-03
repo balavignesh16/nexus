@@ -2,7 +2,6 @@ package com.nexus.device.command.api.dto;
 
 import com.nexus.device.capability.CapabilityType;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 /**
  * Phase 13: {@code value} was {@code Boolean} (LED-only). Widened to
@@ -16,7 +15,8 @@ import jakarta.validation.constraints.NotNull;
  * Object.
  */
 public record CreateDeviceCommandRequest(
-    @NotNull CapabilityType capability,
+    CapabilityType capability,
     @NotBlank String command,
-    @NotNull Object value
-) {}
+    @jakarta.validation.constraints.NotNull Object value,
+    String capabilityKey
+) { public CreateDeviceCommandRequest(CapabilityType capability,String command,Object value){this(capability,command,value,null);} }

@@ -5,6 +5,7 @@ import com.nexus.pipeline.domain.PipelineStage;
 import com.nexus.pipeline.application.PipelineService;
 import com.nexus.realtime.RealtimePublisher;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
+import com.nexus.telemetry.application.NormalizedTelemetry;
 import com.nexus.twin.domain.DigitalTwin;
 import com.nexus.twin.domain.DigitalTwinRegistry;
 import com.nexus.twin.domain.TwinUpdatedEvent;
@@ -40,8 +41,8 @@ public class DigitalTwinService {
     // the number of devices is small and bounded by the Site/Building/Space
     // hierarchy in the database - it does not grow with telemetry volume,
     // unlike, say, a per-message or per-request map would. This mirrors
-    // DigitalTwinRegistry's own twin cache, which is exactly one entry per
-    // device and is never evicted either. A distributed lock, an eviction
+    // DigitalTwinRegistry's own twin cache, which is one entry per
+    // device/capability pair and is never evicted either. A distributed lock, an eviction
     // policy, or a lock-striping library would be premature complexity for
     // a single-instance deployment with this device-count profile; if NEXUS
     // is ever horizontally scaled across multiple backend instances, this
@@ -82,6 +83,10 @@ public class DigitalTwinService {
      * @param correlationId Links this update to the originating telemetry event
      */
     public void updateTwin(TelemetryRequest request, String correlationId) {
+        updateTwin(new NormalizedTelemetry(request.deviceId(),request.timestamp(),request.capabilityKey()!=null?request.capabilityKey():request.sensorType(),request.sensorType(),request.value(),request.unit(),null),correlationId);
+    }
+
+    public void updateTwin(NormalizedTelemetry request, String correlationId) {
         UUID deviceId = request.deviceId();
         Object lock = deviceLocks.computeIfAbsent(deviceId, id -> new Object());
 
@@ -95,7 +100,7 @@ public class DigitalTwinService {
             // sensorType - a newer HUMIDITY reading must never be compared
             // against (or overwrite) an unrelated TEMPERATURE reading's
             // timestamp/state for the same device.
-            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId, request.sensorType());
+            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId, request.externalIdentifier());
 
             if (currentTwinOpt.isPresent()) {
                 DigitalTwin currentTwin = currentTwinOpt.get();
@@ -109,15 +114,17 @@ public class DigitalTwinService {
             now = Instant.now();
             stageStart = System.currentTimeMillis();
 
-            newTwin = new DigitalTwin(
+            newTwin = request.resolved()==null ? new DigitalTwin(
                     deviceId,
                     request.timestamp(),
-                    request.sensorType(),
-                    request.value(),
+                    request.externalIdentifier(),
+                    request.value() instanceof Number n ? n.doubleValue() : null,
                     request.unit(),
                     now,
                     Map.of()
-            );
+            ) : new DigitalTwin(deviceId,request.timestamp(),request.externalIdentifier(),request.value(),request.unit(),now,Map.of(),
+                    request.resolved().definition().getId(),request.resolved().binding()==null?null:request.resolved().binding().getId(),request.capabilityKey(),
+                    request.resolved().definition().getValueType(),request.resolved().resolutionSource());
 
             registry.put(newTwin);
             previousTwin = currentTwinOpt.orElse(null);
@@ -129,7 +136,7 @@ public class DigitalTwinService {
         // Pipeline trace
         pipelineService.recordTrace(
                 PipelineTrace.of(correlationId, deviceId.toString(), PipelineStage.TWIN, stageStart, "SUCCESS",
-                        newTwin, Map.of("sensorType", request.sensorType(), "value", request.value())));
+                        newTwin, Map.of("sensorType", request.externalIdentifier(), "value", request.value())));
 
         TwinUpdatedEvent event = new TwinUpdatedEvent(
                 deviceId,
@@ -144,6 +151,10 @@ public class DigitalTwinService {
 
     public Optional<DigitalTwin> getTwin(UUID deviceId) {
         return registry.get(deviceId);
+    }
+
+    public List<DigitalTwin> getTwinCapabilities(UUID deviceId) {
+        return registry.getAllForDevice(deviceId);
     }
 
     public List<DigitalTwin> getAllTwins() {
