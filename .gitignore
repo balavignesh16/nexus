@@ -27,6 +27,7 @@ node_modules/
 dist/
 .npm/
 .eslintcache
+node_modules_bad*/
 
 # Python (Simulator)
 __pycache__/
@@ -41,3 +42,6 @@ env/
 # Infrastructure
 infrastructure/data/
 infrastructure/mosquitto/log/
+
+# NEXUS orchestration state, logs, and generated validation reports
+.nexus/
