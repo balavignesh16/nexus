@@ -1,0 +1,6 @@
+entity,before,after,added
+Telemetry,14598,14874,276
+Events,20030,20383,353
+Rule Matches,693,825,132
+Actions,750,892,142
+Pipeline Traces,29832,30526,694

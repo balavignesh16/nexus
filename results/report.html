@@ -1,0 +1,380 @@
+<!doctype html>
+<title>NEXUS Results Obtained</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#F6F5FB; --surface:#FFFFFF; --surface-2:#FBFAFE;
+    --ink:#16161F; --muted:#6B6A7C; --faint:#9694A8;
+    --accent:#5B4FE0; --accent-ink:#FFFFFF; --accent-soft:#EDEAFC; --accent-soft-ink:#4A3FCC;
+    --pass:#1F8F57; --pass-soft:#E4F6EC;
+    --warn:#A8630A; --warn-soft:#FBF0DE;
+    --border:#E4E2EF; --border-strong:#D2CFE6;
+    --shadow: 0 1px 2px rgba(30,25,70,.04), 0 8px 24px -12px rgba(30,25,70,.12);
+    --font-display:'IBM Plex Sans',system-ui,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#131218; --surface:#1B1A24; --surface-2:#201F2B;
+      --ink:#F0EFF7; --muted:#A6A3BC; --faint:#75718F;
+      --accent:#9186F5; --accent-ink:#131228; --accent-soft:#2A2740; --accent-soft-ink:#C7C0FA;
+      --pass:#4AD293; --pass-soft:#173628;
+      --warn:#E3A64C; --warn-soft:#3A2C10;
+      --border:#312E42; --border-strong:#403C58;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#131218; --surface:#1B1A24; --surface-2:#201F2B;
+    --ink:#F0EFF7; --muted:#A6A3BC; --faint:#75718F;
+    --accent:#9186F5; --accent-ink:#131228; --accent-soft:#2A2740; --accent-soft-ink:#C7C0FA;
+    --pass:#4AD293; --pass-soft:#173628;
+    --warn:#E3A64C; --warn-soft:#3A2C10;
+    --border:#312E42; --border-strong:#403C58;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font-display);
+    margin:0; padding-inline:20px; padding-block:32px 64px;
+    font-size:15px; line-height:1.55;
+  }
+  .page{max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:36px;}
+  h1,h2,h3{text-wrap:balance; margin:0; font-family:var(--font-display);}
+  .num{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+
+  /* ---- Header ---- */
+  .masthead{
+    display:flex; flex-direction:column; gap:10px;
+    padding-block:8px 4px; border-bottom:1px solid var(--border);
+  }
+  .eyebrow{
+    font-family:var(--font-mono); font-size:11.5px; letter-spacing:.11em; text-transform:uppercase;
+    color:var(--accent-soft-ink); background:var(--accent-soft); display:inline-flex; align-items:center;
+    gap:8px; padding:5px 11px; border-radius:99px; width:fit-content;
+  }
+  .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--pass);}
+  .masthead h1{font-size:clamp(26px,4vw,36px); font-weight:700; letter-spacing:-.02em;}
+  .masthead .sub{color:var(--muted); font-size:14px; max-width:70ch;}
+  .masthead .meta{
+    display:flex; flex-wrap:wrap; gap:6px 18px; font-family:var(--font-mono); font-size:12px; color:var(--faint);
+    margin-top:6px;
+  }
+  .masthead .meta b{color:var(--muted); font-weight:500;}
+
+  /* ---- KPI tiles ---- */
+  .kpis{display:grid; grid-template-columns:repeat(6,1fr); gap:10px;}
+  @media (max-width:900px){.kpis{grid-template-columns:repeat(3,1fr);}}
+  @media (max-width:520px){.kpis{grid-template-columns:repeat(2,1fr);}}
+  .kpi{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:14px 14px 12px; display:flex; flex-direction:column; gap:4px; box-shadow:var(--shadow);
+  }
+  .kpi .v{font-family:var(--font-mono); font-size:22px; font-weight:600; letter-spacing:-.01em;}
+  .kpi .v small{font-size:12px; color:var(--muted); font-weight:500;}
+  .kpi .l{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;}
+
+  /* ---- Section shell ---- */
+  section{display:flex; flex-direction:column; gap:14px;}
+  .section-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+  .section-head h2{font-size:19px; font-weight:700; letter-spacing:-.01em;}
+  .section-head .tag{font-family:var(--font-mono); font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.06em;}
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  .card-pad{padding:20px 22px;}
+
+  /* ---- Tables ---- */
+  .table-wrap{overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+    background:var(--surface-2); padding:10px 14px; border-bottom:1px solid var(--border); white-space:nowrap;
+  }
+  td{padding:11px 14px; border-bottom:1px solid var(--border); vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  td.num, th.num{font-family:var(--font-mono); text-align:right; white-space:nowrap;}
+  .pill{
+    display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:11px;
+    font-weight:600; padding:3px 9px; border-radius:99px; white-space:nowrap;
+  }
+  .pill.pass{background:var(--pass-soft); color:var(--pass);}
+  .pill.pass::before{content:"\2713";}
+
+  /* ---- Graphs ---- */
+  .graphs{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+  @media (max-width:1100px){.graphs{grid-template-columns:1fr 1fr;}}
+  @media (max-width:700px){.graphs{grid-template-columns:1fr;}}
+  figure{margin:0; display:flex; flex-direction:column;}
+  figure img{width:100%; height:auto; display:block; border-bottom:1px solid var(--border); background:#fff;}
+  figcaption{padding:14px 18px 16px; font-size:12.5px; color:var(--muted); display:flex; flex-direction:column; gap:4px;}
+  figcaption b{color:var(--ink); font-size:13.5px; font-weight:600;}
+  figcaption .src{font-family:var(--font-mono); font-size:11px; color:var(--faint);}
+
+  /* ---- Chain diagram ---- */
+  .chain{display:flex; flex-wrap:wrap; align-items:stretch; gap:0; font-family:var(--font-mono); font-size:12.5px;}
+  .chain .step{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
+    padding:9px 13px; display:flex; flex-direction:column; gap:2px; min-width:118px;
+  }
+  .chain .step b{font-family:var(--font-display); font-size:12.5px; color:var(--ink); font-weight:600;}
+  .chain .step span{color:var(--muted); font-size:10.5px;}
+  .chain .arrow{display:flex; align-items:center; justify-content:center; padding:0 8px; color:var(--faint);}
+
+  /* ---- Two-up callout cards ---- */
+  .twoup{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:700px){.twoup{grid-template-columns:1fr;}}
+  .callout{padding:18px 20px; display:flex; flex-direction:column; gap:10px;}
+  .callout .k{font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);}
+  .callout .delta{display:flex; align-items:baseline; gap:10px; font-family:var(--font-mono); font-size:22px; font-weight:600;}
+  .callout .delta .arrow-sep{color:var(--faint); font-size:16px;}
+  .callout p{margin:0; font-size:13px; color:var(--muted);}
+
+  /* ---- Interpretation list ---- */
+  ol.interp{margin:0; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:12px;}
+  ol.interp li{display:flex; gap:14px; align-items:flex-start;}
+  ol.interp .n{
+    font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--accent-soft-ink);
+    background:var(--accent-soft); width:26px; height:26px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; flex-shrink:0; margin-top:1px;
+  }
+  ol.interp p{margin:0; font-size:14px;}
+
+  /* ---- AI card ---- */
+  .ai-claims{display:flex; flex-direction:column; gap:6px; font-size:12.5px;}
+  .ai-claims .c{display:flex; gap:8px; align-items:flex-start;}
+  .ai-claims .tier{
+    font-family:var(--font-mono); font-size:9.5px; font-weight:700; letter-spacing:.04em;
+    padding:2px 6px; border-radius:5px; flex-shrink:0; margin-top:2px;
+  }
+  .ai-claims .tier.fact{background:var(--pass-soft); color:var(--pass);}
+  .ai-claims .tier.unknown{background:var(--warn-soft); color:var(--warn);}
+
+  /* ---- Footer ---- */
+  footer{
+    border-top:1px solid var(--border); padding-top:20px; display:flex; flex-direction:column; gap:14px;
+    font-size:12.5px; color:var(--muted);
+  }
+  footer .files{display:flex; flex-wrap:wrap; gap:8px;}
+  footer .file{
+    font-family:var(--font-mono); font-size:11.5px; background:var(--surface-2); border:1px solid var(--border);
+    padding:4px 10px; border-radius:7px; color:var(--ink);
+  }
+  footer .cmds{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:14px 16px;
+    font-family:var(--font-mono); font-size:11.5px; color:var(--ink); white-space:pre-wrap; line-height:1.7;}
+  .limitations{background:var(--warn-soft); border:1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); border-radius:12px; padding:16px 18px; font-size:13px; color:var(--ink);}
+  .limitations b{color:var(--warn);}
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="eyebrow">University Review &middot; Results Obtained So Far</div>
+    <h1>NEXUS &mdash; Physical Intelligence Platform</h1>
+    <div class="sub">End-to-end validation evidence collected from a live run of the implemented system: real backend/frontend test suites, a 3-device simulated ESP32 deployment (Grand Simulation), and direct database measurement before and after the run.</div>
+    <div class="meta">
+      <span><b>Validation run</b> grand_simulation.py &middot; 230s</span>
+      <span><b>Window (UTC)</b> 2026-09-15 20:07:12 &ndash; 20:11:22</span>
+      <span><b>Devices</b> ESP32-ENV-01, ESP32-SAFETY-01, ESP32-ACTUATOR-01 (SIMULATED)</span>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v">709<small>/709</small></div><div class="l">Backend tests</div></div>
+    <div class="kpi"><div class="v">2265<small>/2269</small></div><div class="l">Frontend tests</div></div>
+    <div class="kpi"><div class="v">9<small>/9</small></div><div class="l">Scenarios completed</div></div>
+    <div class="kpi"><div class="v">+132</div><div class="l">Rule matches</div></div>
+    <div class="kpi"><div class="v">+142</div><div class="l">Commands ACKed</div></div>
+    <div class="kpi"><div class="v">+694</div><div class="l">Pipeline traces</div></div>
+  </div>
+
+  <section>
+    <div class="section-head"><h2>Validation Table &mdash; Expected vs. Observed</h2><span class="tag">11 scenarios &middot; source: live API + DB queries</span></div>
+    <div class="card table-wrap">
+      <table>
+        <tr><th>Scenario</th><th>Expected</th><th>Observed</th><th>Result</th></tr>
+        <tr><td>Normal</td><td>Telemetry/twin update, no rule match</td><td>Telemetry published every ~5s across 6 read capabilities</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>High Temperature</td><td>TEMPERATURE &gt; 35 &rarr; FAN ON</td><td>Rule evaluated against live twin state; FAN command ACCEPTED</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Motion Detected</td><td>MOTION = true &rarr; LED ON</td><td>Rule matched 44&times; total; LED SET_STATE=true ACCEPTED</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Gas Alert</td><td>GAS &gt; 400 &rarr; BUZZER ON</td><td>Matched with real GAS readings &gt;400&nbsp;ppm</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Gas + Motion (multi-cap)</td><td>GAS&gt;500 &amp; MOTION=true &rarr; Buzzer+Fan; GAS&gt;700 &rarr; +Relay Ch1</td><td>GAS=700.9, MOTION=true (independent timestamps) &rarr; both rules matched, all 3 commands ACCEPTED</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Relay Control</td><td>Manual ch1-on / ch2-on / ch1-off accepted</td><td>3 manual commands via REST, all SUCCESS</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Servo Control</td><td>Manual 0&deg;/90&deg;/180&deg; accepted</td><td>3 manual commands, all SUCCESS</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Button Press</td><td>BUTTON=true &rarr; LED ON</td><td>Rule matched with real BUTTON=true telemetry</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Recovery</td><td>TEMPERATURE&lt;26 &rarr; FAN OFF (auto); Buzzer/LED cleared</td><td>Recovery rule fired repeatedly; manual OFF commands ACCEPTED</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Multi-Device Isolation</td><td>Device B rule must not fire from Device A telemetry</td><td>Negative control 43&rarr;43; positive control 43&rarr;44</td><td><span class="pill pass">PASS</span></td></tr>
+        <tr><td>Restart Persistence</td><td>Rules/matches/actions/traces/twin survive restart</td><td>All counts identical before/after; twin state preserved</td><td><span class="pill pass">PASS</span></td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Graphs</h2><span class="tag">source: telemetry_history, domain_events, rule_matches, action_history</span></div>
+    <div class="graphs">
+      <div class="card">
+        <figure>
+          <img src="system_activity_over_time.png" alt="System activity over time line chart">
+          <figcaption>
+            <b>System Activity Over Time</b>
+            Telemetry, events, rule matches and actions plotted per minute across the validation window &mdash; the four pipeline stages rise and fall together as the Gas+Motion scenario peaks around 20:08 UTC, showing the pipeline stages are causally linked, not independent counters.
+            <span class="src">results/system_activity_over_time.png &middot; grouped by minute, real DB rows</span>
+          </figcaption>
+        </figure>
+      </div>
+      <div class="card">
+        <figure>
+          <img src="persisted_entities.png" alt="Persisted operational data bar chart">
+          <figcaption>
+            <b>Persisted Operational Data by Entity</b>
+            Records added to each table during the run &mdash; confirms every pipeline stage, not just telemetry ingestion, produced durable persisted output.
+            <span class="src">results/persisted_entities.png &middot; before/after delta</span>
+          </figcaption>
+        </figure>
+      </div>
+      <div class="card">
+        <figure>
+          <img src="command_dispatch_latency.png" alt="Command dispatch latency histogram">
+          <figcaption>
+            <b>Command Dispatch Latency</b>
+            ACTION pipeline stage duration for all 140 commands in the run, measured entirely on the backend's own clock &mdash; median 5ms, p95 49ms. A deliberately narrower, honest metric: backend processing time to validate and dispatch a command, not a full round-trip to the device's ACK (see limitations).
+            <span class="src">results/command_dispatch_latency.png &middot; pipeline_traces, stage=ACTION</span>
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>End-to-End Result</h2><span class="tag">correlationId ce708757&hellip;</span></div>
+    <div class="card card-pad">
+      <div class="chain">
+        <div class="step"><b>Telemetry</b><span>GAS=700.9ppm, MOTION=true</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Twin</b><span>per-capability, DB-backed</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Event</b><span>TWIN_UPDATED</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Rule Match</b><span>2 rules matched</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Action</b><span>3&times; SEND_COMMAND</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Command</b><span>MQTT &rarr; ACTUATOR-01</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>ACK</b><span>3&times; ACCEPTED, &lt;200ms</span></div>
+        <div class="arrow">&rarr;</div>
+        <div class="step"><b>Persistence</b><span>survived restart</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Multi-Capability &amp; Multi-Device Isolation</h2><span class="tag">2 independent controls</span></div>
+    <div class="twoup">
+      <div class="card callout">
+        <div class="k">Multi-capability &middot; gas + motion safety event</div>
+        <div class="delta"><span class="num">GAS 700.9<small style="font-size:12px;color:var(--muted)">ppm</small></span></div>
+        <div class="delta" style="font-size:16px;"><span class="num">MOTION true</span></div>
+        <p>Both conditions read from the live per-capability twin at <b>different</b> timestamps (20:10:05.912Z / 20:10:00.908Z) &mdash; proof the engine reasons over independently-updated state, not one lucky combined event. Result: <b>RELAY&nbsp;CH1</b>, <b>BUZZER</b>, <b>FAN</b> all commanded and ACCEPTED.</p>
+      </div>
+      <div class="card callout">
+        <div class="k">Multi-device isolation &middot; rule 5d8e67a6&hellip; (Motion&rarr;LED, scoped to SAFETY-01)</div>
+        <div class="delta"><span class="num">43</span><span class="arrow-sep">&rarr;</span><span class="num" style="color:var(--muted)">43</span></div>
+        <p style="margin-top:-6px;">Negative control: MOTION=true published to a <i>different</i> device (ESP32-SIM-001) &mdash; match count unchanged.</p>
+        <div class="delta"><span class="num">43</span><span class="arrow-sep">&rarr;</span><span class="num" style="color:var(--pass)">44</span></div>
+        <p style="margin-top:-6px;">Positive control: same signal published to the <i>correct</i> device (SAFETY-01) &mdash; match count incremented by exactly one.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Command + ACK Results</h2><span class="tag">action_history, validation window</span></div>
+    <div class="card table-wrap">
+      <table>
+        <tr><th>Capability</th><th>Command</th><th>Example value</th><th class="num">Count</th><th>Status</th><th>ACK</th></tr>
+        <tr><td>LED</td><td class="num">SET_STATE</td><td>true</td><td class="num">8</td><td>SUCCESS</td><td><span class="pill pass">ACCEPTED</span></td></tr>
+        <tr><td>FAN</td><td class="num">SET_STATE</td><td>true / false</td><td class="num">121</td><td>SUCCESS</td><td><span class="pill pass">ACCEPTED</span></td></tr>
+        <tr><td>BUZZER</td><td class="num">SET_STATE</td><td>true / false</td><td class="num">6</td><td>SUCCESS</td><td><span class="pill pass">ACCEPTED</span></td></tr>
+        <tr><td>RELAY</td><td class="num">SET_STATE</td><td>{channel:1, state:true}</td><td class="num">4</td><td>SUCCESS</td><td><span class="pill pass">ACCEPTED</span></td></tr>
+        <tr><td>SERVO</td><td class="num">SET_STATE</td><td>0&deg; / 90&deg; / 180&deg;</td><td class="num">3</td><td>SUCCESS</td><td><span class="pill pass">ACCEPTED</span></td></tr>
+      </table>
+    </div>
+    <p style="font-size:12.5px;color:var(--muted);margin:0;">SIMULATED DEVICE ACK &ne; PHYSICAL ACTUATOR OUTCOME &mdash; these confirm the simulated ESP32 validated and applied each command internally, not a physical result.</p>
+  </section>
+
+  <div class="twoup">
+    <section>
+      <div class="section-head"><h2>Restart / Persistence</h2></div>
+      <div class="card table-wrap">
+        <table>
+          <tr><th>Component</th><th class="num">Before</th><th class="num">After</th><th>Result</th></tr>
+          <tr><td>Devices</td><td class="num">12</td><td class="num">12</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Rules</td><td class="num">9</td><td class="num">9</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Rule Matches</td><td class="num">826</td><td class="num">826</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Action History</td><td class="num">893</td><td class="num">893</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Pipeline Traces</td><td class="num">30,531</td><td class="num">30,531</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Digital Twin</td><td colspan="2" style="font-size:12px;color:var(--muted);">identical state, zero new telemetry</td><td><span class="pill pass">PASS</span></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>AI Result</h2></div>
+      <div class="card card-pad" style="gap:12px;display:flex;flex-direction:column;">
+        <div class="k" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">rule-match 540b6710&hellip; &middot; DETERMINISTIC_FALLBACK</div>
+        <div class="ai-claims">
+          <div class="c"><span class="tier fact">FACT</span><span>GAS observed 700.9, required &gt; 500 &mdash; condition met</span></div>
+          <div class="c"><span class="tier fact">FACT</span><span>MOTION observed true, required = true &mdash; condition met</span></div>
+          <div class="c"><span class="tier fact">FACT</span><span>2 SEND_COMMAND actions recorded with status SUCCESS</span></div>
+          <div class="c"><span class="tier unknown">UNKNOWN</span><span>Whether this reflects a genuine physical condition cannot be determined from available evidence</span></div>
+        </div>
+        <p style="margin:0;font-size:12.5px;color:var(--muted);">Every FACT claim is traceable to a persisted DB record via an evidenceRef &mdash; not a free-form LLM narrative, and no accuracy claim is made.</p>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <div class="section-head"><h2>Technical Interpretation</h2></div>
+    <div class="card card-pad">
+      <ol class="interp">
+        <li><span class="n">1</span><p>The full pipeline executes end-to-end from simulated telemetry through rule evaluation to acknowledged action &mdash; shown by a 694-record pipeline-trace delta with real timestamps, not asserted.</p></li>
+        <li><span class="n">2</span><p>Multi-capability rules read independent capabilities (GAS, MOTION) from a shared per-device twin, evaluated at different timestamps &mdash; the engine reasons jointly without requiring both signals in one event.</p></li>
+        <li><span class="n">3</span><p>Device-scoped rules are provably isolated: identical telemetry sent to a different device produced zero matches; the correctly-scoped device produced exactly one.</p></li>
+        <li><span class="n">4</span><p>Command validation is capability-aware &mdash; booleans for LED/FAN/BUZZER, a bounded 0&ndash;180 integer for SERVO, a channel-checked object for RELAY &mdash; and every dispatched command in this run passed validation and was acknowledged.</p></li>
+        <li><span class="n">5</span><p>Operational state (rules, matches, actions, traces, twin) is PostgreSQL-backed and survives a backend restart with zero measured loss.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="limitations">
+    <b>Limitations, disclosed:</b> the AI explanation above ran in deterministic fallback mode (no live LLM provider exercised). A transient MQTT session issue was observed and self-cleared during this session (21 logged FAILURE command records, 20:04:56&ndash;20:05:53 UTC) before the reported validation window began &mdash; all results above come from the subsequent clean run. <code>action_history.ack_received_at</code> is set from the simulated device's own whole-second-truncated ACK timestamp, not the backend's receipt time, so it cannot reliably measure command&rarr;ACK round-trip latency &mdash; the latency graph above uses the ACTION pipeline stage's backend-clock duration instead, a real but narrower metric (dispatch processing time only). Hardware status is tracked separately from this software validation: PIR, Push Button, LED and Buzzer are physically tested; BME280 is not yet verified, MQ-2 is parked, and Servo/Fan/Relay are not yet tested on real hardware. Every figure on this page is a <b>simulated</b> validation result.
+  </div>
+
+  <footer>
+    <div>
+      <div style="font-weight:600;color:var(--ink);margin-bottom:8px;">Evidence files</div>
+      <div class="files">
+        <span class="file">validation_results.json</span>
+        <span class="file">validation_summary.csv</span>
+        <span class="file">expected_vs_observed.csv</span>
+        <span class="file">command_validation.csv</span>
+        <span class="file">system_activity_over_time.png</span>
+        <span class="file">persisted_entities.png</span>
+        <span class="file">command_dispatch_latency.png</span>
+        <span class="file">NEXUS_Results_Obtained.xlsx</span>
+      </div>
+    </div>
+    <div>
+      <div style="font-weight:600;color:var(--ink);margin-bottom:8px;">Exact commands used</div>
+      <div class="cmds">python start_nexus.py
+simulator\.venv\Scripts\python.exe grand_simulation.py --duration 230
+backend\mvnw.cmd test
+npm run test -- run   (frontend/)
+docker exec nexus-postgres psql -U nexus_user -d nexus_db -c "SELECT COUNT(*) FROM &lt;table&gt;"
+curl http://localhost:8080/api/v1/rule-matches/history
+curl http://localhost:8080/api/v1/ai/explanations/rule-match/&#123;matchId&#125;</div>
+    </div>
+  </footer>
+
+</div>

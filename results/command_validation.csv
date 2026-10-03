@@ -1,0 +1,6 @@
+capability,command,example_value,status,ack_status,count_in_run
+LED,SET_STATE,true,SUCCESS,ACCEPTED,8
+FAN,SET_STATE,true/false,SUCCESS,ACCEPTED,121
+BUZZER,SET_STATE,true/false,SUCCESS,ACCEPTED,6
+RELAY,SET_STATE,"{channel:1,state:true}",SUCCESS,ACCEPTED,4
+SERVO,SET_STATE,"0 / 90 / 180 (degrees)",SUCCESS,ACCEPTED,3

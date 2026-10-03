@@ -1,0 +1,19 @@
+metric,value,source
+backend_tests_passed,709,mvnw.cmd test (freshly re-run)
+backend_tests_failed,0,mvnw.cmd test (freshly re-run)
+frontend_tests_passed,2265,npm run test -- run (vitest, freshly re-run)
+frontend_tests_failed,4,npm run test -- run (vitest, freshly re-run; pre-existing, unchanged)
+validation_run_duration_seconds,230,grand_simulation.py --duration 230
+validation_run_scenarios_completed,9,grand_simulation.py console log (all 9 SCENARIO banners present)
+telemetry_added,276,"telemetry_history count, before vs after validation run"
+events_added,353,"domain_events count, before vs after validation run"
+rule_matches_added,132,"rule_matches count, before vs after validation run"
+actions_added,142,"action_history count, before vs after validation run"
+pipeline_traces_added,694,"pipeline_traces count, before vs after validation run"
+multi_capability_gas_value,700.9,"rule_matches.evaluation_evidence for match 540b6710/abed0f86"
+multi_capability_motion_value,true,"rule_matches.evaluation_evidence for match 540b6710/abed0f86"
+device_isolation_negative_control_delta,0,"rule_matches count for Motion->LED rule before/after publishing MOTION=true to a different device"
+device_isolation_positive_control_delta,1,"rule_matches count for Motion->LED rule before/after publishing MOTION=true to SAFETY-01"
+restart_data_loss,0,"devices/rules/rule_matches/action_history/pipeline_traces counts identical before and after backend restart"
+command_dispatch_latency_median_ms,5,"pipeline_traces.duration_ms, stage=ACTION, n=140, backend clock only"
+command_dispatch_latency_p95_ms,49,"pipeline_traces.duration_ms, stage=ACTION, n=140, backend clock only"

@@ -1,0 +1,87 @@
+{
+  "run_metadata": {
+    "date_utc": "2026-09-15",
+    "validation_script": "grand_simulation.py",
+    "duration_seconds": 230,
+    "window_utc": ["2026-09-15T20:07:12Z", "2026-09-15T20:11:22Z"],
+    "devices_simulated": ["ESP32-ENV-01", "ESP32-SAFETY-01", "ESP32-ACTUATOR-01"],
+    "device_mode": "SIMULATED",
+    "scenarios_completed": [
+      "NORMAL OPERATION", "HIGH TEMPERATURE", "MOTION DETECTED", "GAS ALERT",
+      "MULTI-CAPABILITY SAFETY EVENT (GAS+MOTION)", "RELAY CONTROL DEMO",
+      "SERVO CONTROL DEMO", "BUTTON PRESS EVENT", "RECOVERY"
+    ]
+  },
+  "test_results": {
+    "backend": {"passed": 709, "failed": 0, "errors": 0, "skipped": 0, "source": "mvnw.cmd test"},
+    "frontend": {"passed": 2265, "failed": 4, "total": 2269, "source": "npm run test -- run (vitest)", "note": "4 failures pre-existing, unchanged from documented baseline"}
+  },
+  "database_before_after": {
+    "devices": {"before": 12, "after": 12, "added": 0},
+    "device_capabilities": {"before": 31, "after": 31, "added": 0},
+    "rules": {"before": 9, "after": 9, "added": 0},
+    "telemetry_history": {"before": 14598, "after": 14874, "added": 276},
+    "domain_events": {"before": 20030, "after": 20383, "added": 353},
+    "rule_matches": {"before": 693, "after": 825, "added": 132},
+    "action_history": {"before": 750, "after": 892, "added": 142},
+    "pipeline_traces": {"before": 29832, "after": 30526, "added": 694}
+  },
+  "multi_capability_result": {
+    "match_ids": ["540b6710-1a58-479c-b4d7-324e61a3ea21", "abed0f86-b877-40a6-989c-c79c9c8b5dfb"],
+    "correlation_id": "ce708757-d2b8-467c-91bb-262cc49e6d2b",
+    "input": {"gas_ppm": 700.9, "motion": true, "gas_evaluated_at": "2026-09-15T20:10:05.912545Z", "motion_evaluated_at": "2026-09-15T20:10:00.908793Z"},
+    "rules_matched": ["Grand Sim - Gas+Motion Safety Event -> Buzzer+Fan", "Grand Sim - Critical Gas+Motion -> Relay Ch1"],
+    "actions": [
+      {"capability": "RELAY", "value": {"channel": 1, "state": true}, "status": "SUCCESS", "ack_status": "ACCEPTED"},
+      {"capability": "BUZZER", "value": true, "status": "SUCCESS", "ack_status": "ACCEPTED"},
+      {"capability": "FAN", "value": true, "status": "SUCCESS", "ack_status": "ACCEPTED"}
+    ]
+  },
+  "multi_device_isolation_result": {
+    "rule_id": "5d8e67a6-46eb-426e-83ad-075c3bdea27c",
+    "rule_name": "Grand Sim - Motion -> LED On",
+    "scoped_device": "ESP32-SAFETY-01",
+    "negative_control": {"other_device": "ESP32-SIM-001", "match_count_before": 43, "match_count_after": 43, "result": "PASS - no cross-device trigger"},
+    "positive_control": {"correct_device": "ESP32-SAFETY-01", "match_count_before": 43, "match_count_after": 44, "result": "PASS - rule fired for correct device"}
+  },
+  "command_ack_results": [
+    {"capability": "LED", "command": "SET_STATE", "count": 8, "status": "SUCCESS", "ack_status": "ACCEPTED"},
+    {"capability": "FAN", "command": "SET_STATE", "count": 121, "status": "SUCCESS", "ack_status": "ACCEPTED"},
+    {"capability": "BUZZER", "command": "SET_STATE", "count": 6, "status": "SUCCESS", "ack_status": "ACCEPTED"},
+    {"capability": "RELAY", "command": "SET_STATE", "count": 4, "status": "SUCCESS", "ack_status": "ACCEPTED", "example_value": {"channel": 1, "state": true}},
+    {"capability": "SERVO", "command": "SET_STATE", "count": 3, "status": "SUCCESS", "ack_status": "ACCEPTED", "example_values": [0, 90, 180]}
+  ],
+  "command_ack_results_verification": {
+    "method": "Reconstructed by exact row position (row_number() over timestamp order), rows 751-892 of action_history - i.e. precisely the 142 rows that constitute the before(750)/after(892) delta reported in database_before_after.action_history. Sum of per-capability counts (8+121+6+4+3=142) matches the delta exactly by construction.",
+    "note": "An earlier draft used an approximate calendar time-window query for the per-capability breakdown (LED=9, FAN=122, total=144), which did not exactly match the 142 before/after delta. This entry supersedes that draft; 142 is the correct, cross-checked figure used on every results asset."
+  },
+  "command_dispatch_latency": {
+    "metric": "ACTION pipeline stage duration_ms (backend-side processing time to validate and dispatch a command)",
+    "source": "pipeline_traces table, stage=ACTION, same validation window",
+    "n": 140,
+    "median_ms": 5,
+    "p95_ms": 49,
+    "mean_ms": 19.11,
+    "max_ms": 51,
+    "distribution_note": "Bimodal: a fast cluster (~5ms, n~89) and a slower cluster (~45-50ms, n~47), plausibly corresponding to rule-triggered SEND_COMMAND actions vs. the manually REST-dispatched Relay/Servo demo commands taking a different code path - not yet root-caused, reported as observed rather than fully explained.",
+    "excluded_metric_note": "action_history.ack_received_at was deliberately NOT used for this measurement - it is set from the simulated device's own whole-second-truncated ACK payload timestamp (DeviceCommandAckMessageHandler.java, Instant.ofEpochSecond), not the backend's receipt time, so comparing it against the millisecond-precision dispatch timestamp produces meaningless (often negative) deltas. This is a real precision gap in that field, disclosed here rather than worked around silently."
+  },
+  "restart_persistence_result": {
+    "before_restart": {"devices": 12, "rules": 9, "rule_matches": 826, "action_history": 893, "pipeline_traces": 30531},
+    "after_restart": {"devices": 12, "rules": 9, "rule_matches": 826, "action_history": 893, "pipeline_traces": 30531},
+    "digital_twin_survived_restart": true,
+    "data_loss": false
+  },
+  "ai_explanation_example": {
+    "match_id": "540b6710-1a58-479c-b4d7-324e61a3ea21",
+    "generated_by": "DETERMINISTIC_FALLBACK",
+    "fact_claims": 9,
+    "unknown_claims": 1,
+    "note": "Deterministic fallback mode - not a claim of LLM-based inference; all FACT claims are grounded in persisted evaluation_evidence and action_history records."
+  },
+  "known_limitation_observed_during_this_run": {
+    "description": "Running the backend's own MQTT-related test suite concurrently with the live dev backend caused a client-ID collision on the shared local Mosquitto broker, wedging the dev backend's persistent MQTT session for a period and dropping outbound message delivery until manually cleared (reconnect with clean_session=true).",
+    "impact": "No impact on the reported results - all reported evidence comes from a subsequent clean, uninterrupted validation run (20:07:12-20:11:22 UTC) captured after this was resolved.",
+    "recommendation": "Run backend integration tests and the dev backend against separate MQTT broker instances, or not concurrently, in future sessions."
+  }
+}

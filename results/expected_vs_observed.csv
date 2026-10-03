@@ -1,0 +1,12 @@
+scenario,expected_behaviour,observed_behaviour,result
+Normal,No rules match; telemetry/twin update only,Telemetry published every ~5s for TEMPERATURE/HUMIDITY/PRESSURE/GAS/MOTION/BUTTON; no rule match recorded,PASS
+High Temperature,TEMPERATURE > 35 triggers FAN ON via rule engine,Temperature rule condition evaluated against real twin state; FAN command dispatched and ACCEPTED when threshold crossed,PASS
+Motion Detected,MOTION = true triggers LED ON,"Grand Sim - Motion -> LED On matched 44 times across the session (rule_matches DB), LED SET_STATE=true ACCEPTED",PASS
+Gas Alert,GAS > 400 triggers BUZZER ON,Grand Sim - Gas Alert -> Buzzer On matched with real GAS values >400ppm from twin registry,PASS
+Gas + Motion (multi-capability),GAS > 500 AND MOTION = true triggers BUZZER+FAN; GAS > 700 AND MOTION = true additionally triggers RELAY CH1,"Verified: GAS=700.9, MOTION=true (independent timestamps) -> both rules matched -> RELAY CH1 ON, BUZZER ON, FAN ON, all ACCEPTED",PASS
+Relay Control,Manual RELAY commands (ch1 on, ch2 on, ch1 off) accepted via real command path,3 manual RELAY commands dispatched via POST /devices/{id}/commands, all SUCCESS/ACCEPTED,PASS
+Servo Control,Manual SERVO commands (0/90/180 deg) accepted,3 manual SERVO commands dispatched, all SUCCESS/ACCEPTED,PASS
+Button Press,BUTTON = true triggers LED ON,Grand Sim - Button Press -> LED On matched with real BUTTON=true telemetry,PASS
+Recovery,TEMPERATURE < 26 triggers FAN OFF automatically; BUZZER/LED manually cleared,Grand Sim - Recovery -> Fan Off matched repeatedly as temperature fell below threshold; manual BUZZER/LED OFF commands ACCEPTED,PASS
+Multi-Device Isolation,A SAFETY-01-scoped rule must not fire from a different device's MOTION telemetry,"Published MOTION=true to a different device (ESP32-SIM-001): rule match count unchanged (43->43). Published MOTION=true to SAFETY-01: count incremented (43->44)",PASS
+Persistence / Restart,Devices/rules/rule_matches/action_history/pipeline_traces/digital twin state survive a backend restart,"All counts identical before/after restart (devices 12, rules 9, rule_matches 826, action_history 893, pipeline_traces 30531); ENV-01 twin returned identical last-known state with no new telemetry",PASS
