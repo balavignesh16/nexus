@@ -84,7 +84,7 @@ describe('ActionsPage - real action history, no fabrication', () => {
 
     renderPage();
 
-    const badge = screen.getByText('SEND_COMMAND').closest('[class*="cursor-pointer"]')!;
+    const badge = screen.getByText('SEND_COMMAND').closest<HTMLElement>('[class*="cursor-pointer"]')!;
     expect(within(badge).getByText('Failed')).toBeInTheDocument();
   });
 
@@ -126,7 +126,7 @@ describe('ActionsPage - real action history, no fabrication', () => {
     renderPage();
 
     expect(screen.getByText('NO ACK YET')).toBeInTheDocument();
-    const row = screen.getByText('SEND_COMMAND').closest('[class*="cursor-pointer"]')!;
+    const row = screen.getByText('SEND_COMMAND').closest<HTMLElement>('[class*="cursor-pointer"]')!;
     expect(within(row).queryByText('Failed')).not.toBeInTheDocument();
   });
 

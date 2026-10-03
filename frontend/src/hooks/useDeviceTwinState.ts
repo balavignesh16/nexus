@@ -64,12 +64,22 @@ export function useDeviceTwinState(deviceId: string): DeviceTwinState {
   // synthetic "now" record. Index 0 is always the latest either way.
   const latest = history.length > 0 ? history[0] : null;
 
+  // Each telemetry record's payload carries exactly one sensor type
+  // (BackendRepository normalizes {sensorType: value} per record), so
+  // `latest.payload` alone can only ever yield one field - it is not "the
+  // fields this device reports", just the one from its single newest
+  // reading. The real, multi-capability field list is the union of sensor
+  // types seen across the fetched history window, a real, not invented.
+  const reportedFields = Array.from(new Set(
+    history.flatMap((h: any) => (h?.payload ? Object.keys(h.payload) : []))
+  ));
+
   return {
     connectivity: connectivityQuery.data,
     connectivityLoading: connectivityQuery.isLoading,
     connectivityError: connectivityQuery.error,
     lastTelemetryAt: latest?.timestamp ?? null,
-    reportedFields: latest?.payload ? Object.keys(latest.payload) : [],
+    reportedFields,
     telemetryLoading: telemetryQuery.isLoading,
     telemetryError: telemetryQuery.error,
   };

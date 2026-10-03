@@ -5,6 +5,7 @@ import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { DebugOverlay } from '../DebugOverlay';
 import { CreateRuleModal } from '../CreateRuleModal';
+import { RuleDetailModal } from '../RuleDetailModal';
 import { aiApi } from '../../../../api/aiApi';
 import { ruleApi } from '../../../../api/ruleApi';
 import { Card } from '../../../foundation/Card';
@@ -23,6 +24,8 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
   );
   const [modalOpen, setModalOpen] = useState(false);
   const [busyRuleId, setBusyRuleId] = useState<string | null>(null);
+  const [detailRule, setDetailRule] = useState<any | null>(null);
+  const [editingRule, setEditingRule] = useState<any | null>(null);
 
   const toggleEnabled = async (rule: any) => {
     const id = rule.ruleId ?? rule.id;
@@ -109,7 +112,12 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {deviceRules.map((rule: any) => (
-            <GlassPanel key={rule.id} level="glass" className="overflow-hidden flex flex-col">
+            <GlassPanel
+              key={rule.id}
+              level="glass"
+              className="overflow-hidden flex flex-col cursor-pointer hover:border-[var(--accent)] transition-colors"
+              onClick={() => setDetailRule(rule)}
+            >
               {/* Rule Header */}
               <div className="p-4 border-b border-foundation-border flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -130,8 +138,16 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
               <div className="p-4 flex-1 flex flex-col gap-3">
                 <div>
                   <span className="text-[10px] font-bold text-foundation-muted-fg uppercase tracking-wider mb-1.5 block">Trigger Condition</span>
-                  <div className="rounded p-2 text-xs font-mono text-foundation-fg/80 break-all" style={{ backgroundColor: 'var(--foundation-bg)', border: '1px solid var(--foundation-border)' }}>
-                    {rule.condition}
+                  <div className="rounded p-2 text-xs font-mono text-foundation-fg/80 break-all flex flex-col gap-1" style={{ backgroundColor: 'var(--foundation-bg)', border: '1px solid var(--foundation-border)' }}>
+                    {(rule.conditions ?? []).length > 0 ? (
+                      rule.conditions.map((c: any, idx: number) => (
+                        <div key={idx}>
+                          {c.capabilityType ? `${c.capabilityType} ` : ''}{c.field} {c.operator} {c.expectedValue}
+                        </div>
+                      ))
+                    ) : (
+                      <span className="text-foundation-tertiary-fg">No conditions defined</span>
+                    )}
                   </div>
                 </div>
 
@@ -142,13 +158,17 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
                 <div>
                   <span className="text-[10px] font-bold text-foundation-muted-fg uppercase tracking-wider mb-1.5 block">Actions</span>
                   <div className="flex flex-col gap-1.5">
-                    {(rule.actions ?? []).map((action: any, idx: number) => (
-                      <div key={idx} className="rounded p-2 text-xs flex items-center gap-2" style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)' }}>
-                        <Activity size={12} style={{ color: 'var(--accent)' }} className="shrink-0" />
-                        <span className="font-medium text-foundation-fg">{action.type}</span>
-                        <span className="text-foundation-muted-fg truncate">{JSON.stringify(action.payload)}</span>
-                      </div>
-                    ))}
+                    {(rule.actions ?? []).length > 0 ? (
+                      rule.actions.map((action: any, idx: number) => (
+                        <div key={idx} className="rounded p-2 text-xs flex items-center gap-2" style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)' }}>
+                          <Activity size={12} style={{ color: 'var(--accent)' }} className="shrink-0" />
+                          <span className="font-medium text-foundation-fg">{action.actionType}</span>
+                          <span className="text-foundation-muted-fg truncate">{JSON.stringify(action.parameters)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <span className="text-xs text-foundation-tertiary-fg">No actions defined</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -163,7 +183,7 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
                   <span>Priority: {rule.priority}</span>
                   <button
                     type="button"
-                    onClick={() => toggleEnabled(rule)}
+                    onClick={(e) => { e.stopPropagation(); toggleEnabled(rule); }}
                     disabled={busyRuleId === (rule.ruleId ?? rule.id)}
                     aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
                     className="text-foundation-muted-fg hover:text-foundation-fg disabled:opacity-40"
@@ -172,7 +192,7 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteRule(rule)}
+                    onClick={(e) => { e.stopPropagation(); deleteRule(rule); }}
                     disabled={busyRuleId === (rule.ruleId ?? rule.id)}
                     aria-label="Delete rule"
                     className="text-foundation-muted-fg hover:text-[var(--danger)] disabled:opacity-40"
@@ -228,10 +248,22 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
         </div>
       </GlassPanel>
 
+      <RuleDetailModal
+        rule={detailRule}
+        isOpen={detailRule !== null}
+        onClose={() => setDetailRule(null)}
+        onEdit={() => {
+          setEditingRule(detailRule);
+          setDetailRule(null);
+          setModalOpen(true);
+        }}
+      />
+
       <CreateRuleModal
         deviceId={deviceId}
+        editingRule={editingRule}
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditingRule(null); }}
         onCreated={() => refetch()}
       />
     </div>

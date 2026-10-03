@@ -69,11 +69,15 @@ function pipelineTraceMessage(overrides: Partial<PipelineTracePayload> = {}): Re
       correlationId: 'corr-pipe-1',
       stage: 'TELEMETRY',
       deviceId: 'dev-1',
-      enteredAt: 1700000000000,
-      exitedAt: 1700000000123,
-      latencyMs: 123,
-      succeeded: true,
-      stagePayload: { sensorType: 'TEMPERATURE_SENSOR', value: 21.5 },
+      stageIndex: 0,
+      previousStage: null,
+      nextStage: 'TWIN',
+      startTimestamp: 1700000000000,
+      endTimestamp: 1700000000123,
+      durationMs: 123,
+      status: 'SUCCESS',
+      payloadSize: 42,
+      metadata: { sensorType: 'TEMPERATURE', value: 21.5 },
       ...overrides,
     },
   };
@@ -142,83 +146,44 @@ describe('RealtimeRepositorySync - TWINS topic', () => {
     );
   }
 
-  it('identifies the matching twin by deviceId, not id, in ["twins", 12] and ["twins", 100]', () => {
-    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
-    queryClient.setQueryData(['twins', 100], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
-
+  it('invalidates both ["twins", 12] and ["twins", 100] on any TwinUpdated event, so the next read is a real, fully-consistent refetch', () => {
+    // The backend's TwinUpdated delta only ever reports "sensorType" and
+    // "value" changes - it never includes "unit", "lastSeen", or
+    // "latestTimestamp", even though those genuinely change too (a device
+    // cycling between capabilities has a different unit per capability).
+    // Hand-merging just sensorType/value onto a cached row therefore
+    // produces a torn, internally-inconsistent record (observed in
+    // production as e.g. sensorType "TEMPERATURE" paired with the
+    // previous capability's leftover value and unit, like "1013.43
+    // CELSIUS"). Invalidating and letting a real GET /twins refetch happen
+    // is the only way every field on the row is guaranteed to agree.
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
     renderSync();
+
     (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
 
-    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
-    const twins100 = queryClient.getQueryData<any[]>(['twins', 100])!;
-
-    expect(twins12[0].latestValue).toBe(42);
-    expect(twins100[0].latestValue).toBe(42);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['twins', 12] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['twins', 100] });
   });
 
-  it('a "value" delta updates latestValue and does not create a stray "value" field', () => {
-    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestValue: 20 })]);
+  it('never hand-writes latestSensorType/latestValue onto the cached twins array - no torn/partial row is ever produced client-side', () => {
+    const before12 = [realisticTwin({ deviceId: 'dev-1', latestSensorType: 'PRESSURE', latestValue: 1013.9, latestUnit: 'HPA' })];
+    const before100 = [realisticTwin({ deviceId: 'dev-1', latestSensorType: 'PRESSURE', latestValue: 1013.9, latestUnit: 'HPA' })];
+    queryClient.setQueryData(['twins', 12], before12);
+    queryClient.setQueryData(['twins', 100], before100);
 
     renderSync();
     (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
-      deltas: [{ property: 'value', oldValue: 20, newValue: 42, timestamp: 1700000000000 }],
+      deviceId: 'dev-1',
+      deltas: [{ property: 'sensorType', oldValue: 'PRESSURE', newValue: 'TEMPERATURE', timestamp: 1700000000000 }],
     }));
 
-    const twin = queryClient.getQueryData<any[]>(['twins', 12])![0];
-    expect(twin.latestValue).toBe(42);
-    expect(twin).not.toHaveProperty('value');
-  });
-
-  it('a "sensorType" delta updates latestSensorType and does not create a stray "sensorType" field', () => {
-    queryClient.setQueryData(['twins', 12], [realisticTwin({ deviceId: 'dev-1', latestSensorType: 'GAS_SENSOR' })]);
-
-    renderSync();
-    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({
-      deltas: [{ property: 'sensorType', oldValue: 'GAS_SENSOR', newValue: 'TEMPERATURE_SENSOR', timestamp: 1700000000000 }],
-    }));
-
-    const twin = queryClient.getQueryData<any[]>(['twins', 12])![0];
-    expect(twin.latestSensorType).toBe('TEMPERATURE_SENSOR');
-    expect(twin).not.toHaveProperty('sensorType');
-  });
-
-  it('["twins", 12] updates correctly and leaves non-matching twins untouched', () => {
-    queryClient.setQueryData(['twins', 12], [
-      realisticTwin({ deviceId: 'dev-1', latestValue: 20 }),
-      realisticTwin({ deviceId: 'dev-2', latestValue: 5 }),
-    ]);
-
-    renderSync();
-    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
-
-    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
-    expect(twins12.find(t => t.deviceId === 'dev-1')!.latestValue).toBe(42);
-    expect(twins12.find(t => t.deviceId === 'dev-2')!.latestValue).toBe(5);
-  });
-
-  it('["twins", 100] updates correctly and leaves non-matching twins untouched', () => {
-    queryClient.setQueryData(['twins', 100], [
-      realisticTwin({ deviceId: 'dev-1', latestValue: 20 }),
-      realisticTwin({ deviceId: 'dev-2', latestValue: 5 }),
-    ]);
-
-    renderSync();
-    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage());
-
-    const twins100 = queryClient.getQueryData<any[]>(['twins', 100])!;
-    expect(twins100.find(t => t.deviceId === 'dev-1')!.latestValue).toBe(42);
-    expect(twins100.find(t => t.deviceId === 'dev-2')!.latestValue).toBe(5);
-  });
-
-  it('a device with a non-matching deviceId is not modified', () => {
-    const untouched = realisticTwin({ deviceId: 'dev-9', latestValue: 999 });
-    queryClient.setQueryData(['twins', 12], [untouched]);
-
-    renderSync();
-    (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({ deviceId: 'dev-1' }));
-
-    const twins12 = queryClient.getQueryData<any[]>(['twins', 12])!;
-    expect(twins12[0]).toEqual(untouched);
+    // Cache data is untouched by this handler now - only invalidated.
+    // React Query itself (mocked away here) is responsible for the actual
+    // refetch; this handler must never locally patch a mismatched
+    // sensorType/value/unit combination into place.
+    expect(queryClient.getQueryData(['twins', 12])).toEqual(before12);
+    expect(queryClient.getQueryData(['twins', 100])).toEqual(before100);
   });
 
   it('["activeDevices"] still uses id-based identity matching and is unaffected by the twin field mapping', () => {
@@ -260,15 +225,17 @@ describe('RealtimeRepositorySync - TWINS topic', () => {
     expect(untouched.value).toBeUndefined();
   });
 
-  it('is a no-op on ["twins", 100] when that cache entry has not been populated yet', () => {
-    // No initial setQueryData for ['twins', 100] - simulates a page where
-    // useLatestTwins(100) hasn't fetched yet.
+  it('invalidates twins whether or not the device was already present in the cache - a twin missing entirely is never silently dropped', () => {
+    // No initial setQueryData for either key - simulates a page where
+    // useLatestTwins hasn't fetched yet, or a device whose first-ever
+    // update arrives before any REST snapshot caught it.
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
     renderSync();
 
-    expect(() => (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage())).not.toThrow();
+    expect(() => (RealtimeManager as any).__emit(TOPICS.TWINS, twinUpdatedMessage({ deviceId: 'dev-1' }))).not.toThrow();
 
-    const twins100 = queryClient.getQueryData<any[]>(['twins', 100]);
-    expect(twins100).toEqual([]);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['twins', 12] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['twins', 100] });
   });
 });
 
@@ -392,7 +359,9 @@ describe('RealtimeRepositorySync - PIPELINE topic (realtime trace normalization)
 
   it('normalizes a realtime pipeline trace into the canonical REST shape before it enters the shared cache', () => {
     renderSync();
-    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({ stage: 'TWIN' }));
+    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({
+      stage: 'TWIN', stageIndex: 1, previousStage: 'TELEMETRY', nextStage: 'ACTION',
+    }));
 
     const traces = queryClient.getQueryData<any[]>(['global-pipeline-traces'])!;
     expect(traces).toHaveLength(1);
@@ -407,7 +376,7 @@ describe('RealtimeRepositorySync - PIPELINE topic (realtime trace normalization)
     expect(trace.status).toBe('SUCCESS');
     expect(typeof trace.payloadSize).toBe('number');
     expect(Number.isNaN(trace.payloadSize)).toBe(false);
-    expect(trace.metadata).toEqual({ sensorType: 'TEMPERATURE_SENSOR', value: 21.5 });
+    expect(trace.metadata).toEqual({ sensorType: 'TEMPERATURE', value: 21.5 });
   });
 
   it('prepends a normalized trace onto real REST-seeded traces without breaking their existing shape', () => {
@@ -437,9 +406,9 @@ describe('RealtimeRepositorySync - PIPELINE topic (realtime trace normalization)
     expect(traces[1]).toEqual(restTrace); // the real REST trace, untouched
   });
 
-  it('a FAILURE trace (succeeded: false) never renders as SUCCESS, undefined, or NaN', () => {
+  it('a FAILURE trace never renders as SUCCESS, undefined, or NaN', () => {
     renderSync();
-    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({ succeeded: false }));
+    (RealtimeManager as any).__emit(TOPICS.PIPELINE, pipelineTraceMessage({ status: 'FAILURE' }));
 
     const trace = queryClient.getQueryData<any[]>(['global-pipeline-traces'])![0];
     expect(trace.status).toBe('FAILURE');

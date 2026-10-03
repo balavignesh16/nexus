@@ -31,7 +31,7 @@ function device(overrides: Record<string, any> = {}) {
   return { id: 'dev-1', name: 'Gas Sensor 1', ...overrides };
 }
 
-function reading(sensorValue: number, timestamp: number, sensorType = 'TEMPERATURE_SENSOR') {
+function reading(sensorValue: number, timestamp: number, sensorType = 'TEMPERATURE') {
   return { id: `t-${timestamp}`, deviceId: 'dev-1', timestamp, payload: { [sensorType]: sensorValue } };
 }
 
@@ -96,19 +96,19 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
     render(<TelemetryPage />);
 
     const telemetryCall = mockUsePolling.mock.calls.find((c) => c[0][0] === 'telemetry-page');
-    expect(telemetryCall![0]).toEqual(['telemetry-page', 'dev-1', 'TEMPERATURE_SENSOR']);
+    expect(telemetryCall![0]).toEqual(['telemetry-page', 'dev-1', 'TEMPERATURE']);
   });
 
   it('switching the metric selector changes the filtered chart data', () => {
     mockPolling(
       { data: [device()], isLoading: false },
-      { data: [reading(20, 1000, 'TEMPERATURE_SENSOR'), reading(55, 2000, 'HUMIDITY_SENSOR')], isLoading: false }
+      { data: [reading(20, 1000, 'TEMPERATURE'), reading(55, 2000, 'HUMIDITY')], isLoading: false }
     );
 
     render(<TelemetryPage />);
     expect(screen.getAllByText('20.0').length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByDisplayValue('Temperature Sensor'), { target: { value: 'HUMIDITY_SENSOR' } });
+    fireEvent.change(screen.getByDisplayValue('Temperature'), { target: { value: 'HUMIDITY' } });
 
     expect(screen.getAllByText('55.0').length).toBeGreaterThan(0);
     expect(screen.queryByText('20.0')).not.toBeInTheDocument();
@@ -181,9 +181,9 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
     fireEvent.click(exportButton!);
 
     expect(mockDownloadCsv).toHaveBeenCalledWith(
-      expect.stringContaining('telemetry-dev-1-TEMPERATURE_SENSOR-'),
+      expect.stringContaining('telemetry-dev-1-TEMPERATURE-'),
       ['timestamp', 'sensorType', 'value'],
-      [[new Date(1000).toISOString(), 'TEMPERATURE_SENSOR', '20']]
+      [[new Date(1000).toISOString(), 'TEMPERATURE', '20']]
     );
   });
 

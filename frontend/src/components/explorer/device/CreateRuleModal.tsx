@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { ruleApi, type RuleCondition, type RuleOperator } from '../../../api/ruleApi';
+import { ruleApi, type Rule, type RuleCondition, type RuleOperator } from '../../../api/ruleApi';
 import {
   type CapabilityType,
   type Device,
@@ -16,6 +17,13 @@ interface CreateRuleModalProps {
    * locks the trigger device to this one. When launched from the global
    * Rules page there is no device context, so the user picks one. */
   deviceId?: string;
+  /** Optional: when provided, the modal opens pre-filled with this rule's
+   * real conditions/actions and submits via PUT (update) instead of POST
+   * (create). Editing preserves the rule's ruleId, so its match history,
+   * AI explanations and cooldown state all stay attached to it - unlike
+   * deleting and recreating, which orphans that history under a new id.
+   * Undefined/null (the default) leaves create-mode entirely unchanged. */
+  editingRule?: Rule | null;
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
@@ -62,7 +70,7 @@ function newConditionRow(defaultCapability: CapabilityType | ''): ConditionRow {
  * EVENT_TYPE/SEVERITY-based single condition when no trigger device is
  * selected, preserving platform-wide rule creation exactly as before.
  */
-export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: CreateRuleModalProps) {
+export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCreated }: CreateRuleModalProps) {
   const { data: devices = [] } = useActiveDevices();
 
   const [name, setName] = useState('');
@@ -139,6 +147,63 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetCapabilityType, relayChannels.length]);
+
+  // Edit mode: pre-fill every field from the real rule being edited. Runs
+  // once per modal-open in edit mode (isOpen/editingRule as deps, not the
+  // fields it writes) - the seed effects above only backfill a field when
+  // it is still empty, so they never clobber what this sets.
+  useEffect(() => {
+    if (!isOpen || !editingRule) return;
+    setName(editingRule.name);
+    setPriority(editingRule.priority);
+    setEnabled(editingRule.enabled);
+    setCooldownSeconds(editingRule.cooldownSeconds != null ? String(editingRule.cooldownSeconds) : '');
+
+    const ruleConditions = editingRule.conditions ?? [];
+    const deviceCondition = ruleConditions.find((c) => c.field === 'DEVICE_ID');
+    const capabilityConditions = ruleConditions.filter((c) => c.capabilityType);
+
+    if (deviceCondition) {
+      setTriggerDeviceId(deviceCondition.expectedValue);
+      setConditions(capabilityConditions.map((c) => ({
+        id: Math.random().toString(36).slice(2),
+        capabilityType: c.capabilityType as CapabilityType,
+        operator: c.operator,
+        value: c.expectedValue,
+      })));
+    } else {
+      setTriggerDeviceId('');
+      setConditions([]);
+      const legacy = ruleConditions[0];
+      if (legacy) {
+        setLegacyField(legacy.field === 'SEVERITY' ? 'SEVERITY' : 'EVENT_TYPE');
+        setLegacyOperator(legacy.operator);
+        setLegacyValue(legacy.expectedValue);
+      }
+    }
+
+    const firstAction = (editingRule.actions ?? [])[0];
+    if (firstAction) {
+      if (firstAction.actionType === 'SEND_COMMAND') {
+        setActionType('SEND_COMMAND');
+        const p = firstAction.parameters ?? {};
+        setTargetDeviceId(p.deviceId ?? '');
+        setTargetCapabilityType((p.capability as CapabilityType) ?? '');
+        if (p.capability === 'RELAY' && p.value && typeof p.value === 'object') {
+          setCommandRelayChannel(p.value.channel ?? '');
+          setCommandRelayState(Boolean(p.value.state));
+        } else if (p.capability === 'SERVO') {
+          setCommandServoAngle(Number(p.value) || 0);
+        } else {
+          setCommandBoolValue(Boolean(p.value));
+        }
+      } else {
+        setActionType(firstAction.actionType as typeof ACTION_TYPES[number]);
+        setActionParams(JSON.stringify(firstAction.parameters ?? {}));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editingRule]);
 
   if (!isOpen) return null;
 
@@ -258,22 +323,28 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
       return;
     }
 
+    const body = {
+      name: name.trim(),
+      enabled,
+      priority,
+      conditions: buildConditions(),
+      actions,
+      metadata: {},
+      cooldownSeconds: cooldownSeconds.trim() ? Number(cooldownSeconds) : null,
+    };
+
     setSubmitting(true);
     try {
-      await ruleApi.createRule({
-        name: name.trim(),
-        enabled,
-        priority,
-        conditions: buildConditions(),
-        actions,
-        metadata: {},
-        cooldownSeconds: cooldownSeconds.trim() ? Number(cooldownSeconds) : null,
-      });
+      if (editingRule) {
+        await ruleApi.updateRule(editingRule.ruleId, { ...body, ruleId: editingRule.ruleId });
+      } else {
+        await ruleApi.createRule(body);
+      }
       reset();
       onCreated();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create rule.');
+      setError(err instanceof Error ? err.message : `Failed to ${editingRule ? 'update' : 'create'} rule.`);
     } finally {
       setSubmitting(false);
     }
@@ -282,7 +353,12 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
   const selectClass = "h-9 px-2 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]";
   const inputClass = "h-9 px-3 text-xs rounded-[var(--radius-panel)] border border-foundation-border bg-black/[0.02] text-foundation-fg outline-none focus:border-[var(--accent)]";
 
-  return (
+  // Portaled to document.body - see RuleDetailModal.tsx's comment on its
+  // own createPortal call for why: rendered inline, this modal is nested
+  // inside AppShell's content pane, which establishes its own stacking
+  // context, so this modal's z-50 would never actually out-rank the
+  // sidebar (a sibling of that pane, not a descendant of it).
+  return createPortal(
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleClose}>
       <div
         className="rounded-[var(--radius-panel-lg)] shadow-[var(--shadow-glass-lg)] w-full max-w-xl max-h-[90vh] overflow-y-auto"
@@ -290,7 +366,7 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-foundation-border">
-          <h3 className="text-sm font-semibold text-foundation-fg">Create Rule</h3>
+          <h3 className="text-sm font-semibold text-foundation-fg">{editingRule ? 'Edit Rule' : 'Create Rule'}</h3>
           <button onClick={handleClose} className="text-foundation-muted-fg hover:text-foundation-fg">
             <X size={18} />
           </button>
@@ -565,10 +641,11 @@ export function CreateRuleModal({ deviceId, isOpen, onClose, onCreated }: Create
             className="px-4 py-2 rounded-[var(--radius-pill)] text-xs font-medium transition-colors disabled:opacity-50"
             style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' }}
           >
-            {submitting ? 'Creating...' : 'Create Rule'}
+            {submitting ? (editingRule ? 'Saving...' : 'Creating...') : (editingRule ? 'Save Changes' : 'Create Rule')}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

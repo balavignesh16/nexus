@@ -1,5 +1,7 @@
 // Domain Models for NEXUS Platform
 
+import type { DigitalTwinResponse } from '../api/twinApi';
+
 export type DeviceType = 'TEMPERATURE_SENSOR' | 'GAS_SENSOR' | 'CAMERA' | 'LIGHT' | 'FAN' | 'DOOR_LOCK' | 'MOTION_SENSOR' | 'CUSTOM';
 export type DeviceStatus = 'REGISTERED' | 'ACTIVE' | 'OFFLINE' | 'MAINTENANCE';
 
@@ -17,13 +19,7 @@ export interface Device {
   updatedAt: string;
 }
 
-export interface DigitalTwin {
-  deviceId: string;
-  metadata: Record<string, string>;
-  runtimeState: Record<string, unknown>;
-  lastSeenAt: string;
-  quality: string;
-}
+export type DigitalTwin = DigitalTwinResponse;
 
 export interface Telemetry {
   id: string;
@@ -46,6 +42,9 @@ export interface RuleCondition {
   field: string;
   operator: string;
   expectedValue: string;
+  capabilityType?: string;
+  capabilityKey?: string;
+  unit?: string;
 }
 
 export interface RuleAction {

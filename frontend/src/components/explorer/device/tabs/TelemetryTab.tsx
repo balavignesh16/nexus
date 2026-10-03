@@ -3,7 +3,6 @@ import { Signal, Download, Search } from 'lucide-react';
 import { useRepositories } from '../../../../repositories/RepositoryProvider';
 import { usePolling } from '../../../../hooks/usePolling';
 import { useDeviceTwinState } from '../../../../hooks/useDeviceTwinState';
-import { DebugOverlay } from '../DebugOverlay';
 import { downloadCsv } from '../../../../utils/csv';
 import { Card } from '../../../foundation/Card';
 import { Input } from '../../../foundation/Input';

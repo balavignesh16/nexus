@@ -13,8 +13,18 @@ vi.mock('../../../../hooks/usePolling', () => ({
 }));
 
 const mockCreateRule = vi.fn();
+const mockUpdateRule = vi.fn();
+const mockEnableRule = vi.fn().mockResolvedValue(undefined);
+const mockDisableRule = vi.fn().mockResolvedValue(undefined);
+const mockDeleteRule = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../../api/ruleApi', () => ({
-  ruleApi: { createRule: (...args: any[]) => mockCreateRule(...args) },
+  ruleApi: {
+    createRule: (...args: any[]) => mockCreateRule(...args),
+    updateRule: (...args: any[]) => mockUpdateRule(...args),
+    enableRule: (...args: any[]) => mockEnableRule(...args),
+    disableRule: (...args: any[]) => mockDisableRule(...args),
+    deleteRule: (...args: any[]) => mockDeleteRule(...args),
+  },
 }));
 
 const mockGetRuleMatchHistory = vi.fn();
@@ -32,8 +42,8 @@ function rule(overrides: Record<string, any> = {}) {
     description: 'Triggers on high temperature',
     enabled: true,
     priority: 1,
-    condition: 'temperature > 40',
-    actions: [{ type: 'CREATE_ALERT', payload: { severity: 'CRITICAL' } }],
+    conditions: [{ field: 'VALUE', operator: 'GT', expectedValue: '40', capabilityType: 'TEMPERATURE' }],
+    actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'CRITICAL' } }],
     ...overrides,
   };
 }
@@ -105,6 +115,25 @@ describe('RulesTab - device-scoped rules', () => {
     renderTab();
 
     expect(screen.getByText('High Temp Alert')).toBeInTheDocument();
+  });
+
+  it('renders the real condition and action content from rule.conditions/rule.actions, not blank boxes', () => {
+    mockPolling({ data: [rule()], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    expect(screen.getByText('TEMPERATURE VALUE GT 40')).toBeInTheDocument();
+    expect(screen.getByText('CREATE_ALERT')).toBeInTheDocument();
+    expect(screen.getByText('{"severity":"CRITICAL"}')).toBeInTheDocument();
+  });
+
+  it('shows an honest "no conditions/actions defined" fallback when a rule genuinely has none', () => {
+    mockPolling({ data: [rule({ conditions: [], actions: [] })], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+
+    expect(screen.getByText('No conditions defined')).toBeInTheDocument();
+    expect(screen.getByText('No actions defined')).toBeInTheDocument();
   });
 
   it('shows an honest empty state when this device genuinely has no rules', () => {
@@ -232,5 +261,78 @@ describe('RulesTab - device-scoped rules', () => {
 
     const link = screen.getByText('High Temp Alert').closest('a');
     expect(link).toHaveAttribute('href', '/ai?matchId=match-xyz');
+  });
+
+  // ---------- Rule detail popup + edit-in-place ----------
+
+  it('clicking a rule card opens a detail popup showing its real conditions and actions', () => {
+    mockPolling({ data: [rule()], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+
+    // Both the card (behind the popup) and the popup itself render this
+    // condition/action text, so assert presence, not uniqueness.
+    expect(screen.getAllByText(/TEMPERATURE VALUE GT 40/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CREATE_ALERT').length).toBeGreaterThan(0);
+  });
+
+  it('clicking the enable/disable or delete button does not open the detail popup', () => {
+    mockPolling({ data: [rule()], isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderTab();
+    fireEvent.click(screen.getByLabelText('Disable rule'));
+
+    expect(screen.queryByRole('button', { name: /edit rule/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the edit form pre-filled with the real rule from the detail popup, and saves via updateRule (PUT), not createRule (POST)', async () => {
+    mockUpdateRule.mockResolvedValue({});
+    const refetch = vi.fn();
+    mockPolling({
+      data: [rule({
+        conditions: [{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }],
+        actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'CRITICAL' } }],
+      })],
+      isLoading: false,
+      isError: false,
+      refetch,
+    });
+
+    renderTab();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+    fireEvent.click(screen.getByRole('button', { name: /edit rule/i }));
+
+    expect(screen.getByText('Edit Rule')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('High Temp Alert')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await vi.waitFor(() => expect(mockUpdateRule).toHaveBeenCalledWith('r1', expect.objectContaining({
+      name: 'High Temp Alert',
+      conditions: [{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }],
+      actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'CRITICAL' } }],
+    })));
+    expect(mockCreateRule).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(refetch).toHaveBeenCalled());
+  });
+
+  it('a rule with multiple actions cannot be edited from the detail popup, to avoid silently dropping data', () => {
+    mockPolling({
+      data: [rule({
+        actions: [
+          { actionType: 'SEND_COMMAND', parameters: { deviceId: 'device-a', capability: 'BUZZER', command: 'SET_STATE', value: true } },
+          { actionType: 'SEND_COMMAND', parameters: { deviceId: 'device-a', capability: 'FAN', command: 'SET_STATE', value: true } },
+        ],
+      })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    renderTab();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+
+    expect(screen.getByRole('button', { name: /edit rule/i })).toBeDisabled();
   });
 });

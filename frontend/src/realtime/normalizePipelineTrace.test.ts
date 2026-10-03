@@ -8,16 +8,20 @@ function realtimeTrace(overrides: Partial<RealtimePipelineTracePayload> = {}): R
     correlationId: 'corr-1',
     stage: 'TELEMETRY',
     deviceId: 'dev-1',
-    enteredAt: 1700000000000,
-    exitedAt: 1700000000123,
-    latencyMs: 123,
-    succeeded: true,
-    stagePayload: { sensorType: 'TEMPERATURE_SENSOR', value: 21.5 },
+    stageIndex: 0,
+    previousStage: null,
+    nextStage: 'TWIN',
+    startTimestamp: 1700000000000,
+    endTimestamp: 1700000000123,
+    durationMs: 123,
+    status: 'SUCCESS',
+    payloadSize: 42,
+    metadata: { sensorType: 'TEMPERATURE', value: 21.5 },
     ...overrides,
   };
 }
 
-describe('normalizeRealtimePipelineTrace - realtime payload becomes a valid canonical trace', () => {
+describe('normalizeRealtimePipelineTrace - realtime payload is the same shape the backend persists', () => {
   it('passes real identity fields through unchanged', () => {
     const trace = normalizeRealtimePipelineTrace(realtimeTrace({ traceId: 't-9', correlationId: 'c-9', deviceId: 'dev-9', stage: 'TWIN' }));
 
@@ -27,63 +31,39 @@ describe('normalizeRealtimePipelineTrace - realtime payload becomes a valid cano
     expect(trace.stage).toBe('TWIN');
   });
 
-  it('derives stageIndex/previousStage/nextStage from the real, established TELEMETRY/TWIN/ACTION order', () => {
-    const telemetry = normalizeRealtimePipelineTrace(realtimeTrace({ stage: 'TELEMETRY' }));
-    const twin = normalizeRealtimePipelineTrace(realtimeTrace({ stage: 'TWIN' }));
-    const action = normalizeRealtimePipelineTrace(realtimeTrace({ stage: 'ACTION' }));
+  it('passes stageIndex/previousStage/nextStage through unchanged - the backend already computes these', () => {
+    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ stageIndex: 1, previousStage: 'TELEMETRY', nextStage: 'ACTION' }));
 
-    expect(telemetry.stageIndex).toBe(0);
-    expect(telemetry.previousStage).toBeNull();
-    expect(telemetry.nextStage).toBe('TWIN');
-
-    expect(twin.stageIndex).toBe(1);
-    expect(twin.previousStage).toBe('TELEMETRY');
-    expect(twin.nextStage).toBe('ACTION');
-
-    expect(action.stageIndex).toBe(2);
-    expect(action.previousStage).toBe('TWIN');
-    expect(action.nextStage).toBeNull();
+    expect(trace.stageIndex).toBe(1);
+    expect(trace.previousStage).toBe('TELEMETRY');
+    expect(trace.nextStage).toBe('ACTION');
   });
 
-  it('a stage outside the real known order sorts after the known stages, never a fabricated index', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ stage: 'MQTT_IN' }));
-
-    expect(trace.stageIndex).toBe(3);
-    expect(trace.previousStage).toBeNull();
-    expect(trace.nextStage).toBeNull();
-  });
-
-  it('maps startTimestamp/endTimestamp/durationMs from the real enteredAt/exitedAt/latencyMs fields', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ enteredAt: 1000, exitedAt: 1500, latencyMs: 500 }));
+  it('passes startTimestamp/endTimestamp/durationMs through unchanged', () => {
+    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ startTimestamp: 1000, endTimestamp: 1500, durationMs: 500 }));
 
     expect(trace.startTimestamp).toBe(1000);
     expect(trace.endTimestamp).toBe(1500);
     expect(trace.durationMs).toBe(500);
   });
 
-  it('derives status SUCCESS from a real succeeded: true, never NaN/undefined', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ succeeded: true }));
-    expect(trace.status).toBe('SUCCESS');
+  it('passes a real status string through unchanged, never derived from a nonexistent boolean', () => {
+    expect(normalizeRealtimePipelineTrace(realtimeTrace({ status: 'SUCCESS' })).status).toBe('SUCCESS');
+    expect(normalizeRealtimePipelineTrace(realtimeTrace({ status: 'FAILURE' })).status).toBe('FAILURE');
   });
 
-  it('derives status FAILURE from a real succeeded: false', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ succeeded: false }));
-    expect(trace.status).toBe('FAILURE');
+  it('passes the real payloadSize through unchanged', () => {
+    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ payloadSize: 17 }));
+    expect(trace.payloadSize).toBe(17);
   });
 
-  it('derives a real payloadSize from the real stagePayload, never a fabricated number', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ stagePayload: { a: 1 } }));
-    expect(trace.payloadSize).toBe(JSON.stringify({ a: 1 }).length);
-    expect(trace.payloadSize).toBeGreaterThan(0);
+  it('passes a real object metadata through unchanged', () => {
+    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ metadata: { sensorType: 'GAS', value: 12 } }));
+    expect(trace.metadata).toEqual({ sensorType: 'GAS', value: 12 });
   });
 
-  it('maps a real object stagePayload into metadata unchanged', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ stagePayload: { sensorType: 'GAS_SENSOR', value: 12 } }));
-    expect(trace.metadata).toEqual({ sensorType: 'GAS_SENSOR', value: 12 });
-  });
-
-  it('a non-object stagePayload results in an honest empty metadata object, never fabricated content', () => {
-    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ stagePayload: 'raw string payload' as any }));
+  it('a non-object metadata results in an honest empty object, never fabricated content', () => {
+    const trace = normalizeRealtimePipelineTrace(realtimeTrace({ metadata: 'raw string' as any }));
     expect(trace.metadata).toEqual({});
   });
 

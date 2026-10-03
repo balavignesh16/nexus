@@ -16,6 +16,12 @@ import PipelinePage from './pages/PipelinePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AiInsightsPage from './pages/AiInsightsPage';
 import SettingsPage from './pages/SettingsPage';
+import CapabilityDefinitionsPage from './pages/framework/CapabilityDefinitionsPage';
+import DeviceTemplatesPage from './pages/framework/DeviceTemplatesPage';
+import DeviceOnboardingPage from './pages/framework/DeviceOnboardingPage';
+import OnboardingSessionPage from './pages/framework/OnboardingSessionPage';
+import DeviceContractPage from './pages/framework/DeviceContractPage';
+import GenericRulePage from './pages/framework/GenericRulePage';
 import { InspectorProvider } from './components/ui/InspectorProvider';
 import { RealtimeProvider } from './realtime/RealtimeProvider';
 import './App.css';
@@ -41,6 +47,13 @@ function App() {
             <Route path="/actions" element={<AppShell><ActionsPage /></AppShell>} />
             <Route path="/settings" element={<AppShell><SettingsPage /></AppShell>} />
             <Route path="/system" element={<AppShell><SystemPage /></AppShell>} />
+            <Route path="/framework/capabilities" element={<AppShell><CapabilityDefinitionsPage /></AppShell>} />
+            <Route path="/framework/templates" element={<AppShell><DeviceTemplatesPage /></AppShell>} />
+            <Route path="/framework/templates/:templateId" element={<AppShell><DeviceTemplatesPage /></AppShell>} />
+            <Route path="/framework/onboarding" element={<AppShell><DeviceOnboardingPage /></AppShell>} />
+            <Route path="/framework/onboarding/:sessionId" element={<AppShell><OnboardingSessionPage /></AppShell>} />
+            <Route path="/framework/rules" element={<AppShell><GenericRulePage /></AppShell>} />
+            <Route path="/devices/:deviceId/contract" element={<AppShell><DeviceContractPage /></AppShell>} />
             <Route path="*" element={<AppShell><main className="p-8 flex items-center justify-center h-full"><h1 className="text-2xl font-bold text-muted-foreground">404 - Page Not Found</h1></main></AppShell>} />
           </Routes>
         </BrowserRouter>

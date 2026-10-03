@@ -9,7 +9,6 @@ vi.mock('../services/ConnectionManager', () => ({
 
 vi.mock('./ui/DemoScenarioSelector', () => ({ DemoScenarioSelector: () => null }));
 
-const mockCommandPaletteOpen = vi.fn();
 vi.mock('./ui/CommandPalette', () => ({
   CommandPalette: ({ open }: { open: boolean }) => (open ? <div data-testid="command-palette">palette open</div> : null),
 }));

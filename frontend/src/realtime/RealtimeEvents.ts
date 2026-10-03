@@ -94,16 +94,26 @@ export interface ActionAcknowledgedPayload {
   timestamp: number;
 }
 
+// The backend broadcasts the same PipelineTrace bean over this WebSocket
+// topic that it persists and serves via GET /pipeline/history - there is
+// no separate realtime-only shape (verified against
+// RealtimePublisher.publishPipelineTrace, which broadcasts the raw
+// persisted trace object; PipelineTrace's getters, not its @Transient
+// JPA annotations, are what Jackson serializes).
 export interface PipelineTracePayload {
   traceId: string;
   correlationId: string;
-  stage: 'MQTT_IN' | 'TELEMETRY' | 'TWIN' | 'RULE' | 'ACTION' | 'ALERT';
   deviceId: string | null;
-  enteredAt: number;
-  exitedAt: number;
-  latencyMs: number;
-  succeeded: boolean;
-  stagePayload: unknown;
+  stage: 'MQTT_IN' | 'TELEMETRY' | 'TWIN' | 'RULE' | 'ACTION' | 'ALERT';
+  stageIndex: number;
+  previousStage: string | null;
+  nextStage: string | null;
+  startTimestamp: number;
+  endTimestamp: number;
+  durationMs: number;
+  status: string;
+  payloadSize: number;
+  metadata: Record<string, any>;
 }
 
 export interface PlatformHealthPayload {

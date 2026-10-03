@@ -30,7 +30,7 @@ export function TimeSeriesChart({ data, color, unit }: TimeSeriesChartProps) {
           <Tooltip
             contentStyle={{ backgroundColor: 'var(--foundation-surface)', borderColor: 'var(--foundation-border)', borderRadius: 8, fontSize: 12 }}
             labelStyle={{ color: 'var(--foundation-fg)' }}
-            formatter={(value: number) => [`${value}${unit ? ` ${unit}` : ''}`, 'Count']}
+            formatter={(value) => [`${String(value ?? '')}${unit ? ` ${unit}` : ''}`, 'Count']}
           />
           <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fillOpacity={1} fill={`url(#grad-${color.replace('#', '')})`} />
         </AreaChart>

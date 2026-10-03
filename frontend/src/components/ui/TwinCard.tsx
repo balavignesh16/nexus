@@ -33,22 +33,28 @@ export function TwinCard({ twin }: TwinCardProps) {
       </div>
       
       <div className="bg-background/50 rounded p-3 font-mono text-sm border border-border/50">
-        {Object.entries(twin.runtimeState || {}).slice(0, 3).map(([key, val]) => (
-          <div key={key} className="flex justify-between py-1 border-b border-border/30 last:border-0">
-            <span className="text-muted-foreground">{key}</span>
-            <span className="text-foreground font-medium truncate max-w-[100px] text-right">
-              {typeof val === 'object' ? JSON.stringify(val) : String(val)}
-            </span>
+        {Object.keys(twin.reportedState ?? {}).length > 0 ? (
+          Object.entries(twin.reportedState).map(([capability, state]) => (
+            <div className="flex justify-between py-1 gap-3" key={capability}>
+              <span className="text-muted-foreground truncate">{capability}</span>
+              <span className="text-foreground font-medium truncate max-w-[120px] text-right">
+                {state.value} {state.unit}
+              </span>
+            </div>
+          ))
+        ) : twin.latestSensorType ? (
+          <div className="flex justify-between py-1 gap-3">
+            <span className="text-muted-foreground truncate">{twin.latestSensorType}</span>
+            <span className="text-foreground font-medium truncate max-w-[120px] text-right">{twin.latestValue} {twin.latestUnit}</span>
           </div>
-        ))}
-        {Object.keys(twin.runtimeState || {}).length === 0 && (
-          <div className="text-muted-foreground text-center py-2 text-xs">No runtime state available</div>
+        ) : (
+          <div className="text-muted-foreground text-center py-2 text-xs">No reading available</div>
         )}
       </div>
-      
+
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-auto pt-2 border-t border-border/50">
         <Clock size={12} />
-        <span>Seen {twin.lastSeenAt ? new Date(twin.lastSeenAt).toLocaleTimeString() : 'Never'}</span>
+        <span>Seen {twin.lastSeen ? new Date(twin.lastSeen).toLocaleTimeString() : 'Never'}</span>
       </div>
     </div>
   );

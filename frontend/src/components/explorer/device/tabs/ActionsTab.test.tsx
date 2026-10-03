@@ -94,6 +94,17 @@ describe('ActionsTab - real execution status + device acknowledgement', () => {
     expect(screen.getByText('REJECTED')).toBeInTheDocument();
   });
 
+  it('renders the real command parameters from action.parameters, not a blank box', () => {
+    mockUsePolling.mockReturnValue({
+      data: [action({ parameters: { deviceId: 'dev-1', capability: 'FAN', command: 'SET_STATE', value: true } })],
+      isLoading: false,
+    });
+
+    render(<ActionsTab deviceId="device-a" />);
+
+    expect(screen.getByText('{"deviceId":"dev-1","capability":"FAN","command":"SET_STATE","value":true}')).toBeInTheDocument();
+  });
+
   it('does not show an acknowledgement row for non-SEND_COMMAND actions', () => {
     mockUsePolling.mockReturnValue({ data: [action({ actionType: 'CREATE_ALERT', ackStatus: null })], isLoading: false });
 

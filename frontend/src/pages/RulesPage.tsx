@@ -15,6 +15,7 @@ import { Button } from '../components/foundation/Button';
 import { EmptyState } from '../components/foundation/EmptyState';
 import { LoadingBlock } from '../components/foundation/LoadingState';
 import { CreateRuleModal } from '../components/explorer/device/CreateRuleModal';
+import { RuleDetailModal } from '../components/explorer/device/RuleDetailModal';
 
 export function RulesPage() {
   const { rules } = useRepositories();
@@ -29,6 +30,8 @@ export function RulesPage() {
 
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailRule, setDetailRule] = useState<any | null>(null);
+  const [editingRule, setEditingRule] = useState<any | null>(null);
 
   // Real, established API (already used by AiInsightsPage and the
   // device-scoped RulesTab) - the global recent-matches view, not scoped
@@ -132,7 +135,12 @@ export function RulesPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filteredRules.map((rule: any) => (
-              <GlassPanel key={rule.id ?? rule.ruleId} level="glass" className="p-5 flex flex-col justify-between">
+              <GlassPanel
+                key={rule.id ?? rule.ruleId}
+                level="glass"
+                className="p-5 flex flex-col justify-between cursor-pointer hover:border-[var(--accent)] transition-colors"
+                onClick={() => setDetailRule(rule)}
+              >
                 <div>
                   <div className="flex justify-between items-start mb-2 gap-2">
                     <h3 className="font-semibold text-foundation-fg truncate">{rule.name || rule.id}</h3>
@@ -186,7 +194,7 @@ export function RulesPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => toggleEnabled(rule)}
+                      onClick={(e) => { e.stopPropagation(); toggleEnabled(rule); }}
                       disabled={busyRuleId === (rule.ruleId ?? rule.id)}
                       aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
                       className="text-foundation-muted-fg hover:text-foundation-fg disabled:opacity-40"
@@ -195,7 +203,7 @@ export function RulesPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => deleteRule(rule)}
+                      onClick={(e) => { e.stopPropagation(); deleteRule(rule); }}
                       disabled={busyRuleId === (rule.ruleId ?? rule.id)}
                       aria-label="Delete rule"
                       className="text-foundation-muted-fg hover:text-[var(--danger)] disabled:opacity-40"
@@ -253,9 +261,21 @@ export function RulesPage() {
         </GlassPanel>
       </div>
 
+      <RuleDetailModal
+        rule={detailRule}
+        isOpen={detailRule !== null}
+        onClose={() => setDetailRule(null)}
+        onEdit={() => {
+          setEditingRule(detailRule);
+          setDetailRule(null);
+          setModalOpen(true);
+        }}
+      />
+
       <CreateRuleModal
+        editingRule={editingRule}
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditingRule(null); }}
         onCreated={() => refetch()}
       />
     </div>

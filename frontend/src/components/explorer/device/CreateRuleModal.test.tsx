@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CreateRuleModal } from './CreateRuleModal';
-import { ruleApi } from '../../../api/ruleApi';
+import { ruleApi, type Rule } from '../../../api/ruleApi';
 
 vi.mock('../../../api/ruleApi', async () => {
   const actual = await vi.importActual<typeof import('../../../api/ruleApi')>('../../../api/ruleApi');
   return {
     ...actual,
-    ruleApi: { ...actual.ruleApi, createRule: vi.fn() },
+    ruleApi: { ...actual.ruleApi, createRule: vi.fn(), updateRule: vi.fn() },
   };
 });
 
@@ -200,5 +200,83 @@ describe('CreateRuleModal - capability-aware rule creation, no fabrication', () 
 
     await waitFor(() => expect(screen.getByTestId('create-rule-error')).toHaveTextContent('Server error'));
     expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  // ---------- Edit mode: pre-fill from a real rule, submit via PUT ----------
+
+  const relayRule: Rule = {
+    ruleId: 'rule-99',
+    name: 'Critical Gas -> Relay',
+    enabled: false,
+    priority: 7,
+    cooldownSeconds: 30,
+    conditions: [
+      { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+      { field: 'VALUE', operator: 'GT', expectedValue: '700', capabilityType: 'GAS' },
+    ],
+    actions: [
+      { actionType: 'SEND_COMMAND', parameters: { deviceId: 'dev-1', capability: 'RELAY', command: 'SET_STATE', value: { channel: 2, state: true } } },
+    ],
+    metadata: {},
+  };
+
+  it('edit mode shows "Edit Rule" / "Save Changes" instead of the create-mode labels', () => {
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    expect(screen.getByText('Edit Rule')).toBeInTheDocument();
+    expect(screen.getByText('Save Changes')).toBeInTheDocument();
+    expect(screen.queryByText('Create Rule', { selector: 'h3' })).not.toBeInTheDocument();
+  });
+
+  it('edit mode pre-fills name, priority, enabled and cooldown from the real rule', () => {
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    expect(screen.getByDisplayValue('Critical Gas -> Relay')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('30')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+  });
+
+  it('edit mode pre-fills a capability-aware condition (GAS GT 700) into the condition builder', () => {
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    expect(screen.getByTestId('condition-capability-select')).toHaveValue('GAS');
+    expect(screen.getByTestId('condition-operator-select')).toHaveValue('GT');
+    expect(screen.getByTestId('condition-numeric-value-input')).toHaveValue(700);
+  });
+
+  it('edit mode pre-fills a RELAY SEND_COMMAND action, including its real channel and state', () => {
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    expect(screen.getByTestId('action-capability-select')).toHaveValue('RELAY');
+    expect(screen.getByTestId('command-relay-channel-select')).toHaveValue('2');
+    expect(screen.getByTestId('command-relay-state-select')).toHaveValue('true');
+  });
+
+  it('saving in edit mode calls updateRule with the real ruleId, never createRule', async () => {
+    vi.mocked(ruleApi.updateRule).mockResolvedValue(relayRule as any);
+    const onCreated = vi.fn();
+    const onClose = vi.fn();
+
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={onClose} onCreated={onCreated} />);
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => expect(ruleApi.updateRule).toHaveBeenCalledWith('rule-99', expect.objectContaining({
+      ruleId: 'rule-99',
+      name: 'Critical Gas -> Relay',
+      conditions: relayRule.conditions,
+      actions: relayRule.actions,
+    })));
+    expect(ruleApi.createRule).not.toHaveBeenCalled();
+    expect(onCreated).toHaveBeenCalled();
+  });
+
+  it('shows the truthful backend error message when an update fails - never fabricates success', async () => {
+    vi.mocked(ruleApi.updateRule).mockRejectedValue(new Error('Conflict: rule was modified'));
+
+    render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => expect(screen.getByTestId('create-rule-error')).toHaveTextContent('Conflict: rule was modified'));
   });
 });

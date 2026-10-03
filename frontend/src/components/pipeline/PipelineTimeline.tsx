@@ -5,7 +5,7 @@ import { Activity, Signal, Box, Zap, Download } from 'lucide-react';
 import { downloadCsv } from '../../utils/csv';
 import { GlassPanel } from '../foundation/GlassPanel';
 import { Button } from '../foundation/Button';
-import { Table, type TableColumn } from '../foundation/Table';
+import type { TableColumn } from '../foundation/Table';
 import { EmptyState } from '../foundation/EmptyState';
 import { ErrorState } from '../foundation/ErrorState';
 import { LoadingBlock } from '../foundation/LoadingState';

@@ -103,7 +103,7 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
       ) : (
         <div className="flex flex-col gap-3">
           {filteredActions.map((action: any, i: number) => (
-            <Card key={action.id || `${action.timestamp}-${i}`} level="glass" padding="md">
+            <Card key={action.executionId || `${action.timestamp}-${i}`} level="glass" padding="md">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)' }}>
                   {getActionIcon(action.status)}
@@ -141,9 +141,9 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
                       </span>
                     </div>
                   )}
-                  {action.payload && Object.keys(action.payload).length > 0 && (
+                  {action.parameters && Object.keys(action.parameters).length > 0 && (
                     <div className="mt-2 rounded p-2 text-xs font-mono text-foundation-muted-fg overflow-hidden text-ellipsis whitespace-nowrap" style={{ backgroundColor: 'var(--foundation-bg)' }}>
-                      {JSON.stringify(action.payload)}
+                      {JSON.stringify(action.parameters)}
                     </div>
                   )}
                 </div>

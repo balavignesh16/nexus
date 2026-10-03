@@ -19,11 +19,18 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
 
   if (!device) return <LoadingBlock className="h-full mt-6" />;
 
-  const currentTwin = twins.find((t: any) => t.deviceId === deviceId) || null;
-  const previousTwin = twins.filter((t: any) => t.deviceId === deviceId)[1] || null;
+  // The API returns one device-level twin with every independently stored
+  // capability in reportedState. The latest* fields remain only as a
+  // backwards-compatible summary and must not be used as the complete twin.
+  const deviceTwin = twins.find((t) => t.deviceId === deviceId);
+  const currentTwin = deviceTwin?.reportedState ?? null;
 
+  // /twins is a current-state snapshot, not a time series - there is no
+  // real "previous twin" to diff against from this data source, so Diffs
+  // mode honestly shows no changes (current vs. current) rather than
+  // fabricating a prior state from an unrelated capability's row.
   const currentJson = currentTwin ? JSON.stringify(currentTwin, null, 2) : '{\n  "status": "No twin data available"\n}';
-  const previousJson = previousTwin ? JSON.stringify(previousTwin, null, 2) : currentJson;
+  const previousJson = currentJson;
 
   return (
     <div className="py-6 flex flex-col gap-4 h-full">

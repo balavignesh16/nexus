@@ -46,28 +46,20 @@ export function RealtimeRepositorySync() {
         return { ...old, ...deltaObj };
       });
 
-      // Twin-shaped caches (DigitalTwinResponse) use different field names
-      // (latestSensorType/latestValue) than the raw delta property names
-      // (sensorType/value), and identify twins by `deviceId`, not `id`.
-      // Map explicitly so no stray "sensorType"/"value" fields are added.
-      const TWIN_DELTA_FIELD_MAP: Record<string, string> = {
-        sensorType: 'latestSensorType',
-        value: 'latestValue',
-      };
-      const twinDeltaObj = Object.fromEntries(
-        payload.deltas
-          .filter(d => TWIN_DELTA_FIELD_MAP[d.property])
-          .map(d => [TWIN_DELTA_FIELD_MAP[d.property], d.newValue])
-      );
-
-      // Update latest twins query
-      queryClient.setQueryData<any[]>(['twins', 12], (old = []) => {
-        return old.map(dev => dev.deviceId === payload.deviceId ? { ...dev, ...twinDeltaObj } : dev);
-      });
-      // Update the higher-capacity twins query (DigitalTwinTab)
-      queryClient.setQueryData<any[]>(['twins', 100], (old = []) => {
-        return old.map(dev => dev.deviceId === payload.deviceId ? { ...dev, ...twinDeltaObj } : dev);
-      });
+      // Twin-shaped caches (DigitalTwinResponse: latestSensorType,
+      // latestValue, latestUnit, lastSeen, quality, ...) cannot be safely
+      // hand-merged from this delta: the backend's TwinUpdated payload
+      // only ever reports "sensorType" and "value" changes - it never
+      // includes "unit", "lastSeen", or "latestTimestamp", even though
+      // those genuinely change too (a device cycling between capabilities
+      // has a different unit per capability). Patching only
+      // sensorType/value onto the cached row - the previous approach here
+      // - produces a torn/inconsistent record (e.g. sensorType:
+      // "TEMPERATURE" with the previous capability's leftover value and
+      // unit, like "1013.43 CELSIUS"). A full refetch is the only way to
+      // get a row where every field agrees with every other field.
+      queryClient.invalidateQueries({ queryKey: ['twins', 12] });
+      queryClient.invalidateQueries({ queryKey: ['twins', 100] });
     });
 
     // 3. Sync Events -> Prepend

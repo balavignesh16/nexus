@@ -53,16 +53,42 @@ describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
     mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Gas Sensor 1' } });
     mockUseLatestTwins.mockReturnValue({
       data: [
-        { deviceId: 'dev-1', quality: 'GOOD', value: 42 },
-        { deviceId: 'dev-2', quality: 'POOR', value: 7 },
+        { deviceId: 'dev-1', reportedState: { TEMPERATURE: { value: 42, unit: 'CELSIUS', lastSeen: '2026-01-01T00:00:00Z', quality: 'GOOD' } } },
+        { deviceId: 'dev-2', reportedState: { GAS: { value: 7, unit: 'PPM', lastSeen: '2026-01-01T00:00:00Z', quality: 'POOR' } } },
       ],
     });
 
     render(<DigitalTwinTab deviceId="dev-1" />);
 
+    expect(screen.getByText('TEMPERATURE')).toBeInTheDocument();
     expect(screen.getByText('GOOD')).toBeInTheDocument();
     expect(screen.getByText('42')).toBeInTheDocument();
     expect(screen.queryByText('POOR')).not.toBeInTheDocument();
+    expect(screen.queryByText('GAS')).not.toBeInTheDocument();
+  });
+
+  it('renders every capability in the aggregated device twin reportedState', () => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'ESP32-ENV-01' } });
+    mockUseLatestTwins.mockReturnValue({
+      data: [
+        {
+          deviceId: 'dev-1',
+          reportedState: {
+            TEMPERATURE: { value: 22.5, unit: 'CELSIUS', lastSeen: '2026-01-01T00:00:00Z', quality: 'GOOD' },
+            HUMIDITY: { value: 55, unit: 'PERCENT', lastSeen: '2026-01-01T00:00:00Z', quality: 'GOOD' },
+            PRESSURE: { value: 1013.9, unit: 'HPA', lastSeen: '2026-01-01T00:00:00Z', quality: 'GOOD' },
+          },
+        },
+      ],
+    });
+
+    render(<DigitalTwinTab deviceId="dev-1" />);
+
+    expect(screen.getByText('TEMPERATURE')).toBeInTheDocument();
+    expect(screen.getByText('HUMIDITY')).toBeInTheDocument();
+    expect(screen.getByText('PRESSURE')).toBeInTheDocument();
+    expect(screen.getByText('1013.9')).toBeInTheDocument();
+    expect(screen.queryByText('No twin data reported yet')).not.toBeInTheDocument();
   });
 
   it('shows the empty state when useLatestTwins(100) has no entry for this device', () => {
@@ -126,7 +152,7 @@ describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
   it('no synthetic twin history is generated', () => {
     mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Gas Sensor 1' } });
     mockUseLatestTwins.mockReturnValue({
-      data: [{ deviceId: 'dev-1', quality: 'GOOD', value: 42 }],
+      data: [{ deviceId: 'dev-1', reportedState: { TEMPERATURE: { value: 42, unit: 'CELSIUS', lastSeen: '2026-01-01T00:00:00Z', quality: 'GOOD' } } }],
     });
 
     render(<DigitalTwinTab deviceId="dev-1" />);

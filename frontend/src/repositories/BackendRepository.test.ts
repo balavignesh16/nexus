@@ -68,18 +68,18 @@ describe('BackendDeviceRepository - deviceType mapping', () => {
  * which meant it silently returned [] against the real backend, always.
  */
 describe('BackendTelemetryRepository - parses the real backend response shape', () => {
-  const originalFetch = global.fetch;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    global.fetch = vi.fn();
+    globalThis.fetch = vi.fn();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
   });
 
   function mockRecordsResponse() {
-    (global.fetch as any).mockResolvedValue({
+    (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({
         records: [
@@ -114,7 +114,7 @@ describe('BackendTelemetryRepository - parses the real backend response shape', 
   });
 
   it('getTelemetryHistory returns an honest empty array when the device has no telemetry, not a parsing error', async () => {
-    (global.fetch as any).mockResolvedValue({
+    (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ records: [], returnedCount: 0, hasMore: false }),
     });

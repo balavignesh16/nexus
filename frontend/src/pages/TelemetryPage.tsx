@@ -19,11 +19,17 @@ import { DataSourceBadge } from '../components/ui/DataSourceBadge';
 
 type ChartPoint = { time: string; value: number; timestamp: number };
 
+// Real bound: these must match the backend's CapabilityType enum names
+// exactly (the literal sensorType strings telemetry records carry), never
+// the legacy "*_SENSOR" device-type naming - a mismatch here silently
+// leaves the chart empty for every device/metric combination.
 const METRIC_OPTIONS = [
-  { value: 'TEMPERATURE_SENSOR', label: 'Temperature Sensor' },
-  { value: 'HUMIDITY_SENSOR', label: 'Humidity Sensor' },
-  { value: 'GAS_SENSOR', label: 'Gas Sensor' },
-  { value: 'MOTION_SENSOR', label: 'Motion Sensor' },
+  { value: 'TEMPERATURE', label: 'Temperature' },
+  { value: 'HUMIDITY', label: 'Humidity' },
+  { value: 'PRESSURE', label: 'Pressure' },
+  { value: 'GAS', label: 'Gas' },
+  { value: 'MOTION', label: 'Motion' },
+  { value: 'BUTTON', label: 'Button' },
 ];
 
 // Real bound: the backend telemetry history endpoint this page consumes
@@ -42,7 +48,7 @@ export default function TelemetryPage() {
   );
 
   const [selectedDevice, setSelectedDevice] = useState<string>('');
-  const [selectedMetric, setSelectedMetric] = useState<string>('TEMPERATURE_SENSOR');
+  const [selectedMetric, setSelectedMetric] = useState<string>('TEMPERATURE');
   const [windowSize, setWindowSize] = useState(25);
 
   // Default to first device if none selected

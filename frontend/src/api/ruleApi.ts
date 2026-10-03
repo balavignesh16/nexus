@@ -17,6 +17,8 @@ export interface RuleCondition {
   operator: RuleOperator;
   expectedValue: string;
   capabilityType?: CapabilityType;
+  capabilityKey?: string;
+  unit?: string;
 }
 
 export interface RuleAction {

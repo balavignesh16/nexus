@@ -18,8 +18,18 @@ vi.mock('../hooks/usePolling', () => ({
 }));
 
 const mockCreateRule = vi.fn();
+const mockUpdateRule = vi.fn();
+const mockEnableRule = vi.fn().mockResolvedValue(undefined);
+const mockDisableRule = vi.fn().mockResolvedValue(undefined);
+const mockDeleteRule = vi.fn().mockResolvedValue(undefined);
 vi.mock('../api/ruleApi', () => ({
-  ruleApi: { createRule: (...args: any[]) => mockCreateRule(...args) },
+  ruleApi: {
+    createRule: (...args: any[]) => mockCreateRule(...args),
+    updateRule: (...args: any[]) => mockUpdateRule(...args),
+    enableRule: (...args: any[]) => mockEnableRule(...args),
+    disableRule: (...args: any[]) => mockDisableRule(...args),
+    deleteRule: (...args: any[]) => mockDeleteRule(...args),
+  },
 }));
 
 const mockGetRuleMatchHistory = vi.fn();
@@ -213,5 +223,87 @@ describe('RulesPage - real rules, real matches, no fabrication', () => {
     expect(matchesCall).toBeDefined();
     matchesCall![1]();
     expect(mockGetRuleMatchHistory).toHaveBeenCalledWith(50);
+  });
+
+  // ---------- Rule detail popup + edit-in-place ----------
+
+  it('clicking a rule card opens a detail popup showing its real conditions and actions', () => {
+    mockUseActiveDevices.mockReturnValue({ data: [] });
+    mockPolling({
+      data: [rule({
+        conditions: [
+          { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+          { field: 'VALUE', operator: 'GT', expectedValue: '35', capabilityType: 'TEMPERATURE' },
+        ],
+        actions: [{ actionType: 'SEND_COMMAND', parameters: { deviceId: 'dev-1', capability: 'FAN', command: 'SET_STATE', value: true } }],
+      })],
+      isLoading: false,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+
+    expect(screen.getByText(/TEMPERATURE/)).toBeInTheDocument();
+    expect(screen.getAllByText('SEND_COMMAND').length).toBeGreaterThan(0);
+    expect(screen.getByText('Set FAN to ON on dev-1')).toBeInTheDocument();
+  });
+
+  it('clicking the enable/disable or delete button does not open the detail popup', () => {
+    mockUseActiveDevices.mockReturnValue({ data: [] });
+    mockPolling({ data: [rule()], isLoading: false });
+
+    renderPage();
+    fireEvent.click(screen.getByLabelText('Disable rule'));
+
+    expect(screen.queryByRole('button', { name: /edit rule/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the edit form pre-filled with the real rule from the detail popup, and saves via updateRule (PUT), not createRule (POST)', async () => {
+    mockUpdateRule.mockResolvedValue({});
+    mockUseActiveDevices.mockReturnValue({ data: [] });
+    const refetch = vi.fn();
+    mockPolling({
+      data: [rule({
+        conditions: [{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }],
+        actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'CRITICAL' } }],
+      })],
+      isLoading: false,
+      refetch,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+    fireEvent.click(screen.getByRole('button', { name: /edit rule/i }));
+
+    expect(screen.getByText('Edit Rule')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('High Temp Alert')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockUpdateRule).toHaveBeenCalledWith('r1', expect.objectContaining({
+      name: 'High Temp Alert',
+      conditions: [{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }],
+      actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'CRITICAL' } }],
+    })));
+    expect(mockCreateRule).not.toHaveBeenCalled();
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
+  });
+
+  it('a rule with multiple actions cannot be edited from the detail popup, to avoid silently dropping data', () => {
+    mockUseActiveDevices.mockReturnValue({ data: [] });
+    mockPolling({
+      data: [rule({
+        actions: [
+          { actionType: 'SEND_COMMAND', parameters: { deviceId: 'dev-1', capability: 'BUZZER', command: 'SET_STATE', value: true } },
+          { actionType: 'SEND_COMMAND', parameters: { deviceId: 'dev-1', capability: 'FAN', command: 'SET_STATE', value: true } },
+        ],
+      })],
+      isLoading: false,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText('High Temp Alert'));
+
+    expect(screen.getByRole('button', { name: /edit rule/i })).toBeDisabled();
   });
 });

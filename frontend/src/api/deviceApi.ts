@@ -87,6 +87,7 @@ export interface CreateDeviceCapabilityRequest {
 
 export interface Device {
   id: string;
+  mode?: 'SIMULATED' | 'REAL';
   spaceId: string;
   name: string;
   deviceType: DeviceType;

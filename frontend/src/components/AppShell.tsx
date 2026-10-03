@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
-import { Search, Server, Zap, Settings, LayoutDashboard, Box, Signal, FileJson, TrendingUp, Cpu, Bell, Workflow } from 'lucide-react';
+import { Search, Server, Zap, Settings, LayoutDashboard, Box, Signal, FileJson, TrendingUp, Cpu, Bell, Workflow, Boxes } from 'lucide-react';
 import { DemoScenarioSelector } from './ui/DemoScenarioSelector';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { CommandPalette } from './ui/CommandPalette';
@@ -40,6 +40,15 @@ const NAV_GROUPS = [
     items: [
       { label: 'Rules', icon: FileJson, path: '/rules' },
       { label: 'Actions', icon: Zap, path: '/actions' },
+    ],
+  },
+  {
+    label: 'Framework',
+    items: [
+      { label: 'Capability Definitions', icon: Boxes, path: '/framework/capabilities' },
+      { label: 'Device Templates', icon: Box, path: '/framework/templates' },
+      { label: 'Device Onboarding', icon: Server, path: '/framework/onboarding' },
+      { label: 'Generic Rules', icon: FileJson, path: '/framework/rules' },
     ],
   },
   {
