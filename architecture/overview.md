@@ -16,3 +16,23 @@ NEXUS is a highly decoupled, event-driven Physical Intelligence Framework design
 2. **Decoupled Execution**: Decisions (Rules) are physically and logically separated from execution (Actions).
 3. **Immutability**: Domain events are strictly immutable representations of past occurrences.
 4. **Resiliency**: Validation happens at the edge. The system drops malformed data early to protect the core.
+
+## Phase 1 generic capability runtime
+
+NEXUS now supports reusable MQTT `DeviceTemplate` composition and independent
+`DeviceCapabilityBinding` rows. The three seeded templates reproduce the current
+simulator fixtures exactly; legacy `DeviceCapability` rows remain preserved and
+continue to work for devices with no template.
+
+`RuntimeCapabilityResolver` is the single migration boundary. It resolves an
+explicit binding first and otherwise uses the legacy compatibility adapter.
+Telemetry is normalized and validated through the shared capability validator,
+then stored in additive NUMBER/BOOLEAN/STRING/ENUM/OBJECT columns. Digital Twin
+state carries the same typed value and generic definition/binding identity while
+retaining the legacy numeric fields and API shape.
+
+Rules may use `capabilityKey` alongside legacy `capabilityType`. Generic
+conditions use type-specific operators and typed Twin values; command actions
+converge on the same generic command resolver and preserve the existing MQTT and
+ACK contracts. Template editing/provisioning UI, onboarding, protocol adapters,
+temporal rules, and removal of legacy contracts remain deferred to P1.6+.

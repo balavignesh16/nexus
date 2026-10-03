@@ -1,5 +1,43 @@
 # NEXUS — The Physical Intelligence Framework
 
+## Reproducible development baseline
+
+Supported environment: Java 21 LTS (newer JDKs best-effort), Node.js 22+,
+Python 3.11+, Docker with modern Compose, TimescaleDB 2.16.1/PostgreSQL 16,
+and Mosquitto 2.x. Ports: backend 8080, frontend 5173, MQTT 1883, PostgreSQL
+5432. Copy .env.example to .env for overrides; never commit real keys.
+
+    python start_nexus.py
+    python start_nexus.py --help
+    python start_nexus.py --no-simulator
+    python start_nexus.py --duration 60 --infra-down-on-exit
+    python stop_nexus.py --list
+    python stop_nexus.py --infra
+    python validate_nexus.py --fast
+    python validate_nexus.py --full
+
+Startup rejects occupied ports unless --reuse verifies an independently running
+NEXUS service. A second live orchestrator is always rejected. Readiness is
+bounded; Vite stays on 5173. Ignored .nexus/ contains runtime ownership, logs,
+and validation reports. --clean never removes databases or Docker volumes.
+
+Full validation requires a stopped application environment. For collisions run
+python stop_nexus.py --infra. For readiness or migration failures inspect
+.nexus/logs and .nexus/validation/latest.txt.
+
+Automated end-to-end evidence is an **integrated simulated
+physical-intelligence software loop**, not proof of a physical ESP32 loop.
+
+### Capability-definition foundation
+
+The backend exposes additive capability metadata through GET/POST
+/api/v1/capability-definitions and GET/PUT
+/api/v1/capability-definitions/{id}. Definitions use stable lower-snake-case
+string keys and typed constraints. Active telemetry, Twin, Rule, command,
+frontend, and simulator paths still use CapabilityType compatibility; arbitrary
+new definitions do not yet flow end-to-end. Device templates and runtime
+cutover remain later work.
+
 A framework for transforming physical-world telemetry into contextual intelligence.
 
 ## Core Vision
