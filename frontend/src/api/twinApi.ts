@@ -20,7 +20,7 @@ export interface DigitalTwinResponse {
   }>;
   effectiveState?: Record<string, {
     stateId: string; value: unknown; source: 'REPORTED' | 'DESIRED_UNVERIFIED' | 'NONE';
-    observedValue: unknown; intentValue: unknown;
+    observedValue: unknown; intentValue: unknown; stateQuality?: TwinStateQualityEvidence | null;
   }>;
 }
 
@@ -38,12 +38,37 @@ export interface TwinCapabilityState {
   lastSeen: string;
   quality: string;
   metadata: Record<string, unknown>;
+  stateQuality?: TwinStateQualityEvidence | null;
 }
+
+export interface TwinStateQualityEvidence {
+  state: 'GOOD' | 'STALE' | 'OFFLINE' | 'UNKNOWN';
+  reason: string; evaluatedAt: string; receivedAt: string | null;
+  thresholdSeconds: number; connectivity: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
+}
+
+export interface TwinHistoryItem {
+  transitionId: string; deviceId: string; stateId: string; bindingId: string | null;
+  legacyKey: string | null; capabilityDefinitionId: string | null; capabilityKey: string | null;
+  externalIdentifier: string | null; subtargetKey: string; transitionType: string; source: string;
+  valueType: string; previousValue: unknown; newValue: unknown; previousUnit: string | null;
+  newUnit: string | null; eventTime: string | null; receivedAt: string | null;
+  requestedAt: string | null; acceptedForDispatchAt: string | null;
+  transitionedAt: string; correlationId: string | null; commandId: string | null;
+}
+export interface TwinHistoryPage { items: TwinHistoryItem[]; nextCursor: string | null }
+export interface TwinHistoryFilters { bindingId?: string; legacyKey?: string; transitionType?: string; from?: string; to?: string; limit?: number; cursor?: string }
 
 export const twinApi = {
   getLatestTwins: (limit: number = 100) => 
     apiClient.get<DigitalTwinResponse[]>(`/twins?limit=${limit}`),
   
   getDeviceTwin: (deviceId: string) => 
-    apiClient.get<DigitalTwinResponse>(`/devices/${deviceId}/twin`)
+    apiClient.get<DigitalTwinResponse>(`/devices/${deviceId}/twin`),
+
+  getHistory: (deviceId: string, filters: TwinHistoryFilters = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
+    return apiClient.get<TwinHistoryPage>(`/devices/${deviceId}/twin/history?${query.toString()}`);
+  }
 };

@@ -24,13 +24,15 @@ function BindingEditor({ binding, onSaved }: { binding: DeviceBinding; onSaved: 
   const [unit, setUnit] = useState(binding.unit ?? '');
   const [configuration, setConfiguration] = useState(JSON.stringify(binding.configuration ?? {}, null, 2));
   const [external, setExternal] = useState(JSON.stringify(binding.externalIdentifiers ?? {}, null, 2));
+  const [freshness, setFreshness] = useState(binding.freshnessThresholdSeconds?.toString() ?? '');
   const [error, setError] = useState('');
   const save = async () => {
     setError('');
     try {
       await deviceBindingApi.update(binding.deviceId, binding.id, { enabled, unit: unit || null,
         configuration: JSON.parse(configuration) as Record<string, unknown>,
-        externalIdentifiers: JSON.parse(external) as Record<string, string> });
+        externalIdentifiers: JSON.parse(external) as Record<string, string>,
+        freshnessThresholdSeconds: freshness ? Number(freshness) : null });
       await onSaved();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
@@ -41,6 +43,8 @@ function BindingEditor({ binding, onSaved }: { binding: DeviceBinding; onSaved: 
       <label className="block">Unit <Input value={unit} onChange={e => setUnit(e.target.value)} /></label>
       <label className="block">Effective constraints (JSON) <textarea className="w-full rounded-lg border border-foundation-border bg-transparent p-2 font-mono" rows={3} value={configuration} onChange={e => setConfiguration(e.target.value)} /></label>
       <label className="block">External identifiers (JSON) <textarea className="w-full rounded-lg border border-foundation-border bg-transparent p-2 font-mono" rows={3} value={external} onChange={e => setExternal(e.target.value)} /></label>
+      <label className="block">Freshness override seconds <Input type="number" min={1} value={freshness}
+        placeholder="Inherit template policy" onChange={e => setFreshness(e.target.value)} /></label>
       <p className="text-foundation-muted-fg">The server rejects expansion, ambiguity, and changes that would break active Rules.</p>
       {error && <p role="alert" className="text-danger">{error}</p>}
       <Button size="sm" onClick={() => void save()}>Save binding</Button>

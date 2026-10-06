@@ -36,12 +36,14 @@ export interface TemplateCapability {
 export interface BindingOverride {
   enabled?: boolean; unit?: string | null; configuration?: Record<string, unknown>;
   externalIdentifiers?: Record<string, string>;
+  freshnessThresholdSeconds?: number | null;
 }
 
 export interface DeviceBinding {
   id: string; deviceId: string; capabilityDefinitionId: string; capabilityKey: string;
   templateCapabilityId: string | null; enabled: boolean; unit: string | null;
   configuration: Record<string, unknown>; externalIdentifiers: Record<string, string>;
+  freshnessThresholdSeconds: number | null;
 }
 
 export interface ProvisionDeviceRequest {

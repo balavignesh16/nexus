@@ -1,9 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+
+const mockInvalidateQueries = vi.fn();
+vi.mock('@tanstack/react-query', async () => ({
+  ...(await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query')),
+  useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
+}));
+
+const mockGetHistory = vi.fn();
+vi.mock('../../../../api/twinApi', () => ({
+  twinApi: { getHistory: (...args: any[]) => mockGetHistory(...args) },
+}));
 
 // DiffEditor (Monaco) cannot render in jsdom (needs canvas/workers) - stub it.
 vi.mock('@monaco-editor/react', () => ({
-  DiffEditor: () => <div data-testid="diff-editor-stub" />,
+  DiffEditor: ({ original, modified }: { original?: string; modified?: string }) => <div data-testid="diff-editor-stub">
+    <pre data-testid="diff-original">{original}</pre><pre data-testid="diff-modified">{modified}</pre>
+  </div>,
 }));
 
 // Control the two data hooks DigitalTwinTab depends on, without needing a
@@ -37,8 +50,12 @@ function emptyTwinState() {
 
 describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockUseDeviceTwinState.mockReturnValue(emptyTwinState());
+    mockGetHistory.mockResolvedValue({ items: [], nextCursor: null });
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it('requests twins via useLatestTwins(100), matching the old ["twins", 100] capacity', () => {
     mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Gas Sensor 1' } });
@@ -170,5 +187,65 @@ describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
 
     expect(screen.queryByText('Edit Twin')).not.toBeInTheDocument();
     expect(screen.queryByText('Save Changes')).not.toBeInTheDocument();
+  });
+
+  it.each(['GOOD', 'STALE', 'OFFLINE', 'UNKNOWN'])('renders backend-authoritative %s state quality', (quality) => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Sensor' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {
+      TEMPERATURE: { value: 42, unit: 'C', quality: 'LEGACY', stateQuality: {
+        state: quality, reason: `REASON_${quality}`, evaluatedAt: '2026-01-01T00:00:00Z',
+        receivedAt: '2026-01-01T00:00:00Z', thresholdSeconds: 120, connectivity: 'ONLINE',
+      } },
+    } }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getAllByText(quality).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(new RegExp(`REASON_${quality}`))).toBeInTheDocument();
+  });
+
+  it('uses one nearest-boundary timer to refetch authoritative Twin quality', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Sensor' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {
+      A: { value: 1, quality: 'GOOD', stateQuality: { state: 'GOOD', reason: 'OK', receivedAt: '2026-01-01T00:00:00Z', thresholdSeconds: 10 } },
+      B: { value: 2, quality: 'GOOD', stateQuality: { state: 'GOOD', reason: 'OK', receivedAt: '2026-01-01T00:00:00Z', thresholdSeconds: 20 } },
+    } }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(10_001));
+    expect(mockInvalidateQueries).toHaveBeenCalledTimes(1);
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['twins', 100] });
+  });
+
+  it('loads durable typed history, distinguishes reported/desired, and appends the cursor page', async () => {
+    const reported = { transitionId: 't1', transitionedAt: '2026-01-02T00:00:00Z', transitionType: 'REPORTED_STATE_CHANGED', source: 'TELEMETRY', previousValue: false, newValue: true, previousUnit: null, newUnit: null };
+    const desired = { transitionId: 't2', transitionedAt: '2026-01-01T00:00:00Z', transitionType: 'DESIRED_STATE_CHANGED', source: 'MANUAL_COMMAND', previousValue: { channel: 1 }, newValue: { channel: 2 }, previousUnit: null, newUnit: null };
+    mockGetHistory.mockResolvedValueOnce({ items: [reported], nextCursor: 'next' }).mockResolvedValueOnce({ items: [desired], nextCursor: null });
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Sensor' } });
+    mockUseLatestTwins.mockReturnValue({ data: [] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    fireEvent.click(screen.getByText('Diffs'));
+    await waitFor(() => expect(mockGetHistory).toHaveBeenCalledWith('dev-1', expect.objectContaining({ limit: 50 })));
+    expect(await screen.findByText(/REPORTED_STATE_CHANGED/)).toBeInTheDocument();
+    expect(screen.getByTestId('diff-original')).toHaveTextContent('false');
+    expect(screen.getByTestId('diff-modified')).toHaveTextContent('true');
+    fireEvent.click(screen.getByText('Load more'));
+    await waitFor(() => expect(mockGetHistory).toHaveBeenLastCalledWith('dev-1', expect.objectContaining({ cursor: 'next' })));
+    expect(await screen.findByText(/DESIRED_STATE_CHANGED/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('History transition'), { target: { value: '1' } });
+    expect(screen.getByTestId('diff-original')).toHaveTextContent('"channel": 1');
+    expect(screen.getByTestId('diff-modified')).toHaveTextContent('"channel": 2');
+  });
+
+  it('shows honest empty and API-error history states and resets the filter query', async () => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Sensor' } });
+    mockUseLatestTwins.mockReturnValue({ data: [] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    fireEvent.click(screen.getByText('Diffs'));
+    expect(await screen.findByText('No durable transitions')).toBeInTheDocument();
+    mockGetHistory.mockRejectedValueOnce(new Error('history unavailable'));
+    fireEvent.change(screen.getByLabelText('History transition type'), { target: { value: 'DESIRED_STATE_CHANGED' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('history unavailable');
+    expect(mockGetHistory).toHaveBeenLastCalledWith('dev-1', expect.objectContaining({ transitionType: 'DESIRED_STATE_CHANGED', cursor: undefined }));
   });
 });

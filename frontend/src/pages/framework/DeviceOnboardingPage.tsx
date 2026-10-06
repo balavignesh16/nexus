@@ -119,6 +119,11 @@ export default function DeviceOnboardingPage() {
                   value={config.minimum === undefined ? '' : String(config.minimum)} onChange={e => setNumericConfig(member.capabilityKey, 'minimum', e.target.value)} /></label>
                 <label>Maximum <Input type="number" placeholder={String(member.configuration.maximum ?? cap.maximum ?? '')}
                   value={config.maximum === undefined ? '' : String(config.maximum)} onChange={e => setNumericConfig(member.capabilityKey, 'maximum', e.target.value)} /></label></div>}
+              {cap?.direction === 'READ' && <label>Freshness override seconds (inherit {member.freshnessThresholdSeconds ?? 120})
+                <Input type="number" min={1} max={member.freshnessThresholdSeconds ?? 120}
+                  value={current.freshnessThresholdSeconds ?? ''} placeholder="Inherit"
+                  onChange={e => setOverride(member.capabilityKey, { freshnessThresholdSeconds: e.target.value ? Number(e.target.value) : null })} />
+              </label>}
               {member.capabilityKey === 'relay' && <label>Allowed channels (subset) <Input
                 placeholder={String(member.configuration.channels ?? '')}
                 value={Array.isArray(config.channels) ? config.channels.join(',') : ''}

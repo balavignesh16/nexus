@@ -86,6 +86,7 @@ export default function DeviceTemplatesPage() {
           {members.length === 0 ? <p className="text-sm text-foundation-muted-fg">No capabilities yet.</p> : members.map(member =>
             <div key={member.id} className="rounded-lg border border-foundation-border p-3 text-sm">
               {member.capabilityKey} <span className="text-xs text-foundation-muted-fg">· {member.required ? 'required' : 'optional'} · {member.defaultUnit ?? 'unitless'}</span>
+              <div className="text-xs text-foundation-muted-fg">Freshness: {member.freshnessThresholdSeconds ?? 120}s {selected.compositionLocked ? '(read-only parent policy)' : ''}</div>
               <pre className="text-xs overflow-auto">{JSON.stringify(member.configuration)}</pre>
             </div>)}
           {!selected.compositionLocked && <div className="space-y-2">
@@ -95,7 +96,7 @@ export default function DeviceTemplatesPage() {
               <option key={d.id} value={d.id}>{d.displayName} ({d.direction}, {d.valueType})</option>)}</Select>
             <label className="flex gap-2 text-xs"><input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} /> Required</label>
             <div className="grid sm:grid-cols-2 gap-2"><label className="text-xs">Default unit <Input value={unit} onChange={e => setUnit(e.target.value)} /></label>
-              <label className="text-xs">Freshness seconds (optional metadata) <Input type="number" value={freshness} onChange={e => setFreshness(e.target.value)} /></label></div>
+              <label className="text-xs">Freshness seconds (policy) <Input type="number" min={1} value={freshness} onChange={e => setFreshness(e.target.value)} /></label></div>
             <label className="block text-xs">Constraint narrowing (JSON) <textarea className="w-full rounded-lg border border-foundation-border bg-transparent p-2 font-mono text-xs" value={configuration} onChange={e => setConfiguration(e.target.value)} /></label>
             <Button disabled={busy || !capabilityId} onClick={() => void addCapability()}>Add capability</Button>
           </div>}

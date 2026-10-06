@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDevice, useLatestTwins } from '../../../../hooks/queries';
 import { Box, GitCommit } from 'lucide-react';
 import { DiffEditor } from '@monaco-editor/react';
@@ -9,15 +9,23 @@ import { Card } from '../../../foundation/Card';
 import { GlassPanel } from '../../../foundation/GlassPanel';
 import { Tabs } from '../../../foundation/Tabs';
 import { LoadingBlock } from '../../../foundation/LoadingState';
+import { Button } from '../../../foundation/Button';
+import { Select } from '../../../foundation/Input';
+import { twinApi, type TwinHistoryItem } from '../../../../api/twinApi';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
   const { data: device } = useDevice(deviceId);
   const { data: twins = [] } = useLatestTwins(100);
+  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<'visual' | 'json' | 'diff'>('visual');
   const twinState = useDeviceTwinState(deviceId);
   const connectivity = twinState.connectivity?.status ?? 'UNKNOWN';
-
-  if (!device) return <LoadingBlock className="h-full mt-6" />;
+  const [history, setHistory] = useState<TwinHistoryItem[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyType, setHistoryType] = useState('');
+  const [selectedTransition, setSelectedTransition] = useState(0);
+  const [historyError, setHistoryError] = useState('');
 
   // The API returns one device-level twin with every independently stored
   // capability in reportedState. The latest* fields remain only as a
@@ -25,12 +33,45 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
   const deviceTwin = twins.find((t) => t.deviceId === deviceId);
   const currentTwin = deviceTwin?.reportedState ?? null;
 
+  useEffect(() => {
+    const boundaries = Object.values(currentTwin ?? {}).flatMap(state => {
+      const q = state.stateQuality;
+      return q?.receivedAt && q.state === 'GOOD'
+        ? [new Date(q.receivedAt).getTime() + q.thresholdSeconds * 1000 + 1] : [];
+    });
+    if (!boundaries.length) return;
+    // One timer for the nearest boundary. A boundary that elapsed while this
+    // view/query was inactive is refreshed once immediately (never negatively).
+    const delay = Math.max(0, Math.min(...boundaries) - Date.now());
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ['twins', 100] });
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [currentTwin, queryClient]);
+
+  const loadHistory = useCallback(async (cursor?: string) => {
+    const append = Boolean(cursor);
+    try {
+      const page = await twinApi.getHistory(deviceId, { transitionType: historyType || undefined,
+        limit: 50, cursor });
+      setHistory(rows => append ? [...rows, ...page.items] : page.items);
+      setHistoryCursor(page.nextCursor); setHistoryError('');
+      if (!append) setSelectedTransition(0);
+    } catch (error) { setHistoryError(error instanceof Error ? error.message : String(error)); }
+  }, [deviceId, historyType]);
+  useEffect(() => { if (viewMode === 'diff') void loadHistory(); }, [viewMode, loadHistory]);
+
   // /twins is a current-state snapshot, not a time series - there is no
   // real "previous twin" to diff against from this data source, so Diffs
   // mode honestly shows no changes (current vs. current) rather than
   // fabricating a prior state from an unrelated capability's row.
   const currentJson = currentTwin ? JSON.stringify(currentTwin, null, 2) : '{\n  "status": "No twin data available"\n}';
-  const previousJson = currentJson;
+  const selected = history[selectedTransition];
+  const previousJson = selected ? JSON.stringify({ value: selected.previousValue, unit: selected.previousUnit }, null, 2) : currentJson;
+  const changedJson = selected ? JSON.stringify({ value: selected.newValue, unit: selected.newUnit }, null, 2) : currentJson;
+  const displayedQuality = (state: NonNullable<typeof currentTwin>[string]) => state.stateQuality?.state ?? state.quality;
+
+  if (!device) return <LoadingBlock className="h-full mt-6" />;
 
   return (
     <div className="py-6 flex flex-col gap-4 h-full">
@@ -112,8 +153,10 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
                     return (
                       <div key={key} className="col-span-full rounded-[var(--radius-panel)] p-4" style={{ backgroundColor: 'var(--foundation-surface)', border: '1px solid var(--foundation-border)' }}>
                         <h4 className="text-sm font-semibold capitalize mb-3 pb-2 border-b border-foundation-border text-foundation-fg">{key}</h4>
+                        {'quality' in value && <p className="mb-3 text-xs"><span className="text-foundation-muted-fg">State quality: </span>
+                          <strong>{displayedQuality(value)}</strong>{value.stateQuality?.reason ? ` · ${value.stateQuality.reason}` : ''}</p>}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {Object.entries(value).map(([subKey, subValue]) => (
+                          {Object.entries(value).filter(([subKey]) => subKey !== 'stateQuality' && subKey !== 'quality').map(([subKey, subValue]) => (
                             <div key={subKey} className="flex flex-col gap-1">
                               <span className="text-xs text-foundation-muted-fg">{subKey}</span>
                               <span className="text-sm font-medium text-foundation-fg">{String(subValue)}</span>
@@ -168,11 +211,21 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
         {/* Diff Mode */}
         {viewMode === 'diff' && (
           <div className="h-full flex flex-col">
-            <div className="p-2 border-b border-foundation-border flex items-center gap-4 text-xs">
+            <div className="p-2 border-b border-foundation-border flex items-center gap-3 text-xs flex-wrap">
               <div className="flex items-center gap-2">
                 <GitCommit size={14} style={{ color: 'var(--danger)' }} />
                 <span className="text-foundation-muted-fg">Previous State</span>
               </div>
+              <Select aria-label="History transition type" value={historyType} onChange={event => setHistoryType(event.target.value)}>
+                <option value="">All transitions</option><option value="REPORTED_STATE_CHANGED">Reported</option>
+                <option value="DESIRED_STATE_CHANGED">Desired</option><option value="DESIRED_STATE_CLEARED">Desired cleared</option>
+              </Select>
+              <Select aria-label="History transition" value={selectedTransition} onChange={event => setSelectedTransition(Number(event.target.value))}>
+                {history.length === 0 && <option value={0}>No durable transitions</option>}
+                {history.map((item, index) => <option key={item.transitionId} value={index}>{new Date(item.transitionedAt).toLocaleString()} · {item.transitionType} · {item.source}</option>)}
+              </Select>
+              {historyCursor && <Button variant="outline" onClick={() => void loadHistory(historyCursor)}>Load more</Button>}
+              {historyError && <span role="alert" className="text-danger">{historyError}</span>}
               <div className="flex items-center gap-2">
                 <GitCommit size={14} style={{ color: 'var(--success)' }} />
                 <span className="text-foundation-muted-fg">Current State</span>
@@ -184,7 +237,7 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
                 language="json"
                 theme="vs-dark"
                 original={previousJson}
-                modified={currentJson}
+                modified={changedJson}
                 options={{
                   readOnly: true,
                   minimap: { enabled: false },

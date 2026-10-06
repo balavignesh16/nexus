@@ -61,6 +61,7 @@ describe('useDeviceTwinState - Step 9C: connectivity stays live once realtime is
   it('a real DeviceOnline/DeviceOffline push updates the connectivity value live, without waiting for the next REST poll', async () => {
     mockGetDeviceConnectivity.mockResolvedValue({ deviceId: 'dev-1', status: 'OFFLINE', lastChangedAt: '2026-01-01T00:00:00Z' });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
 
     const { result } = renderHook(() => useDeviceTwinState('dev-1'), { wrapper: wrapper(client) });
     await waitFor(() => expect(result.current.connectivity?.status).toBe('OFFLINE'));
@@ -69,6 +70,8 @@ describe('useDeviceTwinState - Step 9C: connectivity stays live once realtime is
     act(() => connectivityHandler!({ deviceId: 'dev-1', status: 'ONLINE' }));
 
     await waitFor(() => expect(result.current.connectivity?.status).toBe('ONLINE'));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['twins', 12] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['twins', 100] });
   });
 
   it('a live push never fabricates a new lastChangedAt timestamp - it preserves the last real value the backend reported', async () => {

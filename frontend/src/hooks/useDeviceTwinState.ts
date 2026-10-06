@@ -50,6 +50,10 @@ export function useDeviceTwinState(deviceId: string): DeviceTwinState {
     queryClient.setQueryData<DeviceConnectivityResult>(['device-connectivity', deviceId], (old) =>
       old ? { ...old, status: payload.status } : { deviceId, status: payload.status, lastChangedAt: null }
     );
+    // Quality is backend-authoritative and connectivity-sensitive. Refetch the
+    // Twin projections instead of deriving/recolouring stateQuality locally.
+    void queryClient.invalidateQueries({ queryKey: ['twins', 12] });
+    void queryClient.invalidateQueries({ queryKey: ['twins', 100] });
   });
 
   const telemetryQuery = usePolling<any[]>(
