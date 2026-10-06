@@ -7,6 +7,7 @@ provision_devices.py have both been run.
 """
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -14,9 +15,9 @@ import uuid
 
 import pytest
 
-BACKEND_URL = "http://localhost:8080/api/v1"
-MQTT_BROKER = "localhost"
-MQTT_PORT = 1883
+BACKEND_URL = os.environ.get("NEXUS_LIVE_BACKEND_URL", "http://localhost:8080/api/v1")
+MQTT_BROKER = os.environ.get("NEXUS_LIVE_MQTT_HOST", "localhost")
+MQTT_PORT = int(os.environ.get("NEXUS_LIVE_MQTT_PORT", "1883"))
 
 
 def _backend_reachable() -> bool:
@@ -50,13 +51,21 @@ def _get(path: str):
 
 
 def _find_simulated_device_with_write_capability(capability_type: str):
+    # A database can contain several ACTIVE/SIMULATED devices with the same
+    # capability. Only an explicitly identified *running* simulator instance
+    # is a valid live ACK target; the first database row is not evidence of
+    # an MQTT subscriber for that device ID.
+    variable = f"NEXUS_LIVE_{capability_type}_SERIAL"
+    serial = os.environ.get(variable)
+    if not serial:
+        pytest.skip(f"set {variable} to the serial of the running MQTT simulator")
     for candidate in _get("/devices/active"):
-        if candidate.get("mode") != "SIMULATED":
+        if candidate.get("mode") != "SIMULATED" or candidate.get("serialNumber") != serial:
             continue
         for cap in candidate.get("capabilities", []):
             if cap["capabilityType"] == capability_type and cap["direction"] == "WRITE":
                 return candidate
-    return None
+    pytest.fail(f"{variable}={serial} is not an ACTIVE SIMULATED device with {capability_type}/WRITE")
 
 
 def _find_simulated_device_with_capabilities(min_read_capabilities: int = 1):
