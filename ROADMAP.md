@@ -10,7 +10,7 @@ the status checkboxes and decision log as work progresses.
 |---|---|---|
 | 0 | Clean baseline and reliable development workflow | Complete |
 | 1 | Generic device and capability framework | Complete |
-| 2 | Complete Digital Twin engine | Not started |
+| 2 | Complete Digital Twin engine | In progress |
 | 3 | Production-grade Rule Engine | Not started |
 | 4 | Reliable event and action pipeline | Not started |
 | 5 | Device adapter and SDK layer | Not started |
@@ -37,10 +37,10 @@ NEXUS currently provides:
 - Operational frontend views.
 - A passing frontend test suite and TypeScript build.
 
-The main remaining extensibility constraint is that capability types and value
-formats are still substantially code-defined. Multiple device instances are
-supported, but introducing a genuinely new kind of component can require changes
-across the backend, frontend, and simulator.
+Phase 1 added configuration-driven generic capabilities and typed values.
+Legacy capability types and the current ESP simulator profiles remain
+code-defined compatibility paths. Twin intent, state history, quality, and
+convergence are the next gaps; a generic readback mapping is not yet present.
 
 ---
 
@@ -106,7 +106,7 @@ Implementation status:
 Introduce a capability-definition model containing:
 
 - Stable capability key, such as `temperature`, `motion`, or `motor_speed`.
-- Direction: `READ`, `WRITE`, or `READ_WRITE`.
+- Direction: currently `READ` or `WRITE` (`READ_WRITE` is not implemented).
 - Value type: number, boolean, string, enum, or object.
 - Unit and allowed units.
 - Numeric minimum and maximum.
@@ -121,7 +121,7 @@ Example:
 ```json
 {
   "key": "motor_speed",
-  "direction": "READ_WRITE",
+  "direction": "WRITE",
   "valueType": "NUMBER",
   "unit": "RPM",
   "minimum": 0,
@@ -192,7 +192,8 @@ Separate:
 
 - `reportedState`: what the device reports.
 - `desiredState`: what NEXUS wants the device to become.
-- `effectiveState`: the resolved operational state.
+- `effectiveState`: a derived structured resolution showing observed fact,
+  desired intent, and verification separately; never a third writable truth.
 - Connectivity state.
 - Twin metadata.
 - Per-capability quality and freshness.
@@ -210,8 +211,9 @@ Example actuator state:
 }
 ```
 
-A difference between desired and reported state represents pending or failed
-convergence.
+A difference between desired and reported state is exposed without hiding the
+observation. P2.4 will classify convergence; P2.1 does not infer it from ACKs
+or simple value equality.
 
 ### 2.2 State history
 
@@ -232,8 +234,11 @@ Support configurable per-capability quality:
 - `GOOD`
 - `STALE`
 - `OFFLINE`
-- `INVALID`
 - `UNKNOWN`
+
+Rejected input is tracked as ingestion health, not automatically as invalid
+current Twin state. The existing age-only `quality` response field stays
+compatible; P2.3 proposes additive `stateQuality`.
 
 Freshness thresholds must be capability-specific. A motion signal and a firmware
 version should not use the same expiration policy.
@@ -245,8 +250,9 @@ For writable capabilities:
 1. Desired state changes.
 2. A command is generated.
 3. The device acknowledges it.
-4. The device reports the resulting physical state.
-5. The Twin becomes converged.
+4. An explicitly mapped READ capability reports state (where supported).
+5. A valid, fresh matching readback may establish current-state convergence;
+   ACK alone never does. Write-only capabilities remain `UNVERIFIED`.
 
 ### Exit criteria
 
@@ -255,6 +261,11 @@ For writable capabilities:
 - [ ] State changes include history and correlation IDs.
 - [ ] Failed convergence is visible and actionable.
 - [ ] Stale state cannot silently drive safety-critical rules.
+
+P2.1 foundation is implemented and committed: V21 desired
+intent, pre-publish durable command acceptance, and derived effective state.
+Final implementation review passed on 2026-10-05. P2.2 history, P2.3 quality,
+and P2.4 convergence remain open.
 
 ---
 
@@ -364,7 +375,8 @@ Prevent lost, duplicated, or untraceable physical actions.
   - `REJECTED`
   - `TIMED_OUT`
   - `FAILED`
-  - `CONVERGED`
+- [ ] Track physical-state `CONVERGED` separately as Twin verification, not a
+  command-delivery lifecycle status.
 - [ ] Add configurable retry policies.
 - [ ] Add dead-letter handling.
 - [ ] Add device command timeouts.
@@ -627,6 +639,8 @@ Record roadmap approvals and meaningful scope decisions here.
 |---|---|---|
 | 2026-09-22 | Initial detailed roadmap captured for review. | Awaiting user confirmation before implementation. |
 | 2026-10-03 | Commit the completed Phase 1 work in scoped stages. | Approved by user; no tag, push, or Phase 2 implementation. |
+| 2026-10-03 | Review Twin 2.0 P2.0 contract against source. | Corrected direction, transaction, quality, history, and convergence semantics; P2.1 remains subject to user approval. |
+| 2026-10-05 | Perform final P2.1 implementation review. | Approved after one frontend status-contract correction and stronger rollback, uniqueness, and concurrency evidence; no P2.2 work. |
 
 ## Progress notes
 
@@ -652,3 +666,10 @@ Use this section for concise updates after each implementation session.
   framework backend, frontend, simulator tests, hardware test files, and
   simulated-results artifacts were committed separately. Phase 1 acceptance
   is complete; Phase 2 implementation has not started.
+- 2026-10-03: P2.0 baseline/contract work started. Isolated ACK tracing found
+  a live-test device-selection defect; focused regression and 10 repeated
+  LED/RELAY live runs passed after a narrow test fix. Twin 2.0 schema,
+  persistence, API, UI, and P2.1+ implementation have not started. The
+  supervised app was briefly stopped for full validation, which passed
+  with 747 backend and 417 frontend tests; it was then restarted healthy.
+  P2.0 contract is ready for review, not yet approved by the user.

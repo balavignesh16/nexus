@@ -437,3 +437,81 @@ numbers that were initially wrong and had to be reconciled against raw SQL).
 - No tag or push was made, and Phase 2 implementation has not started. The
   earlier uncommitted notes above describe the state at the time of the live
   acceptance run.
+
+## 16. P2.0 planning and relay ACK diagnosis (2026-10-03; uncommitted)
+
+- Current baseline: `c1c3a3c`, V20, clean at start. The normal supervised
+  development stack remains on 8080/5173/5432/1883; do not stop it casually.
+- The old live ACK test selected the first active matching device, which can
+  be an orphan with no simulator subscriber. A red/green selector regression
+  proves the defect. Tests now require explicit running simulator serials.
+- Disposable isolated backend/DB/broker on 18080/15432/11883 gave 10/10
+  LED and 10/10 RELAY full command-to-persisted-ACK traces, plus 10/10 each
+  using the fixed live tests. No device hardware was actuated.
+- Phase 2 baseline, current Twin inventory, proposed contract, and P2.1–P2.4
+  tickets live under `architecture/phase2/`. These are planning documents;
+  no V21 migration, Twin 2 endpoint, or P2.1 implementation exists.
+- Post-fix fast and full validation passed. For full validation, the
+  supervised app was briefly stopped without stopping DB/broker, then
+  restarted healthy. Full: 747 backend tests, 417 frontend tests, simulator
+  54 passed/3 live-stack skips, legacy deterministic loop, isolated MQTT
+  ACK, and restart/persistence smokes all passed. Isolated live ACK evidence
+  is recorded separately. P2.0 contract awaits user review; no commit/tag/
+  push requested.
+
+## 17. P2.0 final contract review (2026-10-03; uncommitted)
+
+- Reviewed all Phase 2 documents against current binding, Twin, telemetry,
+  command, ACK, Rule, frontend, and migration code. The current direction enum
+  is READ/WRITE only; V17 permits one binding per device/definition. Legacy
+  bindings were backfilled; truly unbound rows need an explicit fallback.
+- Corrected the proposed contract to separate command lifecycle from Twin
+  verification, keep legacy `quality` fields unchanged while adding future
+  `stateQuality`, require explicit WRITE→READ readback mapping, and specify a
+  pre-publish ActionHistory+desired acceptance transaction for P2.1. Current
+  code publishes before ActionHistory persistence; this is a future change,
+  not a current claim. Phase 4 outbox/recovery remains deferred.
+- P2.1–P2.4 tickets and ROADMAP were reconciled. No V21, runtime behavior,
+  new endpoint, or frontend UI was implemented. No commit/tag/push.
+
+## 18. P2.1 Stage 2 implementation (2026-10-03; uncommitted)
+
+- Stage-1 delta report was approved with explicit PostgreSQL uniqueness,
+  ActionHistory lifecycle authority, FK, concurrency, and acceptance-status
+  constraints. P2.1 implementation is review-ready on top of the dirty P2.0
+  worktree; none of the P2.0 edits were discarded.
+- V21 adds `current_desired_twin_state` separately from `digital_twins`.
+  Non-null canonical target/subtarget keys form the primary key, with a
+  binding/legacy XOR check. `command_id` references ActionHistory's actual
+  `request_id` primary key. Delivery status remains in ActionHistory.
+- Manual and Rule SEND_COMMAND use one coordinator. Acceptance locks the
+  device row and commits ActionHistory `ACCEPTED_FOR_DISPATCH` plus current
+  desired in a `REQUIRES_NEW` transaction before MQTT publish. Publish result
+  and ACK use field-specific updates, preserving a fast ACK. Publish failure
+  retains desired intent; a crash after commit remains delivery-unknown.
+- Twin `/api/v1` responses add desired and derived effective maps while
+  retaining reported keys and legacy `latest*` fields. Desired is DB-read on
+  request, including after restart. No P2.2 history, P2.3 quality, P2.4
+  convergence, outbox, or READ_WRITE direction has been added.
+- Focused migration, MQTT command, rollback, restart, concurrency, late-ACK,
+  and generic type-safety tests were added. Fast and final full validation
+  passed, including complete backend, frontend, simulator, deterministic loop,
+  isolated MQTT command/ACK, and restart smoke gates. No commit, tag, or push.
+
+## 19. P2.1 final implementation review (2026-10-05; uncommitted)
+
+- Final source/schema/test review approved P2.1 against the P2.0 contract.
+  V21 is additive, uses non-null canonical target/subtarget keys, enforces
+  binding-vs-legacy XOR, and links `command_id` to the ActionHistory primary
+  key. PostgreSQL regression coverage now explicitly proves duplicate legacy
+  and RELAY-channel behavior as well as bound/no-subtarget uniqueness.
+- One compatibility defect was corrected: the shared frontend
+  `ExecutionStatus` type now includes `ACCEPTED_FOR_DISPATCH`. Review also
+  strengthened deterministic evidence that acceptance-transaction failure
+  cannot publish and that later durable acceptance wins under real concurrent
+  same-target requests.
+- Final validation passed: 767 backend tests (0 failures/errors/skips), 417
+  frontend tests, and 54 simulator tests with three explicit live-stack skips.
+  Deterministic physical-intelligence loop, isolated MQTT command/ACK, and
+  restart/persistence smokes passed. This is simulator/software evidence, not
+  physical actuation. No P2.2-P2.4 implementation, commit, tag, or push.
