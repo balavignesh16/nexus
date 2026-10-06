@@ -7,6 +7,8 @@ import com.nexus.event.domain.DomainEventRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class DomainEventPersister implements EventListener {
@@ -30,6 +32,7 @@ public class DomainEventPersister implements EventListener {
     }
 
     @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onEvent(DomainEvent event) {
         repository.save(event);
     }

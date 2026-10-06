@@ -54,7 +54,7 @@ public class ActionExecutionEngine {
             boolean durablyAcceptedCommand = false;
             ActionExecutionResult result;
             if (request.actionType() == ActionType.SEND_COMMAND && commandDispatch != null) {
-                CommandDispatchCoordinator.Outcome outcome = commandDispatch.dispatch(request, context);
+                CommandDispatchCoordinator.Outcome outcome = commandDispatch.dispatch(request, context,correlationId);
                 result = outcome.result();
                 durablyAcceptedCommand = outcome.accepted();
             } else {

@@ -5,6 +5,8 @@ import com.nexus.pipeline.domain.PipelineTraceRepository;
 import com.nexus.realtime.RealtimePublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,7 @@ public class PipelineService {
     /**
      * Record a pipeline trace. Saves to the database and broadcasts via RealtimePublisher.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordTrace(PipelineTrace trace) {
         repository.save(trace);
         realtimePublisher.publishPipelineTrace(trace);

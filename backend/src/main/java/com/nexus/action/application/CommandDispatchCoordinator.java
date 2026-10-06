@@ -18,11 +18,11 @@ public class CommandDispatchCoordinator {
         this.acceptance=acceptance; this.executor=executor; this.actions=actions;
     }
 
-    public Outcome dispatch(ActionExecutionRequest request, ActionContext context) {
+    public Outcome dispatch(ActionExecutionRequest request, ActionContext context,String correlationId) {
         Instant requestedAt = Instant.now();
         CommandExecutor.PreparedCommand prepared;
         try {
-            prepared = acceptance.accept(request, context, requestedAt);
+            prepared = acceptance.accept(request, context, requestedAt,correlationId);
         } catch (CommandExecutor.CommandRejectedException e) {
             return new Outcome(new ActionExecutionResult(request.requestId(), request,
                     ExecutionStatus.FAILURE, Instant.now(), e.getMessage()), false);

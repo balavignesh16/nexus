@@ -25,10 +25,17 @@ import com.nexus.shared.exception.ResourceNotFoundException;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class TelemetryService {
+    private static final Logger log=LoggerFactory.getLogger(TelemetryService.class);
 
     private final TelemetryRepository telemetryRepository;
     private final DeviceRepository deviceRepository;
@@ -39,6 +46,7 @@ public class TelemetryService {
     private final CapabilityValueValidator capabilityValueValidator;
     private final OnboardingLifecycleService onboarding;
     private final BindingConstraintService bindingConstraints;
+    private final Clock clock;
 
     public TelemetryService(TelemetryRepository telemetryRepository, DeviceRepository deviceRepository,
                             DigitalTwinService digitalTwinService, RealtimePublisher realtimePublisher,
@@ -51,7 +59,16 @@ public class TelemetryService {
                             PipelineService pipelineService, RuntimeCapabilityResolver capabilityResolver,
                             CapabilityValueValidator capabilityValueValidator) {
         this(telemetryRepository, deviceRepository, digitalTwinService, realtimePublisher, pipelineService,
-                capabilityResolver, capabilityValueValidator, null, null);
+                capabilityResolver, capabilityValueValidator, null, null, Clock.systemUTC());
+    }
+
+    public TelemetryService(TelemetryRepository telemetryRepository, DeviceRepository deviceRepository,
+                            DigitalTwinService digitalTwinService, RealtimePublisher realtimePublisher,
+                            PipelineService pipelineService, RuntimeCapabilityResolver capabilityResolver,
+                            CapabilityValueValidator capabilityValueValidator,
+                            OnboardingLifecycleService onboarding, BindingConstraintService bindingConstraints) {
+        this(telemetryRepository,deviceRepository,digitalTwinService,realtimePublisher,pipelineService,
+                capabilityResolver,capabilityValueValidator,onboarding,bindingConstraints,Clock.systemUTC());
     }
 
     @Autowired
@@ -59,7 +76,8 @@ public class TelemetryService {
                             DigitalTwinService digitalTwinService, RealtimePublisher realtimePublisher,
                             PipelineService pipelineService, RuntimeCapabilityResolver capabilityResolver,
                             CapabilityValueValidator capabilityValueValidator,
-                            OnboardingLifecycleService onboarding, BindingConstraintService bindingConstraints) {
+                            OnboardingLifecycleService onboarding, BindingConstraintService bindingConstraints,
+                            Clock clock) {
         this.telemetryRepository = telemetryRepository;
         this.deviceRepository = deviceRepository;
         this.digitalTwinService = digitalTwinService;
@@ -69,10 +87,12 @@ public class TelemetryService {
         this.capabilityValueValidator = capabilityValueValidator;
         this.onboarding = onboarding;
         this.bindingConstraints = bindingConstraints;
+        this.clock=clock;
     }
 
     @Transactional
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
+        Instant receivedAt=clock.instant();
         Device device = deviceRepository.findById(request.deviceId())
                 .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Device", request.deviceId().toString()));
 
@@ -115,17 +135,19 @@ public class TelemetryService {
         );
 
         telemetryRepository.save(record);
-
-        // Broadcast telemetry in real time
-        realtimePublisher.publishTelemetry(record, correlationId);
-
-        // Pipeline trace for F7.5 visualization
-        pipelineService.recordTrace(
-                PipelineTrace.of(correlationId, request.deviceId().toString(), PipelineStage.TELEMETRY, stageStart, "SUCCESS",
-                        request, java.util.Map.of("sensorType", record.getSensorType(), "value", request.value(),"resolutionSource",resolved.resolutionSource().name())));
-
-        // Update Digital Twin
-        digitalTwinService.updateTwin(normalized, correlationId);
+        DigitalTwinService.Mutation mutation=digitalTwinService.prepareUpdate(normalized,correlationId,receivedAt);
+        afterCommit(() -> {
+            digitalTwinService.projectAfterCommit(mutation);
+            try {
+                realtimePublisher.publishTelemetry(record,correlationId);
+                pipelineService.recordTrace(PipelineTrace.of(correlationId,request.deviceId().toString(),PipelineStage.TELEMETRY,
+                        stageStart,"SUCCESS",request,java.util.Map.of("sensorType",record.getSensorType(),"value",request.value(),
+                        "resolutionSource",resolved.resolutionSource().name())));
+            } catch(RuntimeException failure) {
+                log.error("Post-commit telemetry publication failed device={}",request.deviceId(),failure);
+            }
+            digitalTwinService.publishAfterProjection(mutation);
+        });
 
         if (onboarding != null && device.getStatus() != DeviceStatus.ACTIVE)
             onboarding.completeFirstTelemetry(device.getId());
@@ -144,9 +166,19 @@ public class TelemetryService {
         if (!(request.value() instanceof Number number)) throw new IllegalArgumentException("Legacy telemetry value must be numeric");
         String correlationId=UUID.randomUUID().toString(); long stageStart=System.currentTimeMillis();
         var record=new TelemetryRecord(UUID.randomUUID(),request.deviceId(),request.timestamp(),request.sensorType(),number.doubleValue(),request.unit());
-        telemetryRepository.save(record); realtimePublisher.publishTelemetry(record,correlationId);
-        pipelineService.recordTrace(PipelineTrace.of(correlationId,request.deviceId().toString(),PipelineStage.TELEMETRY,stageStart,"SUCCESS",request,java.util.Map.of("sensorType",request.sensorType(),"value",request.value())));
-        digitalTwinService.updateTwin(request,correlationId); return TelemetryResponse.from(record);
+        telemetryRepository.save(record);
+        afterCommit(()->{realtimePublisher.publishTelemetry(record,correlationId);
+            pipelineService.recordTrace(PipelineTrace.of(correlationId,request.deviceId().toString(),PipelineStage.TELEMETRY,stageStart,"SUCCESS",request,java.util.Map.of("sensorType",request.sensorType(),"value",request.value())));
+            digitalTwinService.updateTwin(request,correlationId);});
+        return TelemetryResponse.from(record);
+    }
+
+    private static void afterCommit(Runnable work) {
+        if(TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
+                @Override public void afterCommit(){work.run();}
+            });
+        } else work.run();
     }
 
     public List<TelemetryResponse> getLatestTelemetry(int limit) {
