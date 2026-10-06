@@ -515,3 +515,25 @@ numbers that were initially wrong and had to be reconciled against raw SQL).
   Deterministic physical-intelligence loop, isolated MQTT command/ACK, and
   restart/persistence smokes passed. This is simulator/software evidence, not
   physical actuation. No P2.2-P2.4 implementation, commit, tag, or push.
+
+## 20. P2.2 + P2.3 combined implementation (2026-10-06; committed)
+
+- Baseline was `be58f7c` on `main`; the three approved Phase 2 design-document
+  edits were already dirty and were preserved. No firmware, hardware, or
+  result artifact was modified.
+- V22 canonicalizes reported identity to stable binding/legacy `state_key`,
+  deterministically archives and removes alias losers, and adds durable typed
+  reported/desired transition history. Current state and history share the
+  device-row-locked transaction; cache and all publications occur after commit.
+- The history endpoint uses descending `(transitionedAt,transitionId)` keyset
+  pagination with bounded, versioned, filter-bound cursors. The frontend Diffs
+  mode now renders this durable source with filters and Load more.
+- V23 records exact backend receipt time without fabricating a backfill, adds
+  validated narrowing-only binding freshness, derives explainable
+  GOOD/STALE/OFFLINE/UNKNOWN state, gates generic and legacy capability Rules
+  on GOOD, and exposes quality/freshness in the UI.
+- Post-commit downstream persistence was made transactionally independent for
+  domain events, Rule matches, action history, and pipeline traces. Focused
+  action, generic MQTT, and legacy MQTT loop regressions pass with this order.
+- P2.4 convergence, an outbox/retry subsystem, new realtime topics, and
+  READ_WRITE remain out of scope. Five implementation commits were created; no tag or push was made.

@@ -39,8 +39,9 @@ NEXUS currently provides:
 
 Phase 1 added configuration-driven generic capabilities and typed values.
 Legacy capability types and the current ESP simulator profiles remain
-code-defined compatibility paths. Twin intent, state history, quality, and
-convergence are the next gaps; a generic readback mapping is not yet present.
+code-defined compatibility paths. Twin intent, durable state history, and
+capability quality are implemented; convergence and generic readback mapping
+remain the next Twin gaps.
 
 ---
 
@@ -217,6 +218,11 @@ or simple value equality.
 
 ### 2.2 State history
 
+Implementation status: **Complete (committed).** V22 provides stable
+binding/legacy identity, deterministic alias reconciliation with an audit
+archive, durable typed transitions, after-commit projection/publication, a
+cursor history API, and a database-backed Twin diff UI.
+
 Persist Twin transitions so the framework can answer:
 
 - What changed?
@@ -228,6 +234,11 @@ Persist Twin transitions so the framework can answer:
 This history will enable real Twin diff mode.
 
 ### 2.3 Quality and freshness
+
+Implementation status: **Complete (committed).** V23 captures exact
+backend receipt time, adds a narrowing-only binding override, derives
+GOOD/STALE/OFFLINE/UNKNOWN evidence, gates capability-backed Rules on GOOD, and
+surfaces policy and quality in the framework UI.
 
 Support configurable per-capability quality:
 
@@ -258,14 +269,14 @@ For writable capabilities:
 
 - [ ] A multi-capability Twin survives restart without losing state.
 - [ ] Desired and reported state are separately inspectable.
-- [ ] State changes include history and correlation IDs.
+- [x] State changes include history and correlation IDs.
 - [ ] Failed convergence is visible and actionable.
-- [ ] Stale state cannot silently drive safety-critical rules.
+- [x] Stale state cannot silently drive safety-critical rules.
 
-P2.1 foundation is implemented and committed: V21 desired
-intent, pre-publish durable command acceptance, and derived effective state.
-Final implementation review passed on 2026-10-05. P2.2 history, P2.3 quality,
-and P2.4 convergence remain open.
+P2.1 foundation is implemented and committed: V21 desired intent,
+pre-publish durable command acceptance, and derived effective state. Final
+implementation review passed on 2026-10-05. P2.2 history and P2.3 quality are
+implemented together, final-review approved, and committed; P2.4 convergence remains open.
 
 ---
 

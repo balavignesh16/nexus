@@ -1,15 +1,14 @@
 # Proposed Twin 2.0 contract — P2.0 review draft
 
-**Reviewed design only.** P2.1–P2.4 must implement/test this before it becomes an API
-guarantee. No V21 migration, new endpoint, or new realtime topic exists yet.
+**Implemented contract through P2.3.** P2.1/V21, P2.2/V22, and P2.3/V23 are implemented. P2.4 must still
+implement/test their sections before those sections become API guarantees.
 Existing Twin routes and `latest*` summaries remain additive/compatible.
 
 **CURRENT BEHAVIOR:** `CapabilityDirection` has only `READ` and `WRITE`;
-`digital_twins` and its cache are keyed by `(deviceId, latestSensorType)`.
-ActionHistory is written synchronously **after** direct MQTT publish, and its
-`SUCCESS` means publish success, not durable pre-publish acceptance. The current
-ACK timestamp is device-supplied, not backend receipt time. The design below
-does not describe current runtime behavior.
+reported `digital_twins` and its cache are still keyed by `(deviceId,
+latestSensorType)`. P2.1 durably accepts ActionHistory plus current desired
+state before MQTT publish. Existing API `SUCCESS` still means publish success.
+The current ACK timestamp is device-supplied, not backend receipt time.
 
 ## Identity and authority
 
@@ -24,9 +23,28 @@ V17 backfilled legacy DeviceCapability bindings using their IDs. For a truly
 unbound legacy row, use `(deviceId, legacy:CapabilityType)` after the existing
 alias mapping (`*_SENSOR` → canonical type); retain external wire identifier
 separately. Do not merge old and bound state merely because keys match: require
-an explicit one-to-one migration mapping. The current reported map remains
-keyed by external identifier; new `stateId` is additive and does not change
-its keys.
+an explicit one-to-one migration mapping.
+
+**P2.2 canonical reported-state correction:** one READ binding currently
+resolves both its definition key and every configured external-identifier
+value. Because V21 reported persistence is keyed by the raw identifier, one
+binding can already have multiple current rows; unbound legacy aliases such as
+`TEMPERATURE` and `TEMPERATURE_SENSOR` can do the same. V22 therefore makes
+reported current-state identity authoritative too: `(deviceId,bindingId)` or
+`(deviceId,canonicalLegacyType)`. Add non-null `state_key` plus nullable
+`legacy_capability_type`, enforce binding-vs-legacy XOR and primary-key
+uniqueness on `(device_id,state_key)`, and retain the configured canonical
+telemetry key and last raw wire identifier as provenance. The old
+`reportedState` object shape and external-identifier keys remain compatible;
+they are projections of one canonical state, never separate authorities.
+
+Before enabling the constraint, V22 groups existing rows by canonical state
+identity. It selects the current authoritative row by `latest_timestamp DESC`,
+then `last_seen DESC`, then lexical `latest_sensor_type` solely as a
+deterministic tie-breaker. It never uses display name. Every non-winning alias
+row is copied verbatim to a no-retention reconciliation-audit table with the
+chosen state key/reason before removal from current-state storage. No row is
+silently discarded and no synthetic state transition is invented.
 
 **P2 TARGET BEHAVIOR:** a WRITE binding may have a separately defined READ
 binding as readback. This is a validated explicit mapping, including subtarget
@@ -34,7 +52,13 @@ selector and comparable unit/value type, not an assumed `READ_WRITE` direction
 or same-key lookup. Without mapping, convergence is UNVERIFIED. One definition
 cannot serve as both READ and WRITE under today's direction model.
 
-Database is the durable authority; cache is acceleration. Restart reloads
+Database is the durable authority; cache is acceleration. Current-state and
+transition writes commit together. Only after commit may the stable-identity
+cache projection be updated, followed by Twin realtime, Twin/domain events,
+and Rule evaluation. If projection fails, evict that state key and use
+read-through reconstruction from PostgreSQL; log/measure the failure and do
+not roll back durable state. Later realtime/event/Rule failures are logged,
+do not roll back, and receive no automatic retry/outbox in P2.2. Restart reloads
 reported and desired values, command IDs, receipt times, binding policies,
 and pending deadlines, then recomputes quality/effective/convergence. Effective state is
 **never independently writable**. Current `reportedState` map keyed by
@@ -60,6 +84,13 @@ does **not** guarantee delivery after a process crash between commit/publish;
 that state remains `ACCEPTED_FOR_DISPATCH`/delivery unknown until Phase 4
 outbox/recovery work. No claim of reliable queueing is made in P2.1.
 
+Every newly accepted command is a new desired intent. It creates
+`DESIRED_STATE_CHANGED` even when its typed target equals the prior target,
+because `commandId`, `acceptedForDispatchAt`, and source/provenance are part of
+authoritative desired intent. This is intentionally different from a newer
+same-value reported observation, which refreshes timing but creates no
+`REPORTED_STATE_CHANGED` transition.
+
 `effectiveState` is a derived **structured resolution**, not a third truth.
 It exposes `value` and `source` (`REPORTED`, `DESIRED_UNVERIFIED`, or `NONE`),
 plus both `observedValue` and `intentValue`, `stateQuality`, and separate
@@ -84,7 +115,10 @@ In examples, `effective.stateQuality` is the categorical value; top-level
 ## Time, telemetry, and transition rules
 
 `eventTime` is device/source-asserted time; `receivedAt` is backend arrival;
-`transitionedAt` is durable state-commit time. Desired records also contain
+`transitionedAt` is the injected-backend-clock timestamp at which the
+authoritative transition row is created/recorded inside its transaction. It is
+not the PostgreSQL commit timestamp; the row becomes durable only if that
+transaction commits. Desired records also contain
 `requestedAt` and `acceptedForDispatchAt`; command evidence may contain
 `publishedAt` and backend `acknowledgedAt`; readback contains its own
 `readbackEventTime`/`readbackReceivedAt`. Device ACK payload timestamp is
@@ -115,7 +149,8 @@ not command causation.
 | Exact replay ID (if supplied later) | currently may retain; Phase 4 inbox dedupe | no second state update | none | no new Twin event |
 | Same eventTime, different receipt | current raw path may retain | none | none | no new Twin event |
 | Older eventTime for same stateId | current raw path may retain; diagnose OUT_OF_ORDER | none | none | no new Twin event |
-| Invalid/missing/far-future time or value | reject/diagnose | none | none | none |
+| Invalid/missing time or invalid value | reject/diagnose | none | none | none |
+| Valid typed value with eventTime beyond configured future skew | retain and diagnose | none | none | none |
 | Unknown capability | reject/diagnose | none | none | none |
 
 P2.2 persists `REPORTED_STATE_CHANGED`, `DESIRED_STATE_CHANGED`, and
@@ -128,11 +163,24 @@ without new input; diagnostics may track it separately. Controlled sources:
 TELEMETRY. Never a free-form UI label. A transition has `transitionId`,
 device/state identity, type/source, typed previous/new value and unit,
 applicable times, `correlationId`, and optional proven `commandId`.
+Normal current telemetry uses `TELEMETRY`; `DEVICE_READBACK` is never inferred
+from value equality and is not emitted until P2.4 supplies an explicit mapping.
+
+Raw `TelemetryReceived` realtime and successful TELEMETRY pipeline traces mean
+accepted/persisted telemetry, not an ingestion attempt: invalid attempts emit
+neither today. P2.2 therefore moves both after successful commit as well. A
+post-commit publication/trace failure is logged and does not roll back or retry
+the raw/current/history transaction.
 
 Proposed **P2.2-only** API:
 `GET /api/v1/devices/{deviceId}/twin/history?bindingId=<uuid>&legacyKey=<key>&transitionType=<type>&from=<instant>&to=<instant>&limit=50&cursor=<opaque>`.
 At most one capability selector; stable order `(transitionedAt DESC,
 transitionId DESC)` and opaque cursor for keyset pagination; max limit 200.
+The cursor contains version, recorded `transitionedAt`, transition UUID, and a
+canonical filter fingerprint; it is bounded, URL-safe base64 without padding,
+and unsigned. Malformed or filter-mismatched cursors return the existing
+structured 400 response. `transitionId` is only the deterministic tie-breaker
+when recorded timestamps tie.
 Response: `{ "items": [transition], "nextCursor": null }`. Indexes follow
 the actual queries: `(device_id, transitioned_at DESC, transition_id DESC)`,
 `(device_id, binding_id, transitioned_at DESC, transition_id DESC)` and a
@@ -158,6 +206,19 @@ the parent threshold. Quality is evaluated at a supplied backend clock time
 from last **valid receivedAt**, not device eventTime. This new receipt field
 must be captured at ingress; current `lastSeen` is the Twin write time and
 is retained as a compatibility field.
+
+Template freshness is immutable template-version configuration once any device
+references that template, matching the existing composition lock. Referenced
+template capabilities cannot change freshness. Existing devices keep their
+exact parent policy; their binding override may be tightened, removed to relax
+back to that parent, or otherwise changed only within the parent ceiling and
+existing active-Rule protections. Changing the parent for future devices
+requires a new template identity representing a new immutable revision; the
+current code has no in-place fork/version operation for referenced templates,
+and no generic composition editor is introduced. An unreferenced template may
+change freshness through the existing
+capability update API. The UI exposes only a narrow freshness control for an
+unreferenced capability and renders referenced parent policy read-only.
 
 | Reported value | Connectivity | Freshness | `stateQuality` |
 |---|---|---|---|
