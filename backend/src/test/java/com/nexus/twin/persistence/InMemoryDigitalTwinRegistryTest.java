@@ -107,7 +107,7 @@ class InMemoryDigitalTwinRegistryTest {
     }
 
     private DigitalTwinId idFor(UUID deviceId) {
-        return new DigitalTwinId(deviceId, SENSOR_TYPE);
+        return new DigitalTwinId(deviceId, "legacy:TEMPERATURE");
     }
 
     @Test
@@ -233,9 +233,9 @@ class InMemoryDigitalTwinRegistryTest {
         assertEquals(1012.0, registry.get(device.getId(), "PRESSURE").orElseThrow().latestValue());
 
         // Real persistence, not just cache.
-        assertEquals(25.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "TEMPERATURE")).orElseThrow().latestValue());
-        assertEquals(60.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "HUMIDITY")).orElseThrow().latestValue());
-        assertEquals(1012.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "PRESSURE")).orElseThrow().latestValue());
+        assertEquals(25.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "legacy:TEMPERATURE")).orElseThrow().latestValue());
+        assertEquals(60.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "legacy:HUMIDITY")).orElseThrow().latestValue());
+        assertEquals(1012.0, digitalTwinRepository.findById(new DigitalTwinId(device.getId(), "legacy:PRESSURE")).orElseThrow().latestValue());
 
         // The device-level (no sensorType) lookup returns the most recent
         // across all capabilities - PRESSURE, since it was updated last.

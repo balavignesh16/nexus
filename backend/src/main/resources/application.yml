@@ -36,6 +36,9 @@ mqtt:
     command-ack: nexus/devices/+/commands/ack
 
 nexus:
+  twin:
+    maximum-future-skew: ${TWIN_MAXIMUM_FUTURE_SKEW:PT5M}
+    default-freshness-threshold: ${TWIN_DEFAULT_FRESHNESS_THRESHOLD:PT120S}
   retention:
     telemetry-days: 30
     pipeline-days: 7

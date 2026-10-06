@@ -6,6 +6,8 @@ import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.twin.domain.DigitalTwin;
 import com.nexus.twin.domain.DigitalTwinRegistry;
 import com.nexus.twin.domain.TwinUpdatedEvent;
+import com.nexus.device.capability.definition.CapabilityValueType;
+import com.nexus.device.binding.runtime.CapabilityResolutionSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -147,6 +149,20 @@ class DigitalTwinServiceTest {
 
         verify(registry, never()).put(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void semanticEqualityTreatsValueTypeChangeAsAStateChange() throws Exception {
+        UUID deviceId=UUID.randomUUID();
+        UUID bindingId=UUID.randomUUID();
+        Instant now=Instant.now();
+        DigitalTwin stringState=new DigitalTwin(deviceId,now,"mode","wire","AUTO",null,now,now,Map.of(),
+                UUID.randomUUID(),bindingId,"mode",CapabilityValueType.STRING,CapabilityResolutionSource.GENERIC_BINDING);
+        DigitalTwin enumState=new DigitalTwin(deviceId,now.plusSeconds(1),"mode","wire","AUTO",null,now,now,Map.of(),
+                stringState.capabilityDefinitionId(),bindingId,"mode",CapabilityValueType.ENUM,CapabilityResolutionSource.GENERIC_BINDING);
+        var method=DigitalTwinService.class.getDeclaredMethod("meaningfullyChanged",DigitalTwin.class,DigitalTwin.class);
+        method.setAccessible(true);
+        assertEquals(true,method.invoke(null,stringState,enumState));
     }
 
     @Test

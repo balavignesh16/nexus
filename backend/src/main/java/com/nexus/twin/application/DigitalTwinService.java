@@ -1,163 +1,175 @@
 package com.nexus.twin.application;
 
-import com.nexus.pipeline.domain.PipelineTrace;
-import com.nexus.pipeline.domain.PipelineStage;
+import com.nexus.device.domain.DeviceRepository;
 import com.nexus.pipeline.application.PipelineService;
+import com.nexus.pipeline.domain.PipelineStage;
+import com.nexus.pipeline.domain.PipelineTrace;
 import com.nexus.realtime.RealtimePublisher;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.NormalizedTelemetry;
-import com.nexus.twin.domain.DigitalTwin;
-import com.nexus.twin.domain.DigitalTwinRegistry;
-import com.nexus.twin.domain.TwinUpdatedEvent;
+import com.nexus.twin.domain.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.beans.factory.annotation.Value;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class DigitalTwinService {
-
-    private static final Logger log = LoggerFactory.getLogger(DigitalTwinService.class);
+    private static final Logger log=LoggerFactory.getLogger(DigitalTwinService.class);
 
     private final DigitalTwinRegistry registry;
-    private final ApplicationEventPublisher eventPublisher;
-    private final RealtimePublisher realtimePublisher;
-    private final PipelineService pipelineService;
+    private final ApplicationEventPublisher events;
+    private final RealtimePublisher realtime;
+    private final PipelineService pipeline;
+    private final DigitalTwinRepository repository;
+    private final TwinStateTransitionRepository transitions;
+    private final DeviceRepository devices;
+    private final Clock clock;
+    @Value("${nexus.twin.maximum-future-skew:PT5M}")
+    private Duration maximumFutureSkew=Duration.ofMinutes(5);
+    private final ConcurrentHashMap<UUID,Object> deviceLocks=new ConcurrentHashMap<>();
 
-    // Tier 3 Phase 5: per-device lock objects guarding the
-    // get -> timestamp-check -> construct -> put sequence in updateTwin()
-    // below, so that sequence is atomic per device within this backend
-    // instance (see updateTwin()'s own Javadoc for why this is needed).
-    //
-    // Lifecycle: entries are created once per distinct deviceId ever seen
-    // and never removed. This is acceptable at current NEXUS scale because
-    // the number of devices is small and bounded by the Site/Building/Space
-    // hierarchy in the database - it does not grow with telemetry volume,
-    // unlike, say, a per-message or per-request map would. This mirrors
-    // DigitalTwinRegistry's own twin cache, which is one entry per
-    // device/capability pair and is never evicted either. A distributed lock, an eviction
-    // policy, or a lock-striping library would be premature complexity for
-    // a single-instance deployment with this device-count profile; if NEXUS
-    // is ever horizontally scaled across multiple backend instances, this
-    // in-JVM lock stops being sufficient and a database-level mechanism
-    // (optimistic locking or a conditional atomic UPDATE) would be required
-    // instead - deliberately left as a documented future option, not part
-    // of this phase.
-    private final ConcurrentHashMap<UUID, Object> deviceLocks = new ConcurrentHashMap<>();
+    public record Mutation(DigitalTwin previous, DigitalTwin current, String correlationId,
+            long stageStart, boolean updated, boolean futureDated) {}
 
-    public DigitalTwinService(DigitalTwinRegistry registry, ApplicationEventPublisher eventPublisher,
-                              RealtimePublisher realtimePublisher, PipelineService pipelineService) {
-        this.registry = registry;
-        this.eventPublisher = eventPublisher;
-        this.realtimePublisher = realtimePublisher;
-        this.pipelineService = pipelineService;
+    public DigitalTwinService(DigitalTwinRegistry registry, ApplicationEventPublisher events,
+            RealtimePublisher realtime, PipelineService pipeline) {
+        this(registry,events,realtime,pipeline,null,null,null,Clock.systemUTC());
     }
 
-    /**
-     * Updates the digital twin if the incoming telemetry is strictly newer
-     * than the current twin's state. Broadcasts delta to WebSocket clients.
-     * <p>
-     * The read-check-write sequence (read the current twin, decide whether
-     * the incoming timestamp is newer, construct the replacement, write it
-     * back) is guarded by a per-device lock (Tier 3 Phase 5). Without this,
-     * two concurrent updates for the same device (reachable today via
-     * concurrent calls to POST /api/v1/telemetry, since Tomcat's request
-     * threads are not serialized per device the way Paho's single MQTT
-     * callback thread is) could both read the same prior state, both pass
-     * the newer-timestamp check against that same stale state, and then
-     * write in either order - allowing an older-timestamped update to win
-     * over one that was already independently accepted as newer. Only the
-     * state decision and state replacement are held under the lock; the
-     * downstream event/realtime/pipeline-trace work below intentionally
-     * runs after the lock is released, since it does not need to be
-     * serialized and does not participate in the race being fixed here.
-     *
-     * @param request       The incoming telemetry request
-     * @param correlationId Links this update to the originating telemetry event
-     */
-    public void updateTwin(TelemetryRequest request, String correlationId) {
-        updateTwin(new NormalizedTelemetry(request.deviceId(),request.timestamp(),request.capabilityKey()!=null?request.capabilityKey():request.sensorType(),request.sensorType(),request.value(),request.unit(),null),correlationId);
+    @Autowired
+    public DigitalTwinService(DigitalTwinRegistry registry, ApplicationEventPublisher events,
+            RealtimePublisher realtime, PipelineService pipeline, DigitalTwinRepository repository,
+            TwinStateTransitionRepository transitions, DeviceRepository devices, Clock clock) {
+        this.registry=registry; this.events=events; this.realtime=realtime; this.pipeline=pipeline;
+        this.repository=repository; this.transitions=transitions; this.devices=devices; this.clock=clock;
     }
 
-    public void updateTwin(NormalizedTelemetry request, String correlationId) {
-        UUID deviceId = request.deviceId();
-        Object lock = deviceLocks.computeIfAbsent(deviceId, id -> new Object());
+    @Transactional
+    public void updateTwin(TelemetryRequest request,String correlationId) {
+        String identity=request.capabilityKey()!=null?request.capabilityKey():request.sensorType();
+        Mutation result=prepareUpdate(new NormalizedTelemetry(request.deviceId(),request.timestamp(),identity,
+                request.sensorType(),request.value(),request.unit(),null),correlationId,clock.instant());
+        afterCommit(() -> publishAfterCommit(result));
+    }
 
-        DigitalTwin newTwin;
-        DigitalTwin previousTwin;
-        Instant now;
-        long stageStart;
+    @Transactional
+    public void updateTwin(NormalizedTelemetry request,String correlationId) {
+        Mutation mutation=prepareUpdate(request,correlationId,clock.instant());
+        afterCommit(() -> publishAfterCommit(mutation));
+    }
 
-        synchronized (lock) {
-            // Phase 11: out-of-order protection is scoped to the same real
-            // sensorType - a newer HUMIDITY reading must never be compared
-            // against (or overwrite) an unrelated TEMPERATURE reading's
-            // timestamp/state for the same device.
-            Optional<DigitalTwin> currentTwinOpt = registry.get(deviceId, request.externalIdentifier());
-
-            if (currentTwinOpt.isPresent()) {
-                DigitalTwin currentTwin = currentTwinOpt.get();
-                if (!request.timestamp().isAfter(currentTwin.latestTimestamp())) {
-                    log.debug("Ignored out-of-order telemetry for device {}. Current: {}, Incoming: {}",
-                            deviceId, currentTwin.latestTimestamp(), request.timestamp());
-                    return;
-                }
-            }
-
-            now = Instant.now();
-            stageStart = System.currentTimeMillis();
-
-            newTwin = request.resolved()==null ? new DigitalTwin(
-                    deviceId,
-                    request.timestamp(),
-                    request.externalIdentifier(),
-                    request.value() instanceof Number n ? n.doubleValue() : null,
-                    request.unit(),
-                    now,
-                    Map.of()
-            ) : new DigitalTwin(deviceId,request.timestamp(),request.externalIdentifier(),request.value(),request.unit(),now,Map.of(),
-                    request.resolved().definition().getId(),request.resolved().binding()==null?null:request.resolved().binding().getId(),request.capabilityKey(),
-                    request.resolved().definition().getValueType(),request.resolved().resolutionSource());
-
-            registry.put(newTwin);
-            previousTwin = currentTwinOpt.orElse(null);
+    public Mutation prepareUpdate(NormalizedTelemetry request,String correlationId,Instant receivedAt) {
+        long stageStart=System.currentTimeMillis();
+        String stateKey=stateKey(request);
+        if (request.timestamp().isAfter(receivedAt.plus(maximumFutureSkew))) {
+            log.warn("Ignoring future-dated Twin candidate device={} stateKey={} eventTime={} receivedAt={}",
+                    request.deviceId(),stateKey,request.timestamp(),receivedAt);
+            return new Mutation(null,null,correlationId,stageStart,false,true);
         }
-
-        // Broadcast delta (only changed fields) to WebSocket clients
-        realtimePublisher.publishTwinDelta(previousTwin, newTwin, correlationId);
-
-        // Pipeline trace
-        pipelineService.recordTrace(
-                PipelineTrace.of(correlationId, deviceId.toString(), PipelineStage.TWIN, stageStart, "SUCCESS",
-                        newTwin, Map.of("sensorType", request.externalIdentifier(), "value", request.value())));
-
-        TwinUpdatedEvent event = new TwinUpdatedEvent(
-                deviceId,
-                now,
-                previousTwin,
-                newTwin,
-                correlationId
-        );
-        eventPublisher.publishEvent(event);
-        log.debug("Twin updated for device {}. TwinUpdatedEvent published.", deviceId);
+        synchronized(deviceLocks.computeIfAbsent(request.deviceId(),ignored->new Object())) {
+        if (devices!=null) devices.findByIdForUpdate(request.deviceId()).orElseThrow();
+        Optional<DigitalTwin> existing=repository!=null
+                ? repository.findByDeviceIdAndStateKey(request.deviceId(),stateKey)
+                : registry.get(request.deviceId(),request.externalIdentifier());
+        if(existing.isPresent()&&!request.timestamp().isAfter(existing.get().latestTimestamp())) {
+            log.debug("Ignored replay/out-of-order telemetry device={} stateKey={}",request.deviceId(),stateKey);
+            return new Mutation(existing.get(),null,correlationId,stageStart,false,false);
+        }
+        Instant now=clock.instant();
+        String apiKey=configuredApiKey(request);
+        var resolved=request.resolved();
+        DigitalTwin next=resolved==null
+                ? new DigitalTwin(request.deviceId(),request.timestamp(),apiKey,request.value() instanceof Number n?n.doubleValue():null,
+                    request.unit(),now,Map.of())
+                : new DigitalTwin(request.deviceId(),request.timestamp(),apiKey,request.externalIdentifier(),request.value(),request.unit(),
+                    now,receivedAt,Map.of(),resolved.definition().getId(),resolved.binding()==null?null:resolved.binding().getId(),
+                    request.capabilityKey(),resolved.definition().getValueType(),resolved.resolutionSource());
+        DigitalTwin previous=existing.orElse(null);
+        if(repository!=null) {
+            repository.saveAndFlush(next);
+            if(meaningfullyChanged(previous,next)) transitions.save(TwinStateTransition.reported(previous,next,correlationId,now));
+        } else registry.put(next);
+        return new Mutation(previous,next,correlationId,stageStart,true,false);
+        }
     }
 
-    public Optional<DigitalTwin> getTwin(UUID deviceId) {
-        return registry.get(deviceId);
+    public void publishAfterCommit(Mutation mutation) {
+        if(mutation==null||!mutation.updated()||mutation.current()==null)return;
+        projectAfterCommit(mutation);
+        publishAfterProjection(mutation);
     }
 
-    public List<DigitalTwin> getTwinCapabilities(UUID deviceId) {
-        return registry.getAllForDevice(deviceId);
+    public void projectAfterCommit(Mutation mutation) {
+        if(mutation==null||!mutation.updated()||mutation.current()==null)return;
+        DigitalTwin next=mutation.current();
+        if(repository!=null) {
+            try { registry.project(next); }
+            catch(RuntimeException projectionFailure) {
+                registry.evict(next.deviceId(),next.stateKey());
+                log.error("Twin cache projection failed; evicted device={} stateKey={}",next.deviceId(),next.stateKey(),projectionFailure);
+            }
+        }
     }
 
-    public List<DigitalTwin> getAllTwins() {
-        return registry.listAll();
+    public void publishAfterProjection(Mutation mutation) {
+        if(mutation==null||!mutation.updated()||mutation.current()==null)return;
+        DigitalTwin next=mutation.current();
+        try {
+            realtime.publishTwinDelta(mutation.previous(),next,mutation.correlationId());
+            pipeline.recordTrace(PipelineTrace.of(mutation.correlationId(),next.deviceId().toString(), PipelineStage.TWIN,
+                    mutation.stageStart(),"SUCCESS",next,Map.of("sensorType",next.latestSensorType(),"value",next.typedValue())));
+            events.publishEvent(new TwinUpdatedEvent(next.deviceId(),clock.instant(),mutation.previous(),next,mutation.correlationId()));
+        } catch(RuntimeException failure) {
+            log.error("Post-commit Twin publication failed device={} stateKey={}",next.deviceId(),next.stateKey(),failure);
+        }
     }
+
+    private static boolean meaningfullyChanged(DigitalTwin previous,DigitalTwin next) {
+        if(previous==null)return true;
+        return previous.valueType()!=next.valueType()
+                ||!Objects.equals(normalize(previous.typedValue()),normalize(next.typedValue()))
+                ||!Objects.equals(previous.latestUnit(),next.latestUnit())
+                ||!Objects.equals(previous.metadata(),next.metadata());
+    }
+    private static Object normalize(Object value){
+        if(value instanceof Number n)return new java.math.BigDecimal(n.toString()).stripTrailingZeros();
+        return value;
+    }
+    private static String stateKey(NormalizedTelemetry request) {
+        if(request.resolved()!=null&&request.resolved().binding()!=null)return "binding:"+request.resolved().binding().getId();
+        String key=request.externalIdentifier().toUpperCase(Locale.ROOT);
+        if(key.endsWith("_SENSOR"))key=key.substring(0,key.length()-7);
+        return "legacy:"+key;
+    }
+    private static String configuredApiKey(NormalizedTelemetry request) {
+        if(request.resolved()!=null&&request.resolved().binding()!=null) {
+            Object configured=request.resolved().binding().getExternalIdentifiers().get("telemetryKey");
+            if(configured!=null&&!configured.toString().isBlank())return configured.toString();
+        }
+        return request.capabilityKey()!=null?request.capabilityKey():request.externalIdentifier();
+    }
+
+    private static void afterCommit(Runnable work) {
+        if(TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { work.run(); }
+            });
+        } else work.run();
+    }
+
+    public Optional<DigitalTwin> getTwin(UUID id){return registry.get(id);}
+    public List<DigitalTwin> getTwinCapabilities(UUID id){return registry.getAllForDevice(id);}
+    public List<DigitalTwin> getAllTwins(){return registry.listAll();}
 }

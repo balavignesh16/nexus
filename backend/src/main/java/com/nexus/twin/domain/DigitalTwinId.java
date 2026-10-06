@@ -14,22 +14,22 @@ import java.util.UUID;
 public class DigitalTwinId implements Serializable {
 
     private UUID deviceId;
-    private String latestSensorType;
+    private String stateKey;
 
     public DigitalTwinId() {
     }
 
-    public DigitalTwinId(UUID deviceId, String latestSensorType) {
+    public DigitalTwinId(UUID deviceId, String stateKey) {
         this.deviceId = deviceId;
-        this.latestSensorType = latestSensorType;
+        this.stateKey = stateKey;
     }
 
     public UUID getDeviceId() {
         return deviceId;
     }
 
-    public String getLatestSensorType() {
-        return latestSensorType;
+    public String getStateKey() {
+        return stateKey;
     }
 
     @Override
@@ -37,11 +37,11 @@ public class DigitalTwinId implements Serializable {
         if (this == o) return true;
         if (!(o instanceof DigitalTwinId)) return false;
         DigitalTwinId that = (DigitalTwinId) o;
-        return Objects.equals(deviceId, that.deviceId) && Objects.equals(latestSensorType, that.latestSensorType);
+        return Objects.equals(deviceId, that.deviceId) && Objects.equals(stateKey, that.stateKey);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(deviceId, latestSensorType);
+        return Objects.hash(deviceId, stateKey);
     }
 }

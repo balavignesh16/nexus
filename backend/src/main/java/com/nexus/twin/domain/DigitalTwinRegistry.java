@@ -7,6 +7,15 @@ import java.util.UUID;
 public interface DigitalTwinRegistry {
     void put(DigitalTwin twin);
 
+    /** Projects already-committed state into the acceleration cache. */
+    default void project(DigitalTwin twin) { put(twin); }
+
+    default void evict(UUID deviceId, String stateKey) {}
+
+    default Optional<DigitalTwin> getByStateKey(UUID deviceId, String stateKey) {
+        return getAllForDevice(deviceId).stream().filter(t -> stateKey.equals(t.stateKey())).findFirst();
+    }
+
     /**
      * The most-recently-updated capability row for this device (Phase 11).
      * For a device with only one real sensorType (every device today),

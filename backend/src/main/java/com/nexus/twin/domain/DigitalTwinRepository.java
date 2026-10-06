@@ -9,4 +9,5 @@ import java.util.UUID;
 @Repository
 public interface DigitalTwinRepository extends JpaRepository<DigitalTwin, DigitalTwinId> {
     List<DigitalTwin> findByDeviceId(UUID deviceId);
+    java.util.Optional<DigitalTwin> findByDeviceIdAndStateKey(UUID deviceId, String stateKey);
 }
