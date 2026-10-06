@@ -4,6 +4,9 @@ import com.nexus.event.domain.DomainEvent;
 import com.nexus.event.domain.EventType;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleEvaluationResult;
+import com.nexus.device.capability.definition.CapabilityValueType;
+import com.nexus.twin.domain.DigitalTwin;
+import com.nexus.telemetry.domain.TelemetryRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -102,5 +105,26 @@ class RealtimePublisherTest {
 
         verify(metrics).recordDroppedMessage();
         verify(metrics, never()).recordPublishedMessage();
+    }
+
+    @Test
+    void genericNonnumericTwinAndTelemetryAreNullSafe() {
+        for (var type : List.of(CapabilityValueType.BOOLEAN, CapabilityValueType.STRING,
+                CapabilityValueType.ENUM, CapabilityValueType.OBJECT)) {
+            Object value = switch (type) {
+                case BOOLEAN -> true; case STRING -> "ready"; case ENUM -> "AUTO";
+                case OBJECT -> Map.of("state", true); default -> throw new AssertionError();
+            };
+            UUID device = UUID.randomUUID();
+            Instant now = Instant.now();
+            DigitalTwin twin = new DigitalTwin(device, now, "generic", value, null, now, Map.of(),
+                    UUID.randomUUID(), UUID.randomUUID(), "generic", type, null);
+            TelemetryRecord record = new TelemetryRecord(UUID.randomUUID(), device, now, "generic", value,
+                    null, twin.capabilityDefinitionId(), twin.bindingId(), "generic", type, null);
+            assertDoesNotThrow(() -> publisher.publishTelemetry(record, "corr"));
+            assertDoesNotThrow(() -> publisher.publishTwinDelta(null, twin, "corr"));
+        }
+        verify(messaging, times(4)).convertAndSend(eq(RealtimeTopics.TELEMETRY), any(RealtimeMessage.class));
+        verify(messaging, times(4)).convertAndSend(eq(RealtimeTopics.TWINS), any(RealtimeMessage.class));
     }
 }

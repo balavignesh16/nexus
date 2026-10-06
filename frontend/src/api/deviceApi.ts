@@ -119,6 +119,7 @@ export interface UpdateDeviceRequest {
 }
 
 export const ExecutionStatus = {
+  ACCEPTED_FOR_DISPATCH: 'ACCEPTED_FOR_DISPATCH',
   SUCCESS: 'SUCCESS',
   FAILURE: 'FAILURE',
   IGNORED: 'IGNORED',

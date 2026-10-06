@@ -6,6 +6,8 @@ import com.nexus.action.domain.ActionExecutionFailedEvent;
 import com.nexus.action.domain.ActionExecutionRequest;
 import com.nexus.action.domain.ActionExecutionResult;
 import com.nexus.action.domain.ExecutionStatus;
+import com.nexus.action.domain.ActionType;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.nexus.pipeline.domain.PipelineTrace;
 import com.nexus.pipeline.domain.PipelineStage;
 import com.nexus.pipeline.application.PipelineService;
@@ -28,19 +30,36 @@ public class ActionExecutionEngine {
     private final ApplicationEventPublisher eventPublisher;
     private final RealtimePublisher realtimePublisher;
     private final PipelineService pipelineService;
+    private final CommandDispatchCoordinator commandDispatch;
 
     public ActionExecutionEngine(ActionExecutorRegistry registry, ApplicationEventPublisher eventPublisher,
                                  RealtimePublisher realtimePublisher, PipelineService pipelineService) {
+        this(registry, eventPublisher, realtimePublisher, pipelineService, null);
+    }
+
+    @Autowired
+    public ActionExecutionEngine(ActionExecutorRegistry registry, ApplicationEventPublisher eventPublisher,
+                                 RealtimePublisher realtimePublisher, PipelineService pipelineService,
+                                 CommandDispatchCoordinator commandDispatch) {
         this.registry = registry;
         this.eventPublisher = eventPublisher;
         this.realtimePublisher = realtimePublisher;
         this.pipelineService = pipelineService;
+        this.commandDispatch = commandDispatch;
     }
 
     public void process(List<ActionExecutionRequest> requests, ActionContext context, String correlationId) {
         for (ActionExecutionRequest request : requests) {
             long stageStart = System.currentTimeMillis();
-            ActionExecutionResult result = executeSingleRequest(request, context);
+            boolean durablyAcceptedCommand = false;
+            ActionExecutionResult result;
+            if (request.actionType() == ActionType.SEND_COMMAND && commandDispatch != null) {
+                CommandDispatchCoordinator.Outcome outcome = commandDispatch.dispatch(request, context);
+                result = outcome.result();
+                durablyAcceptedCommand = outcome.accepted();
+            } else {
+                result = executeSingleRequest(request, context);
+            }
 
             pipelineService.recordTrace(
                     PipelineTrace.of(correlationId, deviceIdFromRequest(request), PipelineStage.ACTION, stageStart,
@@ -48,10 +67,12 @@ public class ActionExecutionEngine {
 
             // Persist action history (synchronous listener) before broadcasting,
             // so the realtime message is only sent once the result is durable.
-            if (result.status() == ExecutionStatus.FAILURE) {
-                eventPublisher.publishEvent(new ActionExecutionFailedEvent(result, correlationId));
-            } else {
-                eventPublisher.publishEvent(new ActionExecutedEvent(result, correlationId));
+            if (!durablyAcceptedCommand) {
+                if (result.status() == ExecutionStatus.FAILURE) {
+                    eventPublisher.publishEvent(new ActionExecutionFailedEvent(result, correlationId));
+                } else {
+                    eventPublisher.publishEvent(new ActionExecutedEvent(result, correlationId));
+                }
             }
 
             // Broadcast to WebSocket clients

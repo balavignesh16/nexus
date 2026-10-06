@@ -15,8 +15,8 @@ import { ErrorState } from '../components/foundation/ErrorState';
 import { LoadingBlock } from '../components/foundation/LoadingState';
 import { DataSourceBadge } from '../components/ui/DataSourceBadge';
 
-// Real backend ExecutionStatus values: SUCCESS/FAILURE/IGNORED/UNSUPPORTED.
-const STATUS_FILTERS = ['ALL', 'SUCCESS', 'FAILURE', 'IGNORED', 'UNSUPPORTED'];
+// ACCEPTED_FOR_DISPATCH is durable intent; MQTT delivery is not yet known.
+const STATUS_FILTERS = ['ALL', 'ACCEPTED_FOR_DISPATCH', 'SUCCESS', 'FAILURE', 'IGNORED', 'UNSUPPORTED'];
 
 export default function ActionsPage() {
   const { actions } = useRepositories();
@@ -44,6 +44,7 @@ export default function ActionsPage() {
   // uses the real 'FAILURE' spelling; only the displayed label is humanized.
   const getActionStatus = (status: string) => {
     switch (status) {
+      case 'ACCEPTED_FOR_DISPATCH': return { label: 'Delivery unknown', icon: Clock, color: 'var(--warning)' };
       case 'SUCCESS': return { label: 'SUCCESS', icon: CheckCircle2, color: 'var(--success)' };
       case 'FAILURE': return { label: 'Failed', icon: XCircle, color: 'var(--danger)' };
       case 'UNSUPPORTED': return { label: 'Unsupported', icon: XCircle, color: 'var(--warning)' };

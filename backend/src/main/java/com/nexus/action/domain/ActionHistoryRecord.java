@@ -67,17 +67,14 @@ public class ActionHistoryRecord {
         this.message = message;
     }
 
-    /**
-     * Tier 5E: applies a correlated ACK to this row. A plain overwrite -
-     * deliberately idempotent for duplicate/delayed MQTT redelivery (see
-     * DeviceCommandAckMessageHandler) rather than guarded by any prior-state
-     * check, version, or sequence number.
-     */
+    /** Used by fixtures and existing domain callers. Production MQTT ACKs use
+     * a field-specific repository update so they cannot overwrite publish status. */
     public void applyAcknowledgement(AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage) {
         this.ackStatus = ackStatus;
         this.ackReceivedAt = ackReceivedAt;
         this.ackMessage = ackMessage;
     }
+
 
     public static ActionHistoryRecord fromResult(ActionExecutionResult result) {
         ActionExecutionRequest req = result.request();

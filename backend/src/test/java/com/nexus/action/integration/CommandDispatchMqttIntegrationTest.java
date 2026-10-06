@@ -48,6 +48,7 @@ import org.testcontainers.utility.MountableFile;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -114,6 +115,18 @@ class CommandDispatchMqttIntegrationTest {
     private com.nexus.pipeline.domain.PipelineTraceRepository pipelineTraceRepository;
     @Autowired
     private com.nexus.action.application.ActionExecutionEngine actionExecutionEngine;
+    @Autowired
+    private com.nexus.action.application.CommandAcceptanceService commandAcceptanceService;
+    @Autowired
+    private com.nexus.twin.domain.DesiredTwinStateRepository desiredRepository;
+    @Autowired
+    private com.nexus.twin.api.DigitalTwinController twinController;
+    @Autowired
+    private com.nexus.device.command.DeviceCommandAckMessageHandler ackHandler;
+    @Autowired
+    private com.nexus.device.binding.DeviceCapabilityBindingRepository bindings;
+    @Autowired
+    private com.nexus.device.capability.definition.CapabilityDefinitionRepository definitions;
 
     private MqttClient observer;
     private UUID deviceId;
@@ -201,6 +214,151 @@ class CommandDispatchMqttIntegrationTest {
 
         com.nexus.action.domain.ActionHistoryRecord persisted = actionHistoryRepository.findById(response.requestId()).orElseThrow();
         assertNull(persisted.getMatchId(), "the persisted action_history row must have match_id = NULL, not a fabricated value");
+        var desired = desiredRepository.findByDeviceId(deviceId);
+        assertEquals(1, desired.size());
+        assertEquals("legacy:LED", desired.getFirst().getTargetKey());
+        assertEquals(response.requestId(), desired.getFirst().getCommandId());
+        assertEquals(true, desired.getFirst().typedValue());
+        var twin = twinController.getTwin(deviceId).getBody();
+        assertNotNull(twin);
+        assertTrue(twin.reportedState().isEmpty(), "command must not fabricate reported telemetry");
+        assertEquals("DESIRED_UNVERIFIED", twin.effectiveState().get("legacy:LED").source());
+        assertEquals("SUCCESS", twin.desiredState().get("legacy:LED").deliveryStatus());
+    }
+
+    @Test
+    @Timeout(30)
+    void laterAcceptedIntentSupersedesWithoutErasingPriorAction() {
+        var on = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", true);
+        var off = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", false);
+        UUID first = deviceCommandService.dispatchCommand(deviceId, on).requestId();
+        UUID second = deviceCommandService.dispatchCommand(deviceId, off).requestId();
+        var desired = desiredRepository.findByDeviceId(deviceId);
+        assertEquals(1, desired.size());
+        assertEquals(second, desired.getFirst().getCommandId());
+        assertEquals(false, desired.getFirst().typedValue());
+        assertTrue(actionHistoryRepository.findById(first).isPresent());
+    }
+
+    @Test
+    @Timeout(30)
+    void concurrentSameTargetUsesDurableAcceptanceOrder() throws Exception {
+        UUID onId = UUID.randomUUID();
+        UUID offId = UUID.randomUUID();
+        ActionExecutionRequest onRequest = new ActionExecutionRequest(onId, null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "SET_STATE", "value", true));
+        ActionExecutionRequest offRequest = new ActionExecutionRequest(offId, null, ActionType.SEND_COMMAND,
+                Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "SET_STATE", "value", false));
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            var on = pool.submit(() -> {
+                start.await();
+                return commandAcceptanceService.accept(onRequest, new ActionContext(null, null), Instant.now());
+            });
+            var off = pool.submit(() -> {
+                start.await();
+                return commandAcceptanceService.accept(offRequest, new ActionContext(null, null), Instant.now());
+            });
+            start.countDown();
+            on.get(20, TimeUnit.SECONDS);
+            off.get(20, TimeUnit.SECONDS);
+            var current = desiredRepository.findByDeviceId(deviceId);
+            assertEquals(1, current.size());
+            var onAction = actionHistoryRepository.findById(onId).orElseThrow();
+            var offAction = actionHistoryRepository.findById(offId).orElseThrow();
+            assertNotEquals(onAction.getTimestamp(), offAction.getTimestamp(),
+                    "serialized acceptances must retain distinct acceptance instants");
+            UUID laterAccepted = onAction.getTimestamp().isAfter(offAction.getTimestamp()) ? onId : offId;
+            assertEquals(laterAccepted, current.getFirst().getCommandId(),
+                    "the device-row lock must make the later durable acceptance the current desired intent");
+            assertEquals(current.getFirst().getAcceptedForDispatchAt(),
+                    actionHistoryRepository.findById(laterAccepted).orElseThrow().getTimestamp());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    void relayChannelsRemainIndependentUnderConcurrentCommands() throws Exception {
+        deviceCapabilityRepository.save(new DeviceCapability(UUID.randomUUID(), deviceId,
+                CapabilityType.RELAY, CapabilityDirection.WRITE, "BOOLEAN", Map.of("channels", List.of(1, 2))));
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            var first = pool.submit(() -> {
+                start.await();
+                return deviceCommandService.dispatchCommand(deviceId,
+                        new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.RELAY,
+                                "SET_STATE", Map.of("channel", 1, "state", true)));
+            });
+            var second = pool.submit(() -> {
+                start.await();
+                return deviceCommandService.dispatchCommand(deviceId,
+                        new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.RELAY,
+                                "SET_STATE", Map.of("channel", 2, "state", false)));
+            });
+            start.countDown();
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+            assertEquals(java.util.Set.of("channel:1", "channel:2"), desiredRepository.findByDeviceId(deviceId)
+                    .stream().map(com.nexus.twin.domain.DesiredTwinState::getSubtargetKey).collect(java.util.stream.Collectors.toSet()));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    void genericBoundRelayUsesBindingIdentityAndValidatedChannel() {
+        var definition = definitions.findByKey("relay").orElseThrow();
+        UUID bindingId = UUID.randomUUID();
+        bindings.save(new com.nexus.device.binding.DeviceCapabilityBinding(bindingId, deviceId, definition,
+                null, true, "BOOLEAN", Map.of("channels", List.of(1, 2)),
+                Map.of("commandCapability", "RELAY"), Instant.now()));
+        var request = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(null, "SET_STATE",
+                Map.of("channel", 2, "state", true), "relay");
+        var response = deviceCommandService.dispatchCommand(deviceId, request);
+        assertEquals(ExecutionStatus.SUCCESS, response.status());
+        var desired = desiredRepository.findByDeviceId(deviceId);
+        assertEquals(1, desired.size());
+        assertEquals("binding:" + bindingId, desired.getFirst().getTargetKey());
+        assertEquals("channel:2", desired.getFirst().getSubtargetKey());
+    }
+
+    @Test
+    @Timeout(30)
+    void lateAckForSupersededCommandDoesNotRestoreOldDesiredIntent() {
+        var on = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", true);
+        var off = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", false);
+        UUID first = deviceCommandService.dispatchCommand(deviceId, on).requestId();
+        UUID second = deviceCommandService.dispatchCommand(deviceId, off).requestId();
+        String payload = "{\"commandId\":\"" + first + "\",\"status\":\"ACCEPTED\",\"timestamp\":"
+                + Instant.now().getEpochSecond() + "}";
+        ackHandler.handle("nexus/devices/" + deviceId + "/commands/ack",
+                payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(com.nexus.action.domain.AcknowledgementStatus.ACCEPTED,
+                actionHistoryRepository.findById(first).orElseThrow().getAckStatus());
+        var current = desiredRepository.findByDeviceId(deviceId);
+        assertEquals(second, current.getFirst().getCommandId());
+        assertEquals(false, current.getFirst().typedValue());
+    }
+
+    @Test
+    @Timeout(30)
+    void fastAckIsNotOverwrittenByPublishResultUpdate() {
+        UUID command = UUID.randomUUID();
+        actionHistoryRepository.save(new com.nexus.action.domain.ActionHistoryRecord(command, null, deviceId,
+                ActionType.SEND_COMMAND, ExecutionStatus.ACCEPTED_FOR_DISPATCH,
+                Map.of("deviceId", deviceId.toString()), Instant.now(), "accepted"));
+        actionHistoryRepository.updateAcknowledgement(command, deviceId,
+                com.nexus.action.domain.AcknowledgementStatus.ACCEPTED, Instant.now(), null);
+        actionHistoryRepository.updatePublishResultIfAccepted(command, ExecutionStatus.SUCCESS,
+                Instant.now(), "published");
+        var action = actionHistoryRepository.findById(command).orElseThrow();
+        assertEquals(ExecutionStatus.SUCCESS, action.getStatus());
+        assertEquals(com.nexus.action.domain.AcknowledgementStatus.ACCEPTED, action.getAckStatus());
     }
 
     @Test

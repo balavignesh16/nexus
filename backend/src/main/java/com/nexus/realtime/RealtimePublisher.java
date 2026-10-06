@@ -46,13 +46,16 @@ public class RealtimePublisher {
     // ─── Telemetry ────────────────────────────────────────────────────────────
 
     public void publishTelemetry(TelemetryRecord record, String correlationId) {
-        Map<String, Object> payload = Map.of(
-                "deviceId",   record.getDeviceId().toString(),
-                "sensorType", record.getSensorType(),
-                "value",      record.getValue(),
-                "unit",       record.getUnit(),
-                "timestamp",  record.getTimestamp().toEpochMilli()
-        );
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("deviceId", record.getDeviceId().toString());
+        payload.put("sensorType", record.getSensorType());
+        payload.put("value", record.getValue());
+        payload.put("unit", record.getUnit());
+        payload.put("timestamp", record.getTimestamp().toEpochMilli());
+        if (record.getValueType() != null) {
+            payload.put("valueType", record.getValueType().name());
+            payload.put("typedValue", record.getTypedValue());
+        }
         broadcast(RealtimeTopics.TELEMETRY, "TelemetryReceived",
                 record.getDeviceId().toString(), correlationId, payload);
     }
@@ -88,8 +91,13 @@ public class RealtimePublisher {
 
         // Compare value
         Double oldValue = oldTwin != null ? oldTwin.latestValue() : null;
-        if (!newTwin.latestValue().equals(oldValue)) {
+        if (!java.util.Objects.equals(newTwin.latestValue(), oldValue)) {
             deltas.add(new RealtimeDelta("value", oldValue, newTwin.latestValue(), now));
+        }
+        if (newTwin.valueType() != null && newTwin.valueType() != com.nexus.device.capability.definition.CapabilityValueType.NUMBER
+                && !java.util.Objects.equals(newTwin.typedValue(), oldTwin == null ? null : oldTwin.typedValue())) {
+            deltas.add(new RealtimeDelta("typedValue", oldTwin == null ? null : oldTwin.typedValue(),
+                    newTwin.typedValue(), now));
         }
 
         return deltas;

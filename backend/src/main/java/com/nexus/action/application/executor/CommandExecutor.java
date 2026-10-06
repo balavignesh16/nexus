@@ -27,6 +27,7 @@ import com.nexus.device.binding.runtime.CapabilityResolutionSource;
 import com.nexus.device.capability.definition.validation.CapabilityOperation;
 import com.nexus.device.capability.definition.validation.CapabilityValueValidator;
 import com.nexus.device.binding.BindingConstraintService;
+import com.nexus.device.capability.definition.CapabilityValueType;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -67,6 +68,18 @@ import java.util.UUID;
  */
 @Component
 public class CommandExecutor implements ActionExecutor {
+
+    public record PreparedCommand(UUID deviceId, UUID bindingId, String legacyCapabilityType,
+            UUID capabilityDefinitionId, String capabilityKey, CapabilityValueType valueType,
+            String unit, String subtargetKey, String wireCapability, String command, Object value) {
+        public String targetKey() {
+            return bindingId != null ? "binding:" + bindingId : "legacy:" + legacyCapabilityType;
+        }
+    }
+
+    public static class CommandRejectedException extends RuntimeException {
+        public CommandRejectedException(String message) { super(message); }
+    }
 
     private static final Logger log = LoggerFactory.getLogger(CommandExecutor.class);
 
@@ -127,6 +140,14 @@ public class CommandExecutor implements ActionExecutor {
 
     @Override
     public ActionExecutionResult execute(ActionExecutionRequest request, ActionContext context) {
+        try {
+            return publishPrepared(request, prepare(request));
+        } catch (CommandRejectedException e) {
+            return failure(request, e.getMessage());
+        }
+    }
+
+    public PreparedCommand prepare(ActionExecutionRequest request) {
         // context.triggeringEvent()/matchedRule() may be null (a manually
         // triggered command has neither) - deliberately never dereferenced
         // here; this class reads only request.parameters().
@@ -134,40 +155,60 @@ public class CommandExecutor implements ActionExecutor {
 
         UUID deviceId = parseDeviceId(parameters);
         if (deviceId == null) {
-            return failure(request, "Missing or invalid deviceId parameter");
+            throw new CommandRejectedException("Missing or invalid deviceId parameter");
         }
 
         Optional<Device> deviceOpt = deviceRepository.findById(deviceId);
         if (deviceOpt.isEmpty()) {
-            return failure(request, "Device not found: " + deviceId);
+            throw new CommandRejectedException("Device not found: " + deviceId);
         }
         Device device = deviceOpt.get();
 
         if (device.getMode() == DeviceMode.REAL) {
-            return failure(request, "Command dispatch to REAL devices is not yet enabled");
+            throw new CommandRejectedException("Command dispatch to REAL devices is not yet enabled");
         }
 
         String capability = asString(parameters.get("capability"));
         String capabilityKey = asString(parameters.get("capabilityKey"));
         boolean genericBindingResolved = false;
+        UUID bindingId = null;
+        UUID definitionId = null;
+        CapabilityValueType valueType = null;
+        String effectiveUnit = null;
+        String semanticKey = null;
         if (capabilityResolver != null && (capabilityKey != null || capability != null)) {
             try {
                 var resolved = capabilityResolver.resolve(deviceId, capabilityKey != null ? capabilityKey : capability, CapabilityDirection.WRITE);
                 if (capabilityKey != null && capability != null
                         && !capabilityResolver.resolve(deviceId, capability, CapabilityDirection.WRITE).definition().getId().equals(resolved.definition().getId())) {
-                    return failure(request, "capability and capabilityKey conflict");
+                    throw new CommandRejectedException("capability and capabilityKey conflict");
                 }
                 String command = asString(parameters.get("command"));
                 Object value = parameters.get("value");
                 var result = capabilityValueValidator.validate(resolved.definition(), value, resolved.effectiveUnit(), CapabilityOperation.COMMAND, command);
-                if (!result.isValid()) return failure(request, result.errors().getFirst().message());
+                if (!result.isValid()) throw new CommandRejectedException(result.errors().getFirst().message());
                 if (bindingConstraints != null && resolved.binding() != null)
                     bindingConstraints.validateValue(resolved.definition(), resolved.binding().getConfiguration(), value);
+                if ("relay".equals(resolved.definition().getKey())) {
+                    Object configured = resolved.effectiveConstraints().get("channels");
+                    Object rawChannel = value instanceof Map<?, ?> map ? map.get("channel") : null;
+                    if (!(configured instanceof java.util.List<?> channels)
+                            || !(rawChannel instanceof Number channel)
+                            || channel.intValue() < 1 || channel.doubleValue() != channel.intValue()
+                            || channels.stream().noneMatch(c -> c instanceof Number allowed
+                                    && allowed.intValue() == channel.intValue()))
+                        throw new CommandRejectedException("RELAY channel is not configured for this binding");
+                }
                 genericBindingResolved = resolved.resolutionSource() == CapabilityResolutionSource.GENERIC_BINDING;
+                bindingId = resolved.binding() == null ? null : resolved.binding().getId();
+                definitionId = resolved.definition().getId();
+                valueType = resolved.definition().getValueType();
+                effectiveUnit = resolved.effectiveUnit();
+                semanticKey = resolved.definition().getKey();
                 String external = resolved.binding() == null ? null : asString(resolved.binding().getExternalIdentifiers().get("commandCapability"));
                 capability = external != null ? external : resolved.definition().getKey().toUpperCase(java.util.Locale.ROOT);
             } catch (RuntimeException exception) {
-                return failure(request, exception.getMessage());
+                throw new CommandRejectedException(exception.getMessage());
             }
         }
         String command = asString(parameters.get("command"));
@@ -175,34 +216,51 @@ public class CommandExecutor implements ActionExecutor {
         if (!genericBindingResolved) {
             CapabilityType capabilityType = parseCapabilityType(capability);
             if (capabilityType == null) {
-                return failure(request, "Unknown capability: " + capability);
+                throw new CommandRejectedException("Unknown capability: " + capability);
             }
             Optional<DeviceCapability> deviceCapability = deviceCapabilityRepository
                     .findByDeviceIdAndCapabilityTypeAndDirection(deviceId, capabilityType, CapabilityDirection.WRITE);
             if (deviceCapability.isEmpty()) {
-                return failure(request, "Device " + deviceId + " is not authorized for " + capabilityType + " WRITE");
+                throw new CommandRejectedException("Device " + deviceId + " is not authorized for " + capabilityType + " WRITE");
             }
             try {
                 CommandValueValidator.validate(capabilityType, deviceCapability.get(), command, value);
             } catch (CommandValueValidator.CommandValidationException e) {
-                return failure(request, "Unsupported command: capability=" + capability + " command=" + command + " - " + e.getMessage());
+                throw new CommandRejectedException("Unsupported command: capability=" + capability + " command=" + command + " - " + e.getMessage());
             }
+            if (valueType == null) valueType = capabilityType == CapabilityType.SERVO ? CapabilityValueType.NUMBER :
+                    capabilityType == CapabilityType.RELAY ? CapabilityValueType.OBJECT : CapabilityValueType.BOOLEAN;
+            if (semanticKey == null) semanticKey = capabilityType.name().toLowerCase(java.util.Locale.ROOT);
+            if (effectiveUnit == null) effectiveUnit = deviceCapability.get().getUnit();
         }
 
         DeviceConnectivityStatus connectivity = deviceConnectivityRegistry.get(deviceId)
                 .map(c -> c.status())
                 .orElse(null);
         if (connectivity != DeviceConnectivityStatus.ONLINE) {
-            return failure(request, "Device is offline");
+            throw new CommandRejectedException("Device is offline");
         }
 
         if (!mqttClient.isConnected()) {
-            return failure(request, "MQTT backend is not connected");
+            throw new CommandRejectedException("MQTT backend is not connected");
         }
 
+        String legacyType = bindingId == null ? capability : null;
+        String subtarget = "";
+        if ("relay".equals(semanticKey)) {
+            if (!(value instanceof Map<?, ?> map) || !(map.get("channel") instanceof Number n)
+                    || n.intValue() < 1 || n.doubleValue() != n.intValue())
+                throw new CommandRejectedException("RELAY requires a positive integral channel");
+            subtarget = "channel:" + n.intValue();
+        }
+        return new PreparedCommand(deviceId, bindingId, legacyType, definitionId, semanticKey,
+                valueType, effectiveUnit, subtarget, capability, command, value);
+    }
+
+    public ActionExecutionResult publishPrepared(ActionExecutionRequest request, PreparedCommand prepared) {
         try {
-            String topic = String.format(COMMAND_TOPIC_TEMPLATE, deviceId);
-            String payload = buildPayload(request.requestId(), capability, command, value);
+            String topic = String.format(COMMAND_TOPIC_TEMPLATE, prepared.deviceId());
+            String payload = buildPayload(request.requestId(), prepared.wireCapability(), prepared.command(), prepared.value());
             MqttMessage message = new MqttMessage(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             message.setQos(COMMAND_QOS);
             message.setRetained(false);
@@ -217,7 +275,7 @@ public class CommandExecutor implements ActionExecutor {
                     "Command published to MQTT"
             );
         } catch (Exception e) {
-            log.error("Failed to publish command {} for device {}", request.requestId(), deviceId, e);
+            log.error("Failed to publish command {} for device {}", request.requestId(), prepared.deviceId(), e);
             return failure(request, "MQTT publish failed: " + e.getMessage());
         }
     }

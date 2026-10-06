@@ -56,11 +56,7 @@ public class EventDetector {
                     twinEvent.deviceId(),
                     now,
                     "EventDetector",
-                    Map.of(
-                            "sensorType", current.latestSensorType(),
-                            "value", current.latestValue(),
-                            "unit", current.latestUnit()
-                    ),
+                    observationPayload(current),
                     "INFO",
                     twinEvent.correlationId()
             ));
@@ -73,17 +69,13 @@ public class EventDetector {
                 twinEvent.deviceId(),
                 now,
                 "EventDetector",
-                Map.of(
-                        "sensorType", current.latestSensorType(),
-                        "value", current.latestValue(),
-                        "unit", current.latestUnit()
-                ),
+                observationPayload(current),
                 "INFO",
                 twinEvent.correlationId()
         ));
 
         // 3. SENSOR_VALUE_CHANGED
-        if (previous != null) {
+        if (previous != null && previous.latestValue() != null && current.latestValue() != null) {
             double diff = Math.abs(current.latestValue() - previous.latestValue());
             if (diff >= VALUE_CHANGE_THRESHOLD) {
                 detectedEvents.add(new DomainEvent(
@@ -92,12 +84,7 @@ public class EventDetector {
                         twinEvent.deviceId(),
                         now,
                         "EventDetector",
-                        Map.of(
-                                "sensorType", current.latestSensorType(),
-                                "previousValue", previous.latestValue(),
-                                "currentValue", current.latestValue(),
-                                "unit", current.latestUnit()
-                        ),
+                        valueChangePayload(previous, current),
                         "INFO",
                         twinEvent.correlationId()
                 ));
@@ -105,5 +92,22 @@ public class EventDetector {
         }
 
         return detectedEvents;
+    }
+
+    private Map<String,Object> observationPayload(DigitalTwin twin) {
+        Map<String,Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("sensorType", twin.latestSensorType());
+        payload.put("value", twin.typedValue());
+        payload.put("unit", twin.latestUnit());
+        return payload;
+    }
+
+    private Map<String,Object> valueChangePayload(DigitalTwin previous, DigitalTwin current) {
+        Map<String,Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("sensorType", current.latestSensorType());
+        payload.put("previousValue", previous.latestValue());
+        payload.put("currentValue", current.latestValue());
+        payload.put("unit", current.latestUnit());
+        return payload;
     }
 }

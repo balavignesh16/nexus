@@ -99,10 +99,10 @@ public class DeviceCommandAckMessageHandler {
             return;
         }
 
-        // Plain overwrite - deliberately idempotent for duplicate/delayed
-        // QoS 1 redelivery (see ActionHistoryRecord.applyAcknowledgement).
-        record.applyAcknowledgement(status, ackReceivedAt, reason);
-        actionHistoryRepository.save(record);
+        // Update ACK fields only: a concurrent publish-result update must not
+        // erase this ACK, and an ACK never changes the current desired row.
+        if (actionHistoryRepository.updateAcknowledgement(commandId, topicDeviceId,
+                status, ackReceivedAt, reason) == 0) return;
 
         realtimePublisher.publishActionAcknowledged(commandId, topicDeviceId, status, reason, ackReceivedAt);
         log.info("Command {} acknowledged by device {}: {}", commandId, topicDeviceId, status);

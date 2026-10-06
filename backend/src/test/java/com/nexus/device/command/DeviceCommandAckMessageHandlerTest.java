@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -42,6 +43,8 @@ class DeviceCommandAckMessageHandlerTest {
     @BeforeEach
     void setUp() {
         actionHistoryRepository = mock(ActionHistoryRepository.class);
+        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), nullable(String.class)))
+                .thenReturn(1);
         realtimePublisher = mock(RealtimePublisher.class);
         ObjectMapper objectMapper = new ObjectMapper();
         handler = new DeviceCommandAckMessageHandler(actionHistoryRepository, realtimePublisher, objectMapper);
@@ -70,10 +73,8 @@ class DeviceCommandAckMessageHandlerTest {
         String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}";
         handler.handle(topic, bytes(payload));
 
-        assertEquals(AcknowledgementStatus.ACCEPTED, record.getAckStatus());
-        assertEquals(Instant.ofEpochSecond(1735689600), record.getAckReceivedAt());
-        assertNull(record.getAckMessage());
-        verify(actionHistoryRepository).save(record);
+        verify(actionHistoryRepository).updateAcknowledgement(eq(commandId), eq(deviceId),
+                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), nullable(String.class));
         verify(realtimePublisher).publishActionAcknowledged(eq(commandId), eq(deviceId), eq(AcknowledgementStatus.ACCEPTED), any(), any());
     }
 
@@ -90,8 +91,8 @@ class DeviceCommandAckMessageHandlerTest {
         String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"REJECTED\",\"timestamp\":1735689600,\"reason\":\"STALE\"}";
         handler.handle(topic, bytes(payload));
 
-        assertEquals(AcknowledgementStatus.REJECTED, record.getAckStatus());
-        assertEquals("STALE", record.getAckMessage());
+        verify(actionHistoryRepository).updateAcknowledgement(eq(commandId), eq(deviceId),
+                eq(AcknowledgementStatus.REJECTED), eq(Instant.ofEpochSecond(1735689600)), eq("STALE"));
         verify(realtimePublisher).publishActionAcknowledged(eq(commandId), eq(deviceId), eq(AcknowledgementStatus.REJECTED), eq("STALE"), any());
     }
 
@@ -171,8 +172,8 @@ class DeviceCommandAckMessageHandlerTest {
         handler.handle(topic, bytes(payload));
         handler.handle(topic, bytes(payload));
 
-        assertEquals(AcknowledgementStatus.ACCEPTED, record.getAckStatus());
-        verify(actionHistoryRepository, times(2)).save(record);
+        verify(actionHistoryRepository, times(2)).updateAcknowledgement(eq(commandId), eq(deviceId),
+                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), nullable(String.class));
         verify(actionHistoryRepository, times(2)).findById(commandId);
     }
 
@@ -197,7 +198,8 @@ class DeviceCommandAckMessageHandlerTest {
         String topic = "nexus/devices/" + deviceId + "/commands/ack";
         ActionHistoryRecord record = existingRecord(commandId, deviceId);
         when(actionHistoryRepository.findById(commandId)).thenReturn(Optional.of(record));
-        when(actionHistoryRepository.save(any())).thenThrow(new RuntimeException("simulated DB failure"));
+        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("simulated DB failure"));
 
         String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}";
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> handler.handle(topic, bytes(payload)));

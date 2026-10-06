@@ -18,10 +18,10 @@ import java.util.UUID;
 
 /**
  * Tier 5D: the manual (non-rule) command trigger path. Reuses the existing
- * ActionExecutionEngine/CommandExecutor/ActionHistoryRecord pipeline
- * entirely - this class only constructs the request and reads back the
- * durably-persisted result; it duplicates none of the authorization,
- * connectivity, or MQTT-publish logic that already lives in CommandExecutor.
+ * ActionExecutionEngine command path. This class constructs the request and
+ * reads back its durably-persisted action; the engine's command coordinator
+ * accepts ActionHistory plus desired intent before calling CommandExecutor
+ * to publish. Target validation remains in CommandExecutor.prepare().
  *
  * matchId is null (ActionExecutionRequest has no rule match to reference)
  * and ActionContext(null, null) - a manually triggered command genuinely
@@ -64,13 +64,9 @@ public class DeviceCommandService {
                 parameters
         );
 
-        // ActionExecutionEngine.process()'s internal event publication is
-        // synchronous (Spring's default ApplicationEventMulticaster, no
-        // @Async on ActionHistoryPersister) - by the time process() returns,
-        // the ActionHistoryRecord is already durably persisted. This is the
-        // same guarantee ActionExecutionEngineTest's
-        // shouldPersistActionHistoryBeforeBroadcastingRealtimeMessage already
-        // relies on and proves.
+        // SEND_COMMAND acceptance is committed before publish; its publish
+        // result is updated before process() returns. Non-command actions
+        // still use the engine's synchronous ActionHistoryPersister listener.
         actionExecutionEngine.process(List.of(actionRequest), new ActionContext(null, null), requestId.toString());
 
         ActionHistoryRecord record = actionHistoryRepository.findById(requestId)

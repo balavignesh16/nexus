@@ -12,7 +12,7 @@ import { LoadingBlock } from '../../../foundation/LoadingState';
 // Real backend ExecutionStatus values (deviceApi.ts): SUCCESS/FAILURE/
 // IGNORED/UNSUPPORTED - the filter set uses the real 'FAILURE' spelling,
 // not the previous 'FAILED' which never matched a real action.
-const FILTERS = ['ALL', 'SUCCESS', 'FAILURE', 'IGNORED', 'UNSUPPORTED'];
+const FILTERS = ['ALL', 'ACCEPTED_FOR_DISPATCH', 'SUCCESS', 'FAILURE', 'IGNORED', 'UNSUPPORTED'];
 
 export function ActionsTab({ deviceId }: { deviceId: string }) {
   const { actions } = useRepositories();
@@ -29,6 +29,7 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
 
   const getActionIcon = (status: string) => {
     switch (status) {
+      case 'ACCEPTED_FOR_DISPATCH': return <Play size={16} style={{ color: 'var(--warning)' }} />;
       case 'SUCCESS': return <CheckCircle2 size={16} style={{ color: 'var(--success)' }} />;
       case 'FAILURE': return <XCircle size={16} style={{ color: 'var(--danger)' }} />;
       case 'IGNORED':

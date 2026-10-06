@@ -2,6 +2,11 @@ package com.nexus.twin.api;
 
 import com.nexus.twin.api.dto.DigitalTwinResponse;
 import com.nexus.twin.application.DigitalTwinService;
+import com.nexus.twin.domain.DesiredTwinState;
+import com.nexus.twin.domain.DesiredTwinStateRepository;
+import com.nexus.action.domain.ActionHistoryRecord;
+import com.nexus.action.domain.ActionHistoryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,34 +19,57 @@ import java.util.stream.Collectors;
 public class DigitalTwinController {
 
     private final DigitalTwinService twinService;
+    private final DesiredTwinStateRepository desiredRepository;
+    private final ActionHistoryRepository actionRepository;
 
     public DigitalTwinController(DigitalTwinService twinService) {
+        this(twinService, null, null);
+    }
+
+    @Autowired
+    public DigitalTwinController(DigitalTwinService twinService, DesiredTwinStateRepository desiredRepository,
+            ActionHistoryRepository actionRepository) {
         this.twinService = twinService;
+        this.desiredRepository = desiredRepository;
+        this.actionRepository = actionRepository;
     }
 
     @GetMapping("/devices/{deviceId}/twin")
     public ResponseEntity<DigitalTwinResponse> getTwin(@PathVariable UUID deviceId) {
         List<com.nexus.twin.domain.DigitalTwin> states = twinService.getTwinCapabilities(deviceId);
-        if (states.isEmpty()) {
+        List<DesiredTwinState> desired = desiredRepository == null ? List.of() : desiredRepository.findByDeviceId(deviceId);
+        if (states.isEmpty() && desired.isEmpty()) {
             throw new com.nexus.shared.exception.ResourceNotFoundException("DigitalTwin", deviceId.toString());
         }
-        return ResponseEntity.ok(DigitalTwinResponse.from(states));
+        return ResponseEntity.ok(DigitalTwinResponse.from(states, desired, actionsFor(desired)));
     }
 
     @GetMapping("/twins")
     public ResponseEntity<List<DigitalTwinResponse>> getAllTwins(
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
         
-        List<DigitalTwinResponse> twins = twinService.getAllTwins().stream()
-                .limit(limit)
-                .map(twin -> {
-                    List<com.nexus.twin.domain.DigitalTwin> states = twinService.getTwinCapabilities(twin.deviceId());
-                    // A concurrent device removal must not turn a list request
-                    // into a 500 after this representative snapshot was read.
-                    return DigitalTwinResponse.from(states.isEmpty() ? List.of(twin) : states);
-                })
-                .collect(Collectors.toList());
+        java.util.Map<UUID, com.nexus.twin.domain.DigitalTwin> reportedDevices = new java.util.LinkedHashMap<>();
+        for (var twin : twinService.getAllTwins()) reportedDevices.put(twin.deviceId(), twin);
+        java.util.Map<UUID, List<DesiredTwinState>> desiredByDevice = new java.util.LinkedHashMap<>();
+        if (desiredRepository != null) for (DesiredTwinState state : desiredRepository.findAll())
+            desiredByDevice.computeIfAbsent(state.getDeviceId(), ignored -> new java.util.ArrayList<>()).add(state);
+        java.util.LinkedHashSet<UUID> ids = new java.util.LinkedHashSet<>(reportedDevices.keySet());
+        ids.addAll(desiredByDevice.keySet());
+        List<DigitalTwinResponse> twins = ids.stream().limit(limit).map(id -> {
+            var states = twinService.getTwinCapabilities(id);
+            if (states.isEmpty() && reportedDevices.containsKey(id)) states = List.of(reportedDevices.get(id));
+            var desired = desiredByDevice.getOrDefault(id, List.of());
+            return DigitalTwinResponse.from(states, desired, actionsFor(desired));
+        }).collect(Collectors.toList());
                 
         return ResponseEntity.ok(twins);
+    }
+
+    private java.util.Map<UUID, ActionHistoryRecord> actionsFor(List<DesiredTwinState> desired) {
+        if (actionRepository == null || desired.isEmpty()) return java.util.Map.of();
+        java.util.Map<UUID, ActionHistoryRecord> result = new java.util.HashMap<>();
+        for (var action : actionRepository.findAllById(desired.stream().map(DesiredTwinState::getCommandId).toList()))
+            result.put(action.getRequestId(), action);
+        return result;
     }
 }
