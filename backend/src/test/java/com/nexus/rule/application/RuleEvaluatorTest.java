@@ -11,6 +11,9 @@ import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.domain.RuleOperator;
 import com.nexus.twin.domain.DigitalTwin;
 import com.nexus.twin.domain.DigitalTwinRegistry;
+import com.nexus.twin.domain.TwinStateQuality;
+import com.nexus.twin.domain.TwinStateQualityEvidence;
+import com.nexus.twin.application.TwinStateQualityEvaluator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -629,6 +632,24 @@ class RuleEvaluatorTest {
         assertTrue(result.matched());
         assertNull(result.evidence().get(0).stateTimestamp(), "a legacy, event-payload-based condition must never populate stateTimestamp");
         org.mockito.Mockito.verifyNoInteractions(digitalTwinRegistry);
+    }
+
+    @Test
+    void offlineLegacyCapabilityState_cannotSatisfyObservationRule() {
+        UUID deviceId = UUID.randomUUID();
+        DigitalTwin current = twin(deviceId, "GAS", 900, Instant.now());
+        TwinStateQualityEvaluator quality = mock(TwinStateQualityEvaluator.class);
+        when(digitalTwinRegistry.get(deviceId, "GAS")).thenReturn(Optional.of(current));
+        when(quality.evaluate(current)).thenReturn(new TwinStateQualityEvidence(TwinStateQuality.OFFLINE,
+                "DEVICE_OFFLINE", Instant.now(), null, 120, "OFFLINE"));
+
+        Rule rule = ruleWithConditions(capabilityCondition(RuleOperator.GT, "800", CapabilityType.GAS));
+        RuleEvaluationResult result = new RuleEvaluator(digitalTwinRegistry, quality).evaluate(rule,
+                eventWithPayload(EventType.TWIN_UPDATED, deviceId, "INFO", Map.of("value", 900.0)));
+
+        assertFalse(result.matched());
+        assertEquals("OFFLINE", result.evidence().getFirst().stateQuality());
+        assertEquals(900.0, result.evidence().getFirst().actualValue());
     }
 
     private static UUID eq(UUID value) {

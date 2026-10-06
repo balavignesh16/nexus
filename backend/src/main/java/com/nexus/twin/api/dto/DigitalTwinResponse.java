@@ -3,6 +3,7 @@ package com.nexus.twin.api.dto;
 import com.nexus.twin.domain.DigitalTwin;
 import com.nexus.twin.domain.DesiredTwinState;
 import com.nexus.action.domain.ActionHistoryRecord;
+import com.nexus.twin.domain.TwinStateQualityEvidence;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -30,7 +31,7 @@ public record DigitalTwinResponse(
             String source, UUID commandId, Instant requestedAt, Instant acceptedForDispatchAt,
             String deliveryStatus, String ackStatus) {}
     public record EffectiveState(String stateId, Object value, String source,
-            Object observedValue, Object intentValue) {}
+            Object observedValue, Object intentValue,TwinStateQualityEvidence stateQuality) {}
     /**
      * Latest state for one telemetry capability belonging to this device.
      * The map key in {@code reportedState} is the capability/sensor type.
@@ -48,12 +49,12 @@ public record DigitalTwinResponse(
         Instant timestamp,
         Instant lastSeen,
         String quality,
-        Map<String, Object> metadata
+        Map<String, Object> metadata,
+        TwinStateQualityEvidence stateQuality
     ) {
-        private static CapabilityState from(DigitalTwin twin) {
+        private static CapabilityState from(DigitalTwin twin,TwinStateQualityEvidence evidence) {
             return new CapabilityState(
-                    twin.bindingId() != null ? "binding:" + twin.bindingId()
-                            : "legacy:" + canonicalLegacy(twin.latestSensorType()),
+                    twin.stateKey(),
                     twin.latestValue(),
                     twin.typedValue(),
                     twin.valueType() == null ? null : twin.valueType().name(),
@@ -65,7 +66,7 @@ public record DigitalTwinResponse(
                     twin.latestTimestamp(),
                     twin.lastSeen(),
                     calculateQuality(twin.lastSeen()),
-                    twin.metadata()
+                    twin.metadata(),evidence
             );
         }
     }
@@ -85,6 +86,11 @@ public record DigitalTwinResponse(
 
     public static DigitalTwinResponse from(List<DigitalTwin> twins, List<DesiredTwinState> desired,
             Map<UUID, ActionHistoryRecord> actions) {
+        return from(twins,desired,actions,Map.of());
+    }
+
+    public static DigitalTwinResponse from(List<DigitalTwin> twins,List<DesiredTwinState> desired,
+            Map<UUID,ActionHistoryRecord> actions,Map<String,TwinStateQualityEvidence> qualities) {
         if ((twins == null || twins.isEmpty()) && (desired == null || desired.isEmpty())) {
             throw new IllegalArgumentException("At least one capability state is required");
         }
@@ -99,7 +105,7 @@ public record DigitalTwinResponse(
                 .sorted(Comparator.comparing(DigitalTwin::latestSensorType))
                 .collect(Collectors.toMap(
                         DigitalTwin::latestSensorType,
-                        CapabilityState::from,
+                        twin -> CapabilityState.from(twin,qualities.get(twin.stateKey())),
                         (left, right) -> right,
                         LinkedHashMap::new
                 ));
@@ -107,10 +113,9 @@ public record DigitalTwinResponse(
         Map<String, DesiredState> desiredState = new LinkedHashMap<>();
         Map<String, EffectiveState> effectiveState = new LinkedHashMap<>();
         for (DigitalTwin twin : reported) {
-            String id = twin.bindingId() != null ? "binding:" + twin.bindingId()
-                    : "legacy:" + canonicalLegacy(twin.latestSensorType());
+            String id = twin.stateKey();
             effectiveState.putIfAbsent(id, new EffectiveState(id, twin.typedValue(), "REPORTED",
-                    twin.typedValue(), null));
+                    twin.typedValue(), null,qualities.get(twin.stateKey())));
         }
         for (DesiredTwinState state : intended) {
             String id = state.getTargetKey() + (state.getSubtargetKey().isEmpty() ? "" : "/" + state.getSubtargetKey());
@@ -128,8 +133,11 @@ public record DigitalTwinResponse(
                     break;
                 }
             }
+            TwinStateQualityEvidence evidence=reported.stream().filter(t->state.getBindingId()!=null&&state.getBindingId().equals(t.bindingId())
+                    ||state.getLegacyCapabilityType()!=null&&state.getLegacyCapabilityType().equals(t.legacyCapabilityType()))
+                    .findFirst().map(t->qualities.get(t.stateKey())).orElse(qualities.get(id));
             effectiveState.put(id, new EffectiveState(id, observed != null ? observed : state.typedValue(),
-                    observed != null ? "REPORTED" : "DESIRED_UNVERIFIED", observed, state.typedValue()));
+                    observed != null ? "REPORTED" : "DESIRED_UNVERIFIED", observed, state.typedValue(),evidence));
         }
 
         return new DigitalTwinResponse(

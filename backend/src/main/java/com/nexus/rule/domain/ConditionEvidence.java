@@ -27,11 +27,21 @@ public record ConditionEvidence(
     java.util.UUID definitionId,
     java.util.UUID bindingId,
     String valueType,
-    String unit
+    String unit,
+    String stateQuality,
+    String qualityReason,
+    Instant qualityEvaluatedAt,
+    Instant receivedAt,
+    Integer freshnessThresholdSeconds,
+    String connectivity
 ) {
     public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue,
                               Object actualValue, boolean conditionMet) {
-        this(field, operator, expectedValue, actualValue, conditionMet, null,null,null,null,null,null);
+        this(field, operator, expectedValue, actualValue, conditionMet, null,null,null,null,null,null,null,null,null,null,null,null);
     }
-    public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null);}
+    public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null,null,null,null,null,null,null);}
+    public ConditionEvidence withQuality(String quality,String reason,Instant evaluatedAt,Instant receivedAt,Integer threshold,String connectivity){
+        return new ConditionEvidence(field,operator,expectedValue,actualValue,conditionMet,stateTimestamp,capabilityKey,
+                definitionId,bindingId,valueType,unit,quality,reason,evaluatedAt,receivedAt,threshold,connectivity);
+    }
 }

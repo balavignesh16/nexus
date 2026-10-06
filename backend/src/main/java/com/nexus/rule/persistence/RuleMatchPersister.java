@@ -5,6 +5,8 @@ import com.nexus.rule.domain.ConditionEvidence;
 import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleMatchedEvent;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,8 +19,9 @@ import java.util.Map;
  * (a persistence failure must propagate so RuleMatcher's existing per-rule
  * try/catch can stop that match from reaching the cache, realtime, or
  * action planning - see RuleMatcher.onEvent()), and no transaction
- * annotation, since this is a single repository.save() call exactly like
- * every other persister in this codebase.
+ * transaction. Twin events are intentionally published after the telemetry
+ * transaction commits, so this write must own a new transaction rather than
+ * joining the completed transaction synchronization.
  */
 @Component
 public class RuleMatchPersister {
@@ -31,6 +34,7 @@ public class RuleMatchPersister {
         this.objectMapper = objectMapper;
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void persist(RuleMatchedEvent event) {
         RuleEvaluationResult result = event.result();
 
@@ -78,6 +82,14 @@ public class RuleMatchPersister {
             map.put("bindingId", conditionEvidence.bindingId());
             map.put("valueType", conditionEvidence.valueType());
             map.put("unit", conditionEvidence.unit());
+        }
+        if (conditionEvidence.stateQuality() != null) {
+            map.put("quality", conditionEvidence.stateQuality());
+            map.put("qualityReason", conditionEvidence.qualityReason());
+            map.put("qualityEvaluatedAt", conditionEvidence.qualityEvaluatedAt());
+            map.put("receivedAt", conditionEvidence.receivedAt());
+            map.put("freshnessThresholdSeconds", conditionEvidence.freshnessThresholdSeconds());
+            map.put("connectivity", conditionEvidence.connectivity());
         }
         return map;
     }

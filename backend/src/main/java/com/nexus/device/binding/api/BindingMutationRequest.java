@@ -4,4 +4,10 @@ import java.util.Map;
 import java.util.UUID;
 
 public record BindingMutationRequest(UUID capabilityDefinitionId, Boolean enabled,
-        String unit, Map<String,Object> configuration, Map<String,Object> externalIdentifiers) {}
+        String unit, Map<String,Object> configuration, Map<String,Object> externalIdentifiers,
+        Integer freshnessThresholdSeconds) {
+    public BindingMutationRequest(UUID capabilityDefinitionId,Boolean enabled,String unit,
+            Map<String,Object> configuration,Map<String,Object> externalIdentifiers){
+        this(capabilityDefinitionId,enabled,unit,configuration,externalIdentifiers,null);
+    }
+}

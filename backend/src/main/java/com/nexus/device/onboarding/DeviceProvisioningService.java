@@ -12,6 +12,7 @@ import com.nexus.device.onboarding.api.*;
 import com.nexus.device.template.*;
 import com.nexus.shared.exception.ResourceNotFoundException;
 import com.nexus.space.persistence.SpaceRepository;
+import com.nexus.twin.application.FreshnessPolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,24 +34,34 @@ public class DeviceProvisioningService {
     private final BindingConstraintService constraints;
     private final ObjectMapper canonicalMapper;
     private final Clock clock;
+    private final FreshnessPolicy freshness;
 
     @Autowired
     public DeviceProvisioningService(DeviceOnboardingSessionRepository sessions, DeviceTemplateRepository templates,
             DeviceTemplateCapabilityRepository templateCapabilities, DeviceCapabilityBindingRepository bindings,
             DeviceRepository devices, SpaceRepository spaces, BindingConstraintService constraints,
-            ObjectMapper mapper) {
-        this(sessions, templates, templateCapabilities, bindings, devices, spaces, constraints, mapper, Clock.systemUTC());
+            ObjectMapper mapper,FreshnessPolicy freshness) {
+        this(sessions, templates, templateCapabilities, bindings, devices, spaces, constraints, mapper,
+                Clock.systemUTC(),freshness);
     }
 
     DeviceProvisioningService(DeviceOnboardingSessionRepository sessions, DeviceTemplateRepository templates,
             DeviceTemplateCapabilityRepository templateCapabilities, DeviceCapabilityBindingRepository bindings,
             DeviceRepository devices, SpaceRepository spaces, BindingConstraintService constraints,
             ObjectMapper mapper, Clock clock) {
+        this(sessions,templates,templateCapabilities,bindings,devices,spaces,constraints,mapper,clock,new FreshnessPolicy());
+    }
+
+    DeviceProvisioningService(DeviceOnboardingSessionRepository sessions, DeviceTemplateRepository templates,
+            DeviceTemplateCapabilityRepository templateCapabilities, DeviceCapabilityBindingRepository bindings,
+            DeviceRepository devices, SpaceRepository spaces, BindingConstraintService constraints,
+            ObjectMapper mapper, Clock clock,FreshnessPolicy freshness) {
         this.sessions=sessions; this.templates=templates; this.templateCapabilities=templateCapabilities;
         this.bindings=bindings; this.devices=devices; this.spaces=spaces; this.constraints=constraints;
         this.canonicalMapper=mapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
                 .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
         this.clock=clock;
+        this.freshness=freshness;
     }
 
     @Transactional
@@ -63,7 +74,9 @@ public class DeviceProvisioningService {
             if (!prior.get().getRequestHash().equals(hash)) throw new OnboardingConflictException("Idempotency key has conflicting body");
             return DeviceOnboardingSessionResponse.from(prior.get());
         }
-        DeviceTemplate template = templates.findById(request.templateId())
+        // Serialize the first device reference with template-composition policy
+        // mutations. Both paths lock this same row before reading capabilities.
+        DeviceTemplate template = templates.findByIdForUpdate(request.templateId())
                 .orElseThrow(() -> new ResourceNotFoundException("DeviceTemplate", request.templateId().toString()));
         if (!template.isEnabled() || template.getProtocolType() != ProtocolType.MQTT)
             throw new IllegalArgumentException("Template must be enabled and use MQTT");
@@ -98,8 +111,10 @@ public class DeviceProvisioningService {
             Map<String,Object> external = defaultIdentifiers(definition.getKey(), definition.getDirection());
             if (override != null && override.externalIdentifiers() != null) external.putAll(override.externalIdentifiers());
             validateIdentifiers(external);
+            Integer freshnessOverride=override==null?null:override.freshnessThresholdSeconds();
+            freshness.validateOverride(freshnessOverride,member.getFreshnessThresholdSeconds());
             created.add(new DeviceCapabilityBinding(UUID.randomUUID(), device.getId(), definition, member,
-                    enabled, unit, config, external, now));
+                    enabled, unit, config, external,freshnessOverride,now));
         }
         assertUnambiguous(created);
         bindings.saveAll(created);

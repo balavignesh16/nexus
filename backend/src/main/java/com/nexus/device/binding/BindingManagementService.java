@@ -8,7 +8,9 @@ import com.nexus.device.onboarding.DeviceProvisioningService;
 import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.persistence.RuleRegistry;
 import com.nexus.shared.exception.ResourceNotFoundException;
+import com.nexus.twin.application.FreshnessPolicy;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -21,12 +23,20 @@ public class BindingManagementService {
     private final DeviceRepository devices;
     private final BindingConstraintService constraints;
     private final RuleRegistry rules;
+    private final FreshnessPolicy freshness;
 
     public BindingManagementService(DeviceCapabilityBindingRepository bindings,
             CapabilityDefinitionRepository definitions, DeviceRepository devices,
             BindingConstraintService constraints, RuleRegistry rules) {
+        this(bindings,definitions,devices,constraints,rules,new FreshnessPolicy());
+    }
+    @Autowired
+    public BindingManagementService(DeviceCapabilityBindingRepository bindings,
+            CapabilityDefinitionRepository definitions, DeviceRepository devices,
+            BindingConstraintService constraints, RuleRegistry rules,FreshnessPolicy freshness) {
         this.bindings=bindings; this.definitions=definitions; this.devices=devices;
         this.constraints=constraints; this.rules=rules;
+        this.freshness=freshness;
     }
 
     @Transactional(readOnly = true)
@@ -50,8 +60,10 @@ public class BindingManagementService {
                 ? DeviceProvisioningService.defaultIdentifiers(definition.getKey(), definition.getDirection())
                 : request.externalIdentifiers();
         DeviceProvisioningService.validateIdentifiers(external);
+        freshness.validateOverride(request.freshnessThresholdSeconds(),null);
         var binding = new DeviceCapabilityBinding(UUID.randomUUID(), deviceId, definition, null,
-                request.enabled() == null || request.enabled(), unit, configuration, external, Instant.now());
+                request.enabled() == null || request.enabled(), unit, configuration, external,
+                request.freshnessThresholdSeconds(),Instant.now());
         var all = new ArrayList<>(bindings.findByDeviceId(deviceId));
         all.add(binding);
         DeviceProvisioningService.assertUnambiguous(all);
@@ -71,12 +83,16 @@ public class BindingManagementService {
                 : constraints.narrow(binding.getDefinition(), binding.getConfiguration(), request.configuration());
         Map<String,Object> external = request.externalIdentifiers() == null ? binding.getExternalIdentifiers()
                 : request.externalIdentifiers();
+        Integer threshold=request.freshnessThresholdSeconds();
+        Integer parent=binding.getTemplateCapability()==null?null:binding.getTemplateCapability().getFreshnessThresholdSeconds();
+        freshness.validateOverride(threshold,parent);
         DeviceProvisioningService.validateIdentifiers(external);
         if ((enabled != binding.isEnabled() || !Objects.equals(unit, binding.getUnit())
                 || !Objects.equals(configuration, binding.getConfiguration())
-                || !Objects.equals(external, binding.getExternalIdentifiers())) && activeRuleReferences(deviceId, binding.getDefinition().getKey()))
+                || !Objects.equals(external, binding.getExternalIdentifiers())
+                || !Objects.equals(threshold,binding.getFreshnessThresholdSeconds())) && activeRuleReferences(deviceId, binding.getDefinition().getKey()))
             throw new IllegalStateException("Active Rule references this binding");
-        binding.update(enabled, unit, configuration, external, Instant.now());
+        binding.update(enabled, unit, configuration, external,threshold,Instant.now());
         DeviceProvisioningService.assertUnambiguous(bindings.findByDeviceId(deviceId));
         return DeviceCapabilityBindingResponse.from(binding);
     }

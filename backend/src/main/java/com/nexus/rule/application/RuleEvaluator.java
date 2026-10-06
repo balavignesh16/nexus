@@ -9,7 +9,11 @@ import com.nexus.rule.domain.RuleEvaluationResult;
 import com.nexus.rule.domain.RuleField;
 import com.nexus.twin.domain.DigitalTwin;
 import com.nexus.twin.domain.DigitalTwinRegistry;
+import com.nexus.twin.application.TwinStateQualityEvaluator;
+import com.nexus.twin.domain.TwinStateQualityEvidence;
+import com.nexus.twin.domain.TwinStateQuality;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,9 +41,16 @@ public class RuleEvaluator {
     private static final String MISSING = "MISSING";
 
     private final DigitalTwinRegistry digitalTwinRegistry;
+    private final TwinStateQualityEvaluator qualityEvaluator;
 
     public RuleEvaluator(DigitalTwinRegistry digitalTwinRegistry) {
+        this(digitalTwinRegistry,null);
+    }
+
+    @Autowired
+    public RuleEvaluator(DigitalTwinRegistry digitalTwinRegistry,TwinStateQualityEvaluator qualityEvaluator) {
         this.digitalTwinRegistry = digitalTwinRegistry;
+        this.qualityEvaluator=qualityEvaluator;
     }
 
     public RuleEvaluationResult evaluate(Rule rule, DomainEvent event) {
@@ -93,11 +104,13 @@ public class RuleEvaluator {
     }
 
     private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId){
-        if(deviceId==null)return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),MISSING,false,null,condition.capabilityKey(),null,null,null,condition.unit());
+        if(deviceId==null)return evidence(condition,MISSING,false,null,null);
         Optional<DigitalTwin> found=digitalTwinRegistry.getAllForDevice(deviceId).stream().filter(t->condition.capabilityKey().equals(t.capabilityKey())||condition.capabilityKey().equalsIgnoreCase(t.latestSensorType())).findFirst();
-        if(found.isEmpty()||found.get().typedValue()==null)return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),MISSING,false,found.map(DigitalTwin::latestTimestamp).orElse(null),condition.capabilityKey(),null,null,null,condition.unit());
-        DigitalTwin twin=found.get(); Object actual=twin.typedValue(); boolean met=evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
-        return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met,twin.latestTimestamp(),condition.capabilityKey(),twin.capabilityDefinitionId(),twin.bindingId(),twin.valueType()==null?null:twin.valueType().name(),condition.unit()!=null?condition.unit():twin.latestUnit());
+        if(found.isEmpty()||found.get().typedValue()==null)return evidence(condition,MISSING,false,found.orElse(null),null);
+        DigitalTwin twin=found.get(); TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(twin);
+        Object actual=twin.typedValue(); boolean met=(quality==null||quality.state()==TwinStateQuality.GOOD)
+                &&evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
+        return evidence(condition,actual,met,twin,quality);
     }
 
     private boolean evaluateGeneric(Object actual,String expected,com.nexus.rule.domain.RuleOperator op,com.nexus.device.capability.definition.CapabilityValueType type){
@@ -129,13 +142,22 @@ public class RuleEvaluator {
         }
 
         DigitalTwin currentTwin = twin.get();
+        TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(currentTwin);
         double rawValue = currentTwin.latestValue();
         CapabilityValueKind kind = CapabilityValueKind.of(condition.capabilityType());
-        boolean conditionMet = evaluateTypedConditionMet(condition, rawValue, kind);
+        boolean conditionMet = (quality==null||quality.state()==TwinStateQuality.GOOD)&&evaluateTypedConditionMet(condition, rawValue, kind);
         Object actualValueForEvidence = kind == CapabilityValueKind.BOOLEAN ? (rawValue != 0.0) : rawValue;
 
-        return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(),
-                actualValueForEvidence, conditionMet, currentTwin.latestTimestamp());
+        return evidence(condition,actualValueForEvidence,conditionMet,currentTwin,quality);
+    }
+
+    private ConditionEvidence evidence(RuleCondition condition,Object actual,boolean met,DigitalTwin twin,TwinStateQualityEvidence q){
+        return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met,
+                twin==null?null:twin.latestTimestamp(),condition.capabilityKey(),twin==null?null:twin.capabilityDefinitionId(),
+                twin==null?null:twin.bindingId(),twin==null||twin.valueType()==null?null:twin.valueType().name(),
+                condition.unit()!=null?condition.unit():twin==null?null:twin.latestUnit(),q==null?null:q.state().name(),
+                q==null?null:q.reason(),q==null?null:q.evaluatedAt(),q==null?null:q.receivedAt(),
+                q==null?null:q.thresholdSeconds(),q==null?null:q.connectivity());
     }
 
     /**
