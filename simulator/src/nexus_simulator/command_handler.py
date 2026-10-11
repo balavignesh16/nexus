@@ -36,6 +36,7 @@ class CommandHandler:
         # commandId -> (status, reason) - bounded LRU so a long-running
         # device doesn't grow this unboundedly.
         self._applied: "OrderedDict[str, tuple]" = OrderedDict()
+        self.last_applied_new = False
 
     def handle(self, payload_bytes: bytes):
         """Returns (commandId_or_None, status, reason_or_None).
@@ -45,6 +46,7 @@ class CommandHandler:
         callers must not publish an ACK in that case (there is nothing to
         correlate it to).
         """
+        self.last_applied_new = False
         try:
             data = json.loads(payload_bytes.decode("utf-8"))
         except Exception:
@@ -89,6 +91,7 @@ class CommandHandler:
         except ActuatorValidationError as e:
             return self._finish(command_id, "REJECTED", e.reason)
 
+        self.last_applied_new = True
         return self._finish(command_id, "ACCEPTED", None)
 
     def _finish(self, command_id: str, status: str, reason):

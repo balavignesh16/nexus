@@ -55,6 +55,8 @@ class SimulatorScheduler:
                 device_id = device_dict.get("id")
                 active_ids.add(device_id)
                 if device_id in self.devices:
+                    if hasattr(self.client, "get_readback_routes"):
+                        self.devices[device_id].readback_routes = self.client.get_readback_routes(device_id)
                     continue
 
                 sim_device = SimulatedDevice(
@@ -68,6 +70,9 @@ class SimulatorScheduler:
                     print(f"Device {device_id} has no supported provisioned capabilities "
                           "- skipping")
                     continue
+
+                if hasattr(self.client, "get_readback_routes"):
+                    sim_device.readback_routes = self.client.get_readback_routes(device_id)
 
                 if self._mqtt_enabled:
                     sim_device.mqtt_publisher = MQTTPublisher(self.config, device_id, sim_device)

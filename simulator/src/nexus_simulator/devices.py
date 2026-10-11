@@ -69,6 +69,7 @@ class SimulatedDevice:
         self.write_capabilities: Dict[str, WriteCapability] = {}
         self._bme280_model: Optional[Bme280Model] = None
         self.command_handler = CommandHandler(self)
+        self.readback_routes: List[dict] = []
         # Set by the owning SimulatorScheduler once the device's per-device
         # MQTT client is created - never constructed here (devices.py must
         # not depend on mqtt_publisher.py to avoid a circular import).
@@ -134,3 +135,25 @@ class SimulatedDevice:
 
     def has_capabilities(self) -> bool:
         return bool(self.read_capabilities or self.write_capabilities)
+
+    def readback_observations(self, capability: str, command_value):
+        """One explicit observation of simulated actuator state per mapped command."""
+        write = self.write_capabilities.get(capability)
+        if write is None:
+            return []
+        actuator = write.actuator
+        channel = command_value.get("channel") if isinstance(command_value, dict) else None
+        subtarget = f"channel:{channel}" if channel is not None else ""
+        if isinstance(actuator, RelayActuator):
+            actual = actuator.channels.get(channel)
+        elif isinstance(actuator, ServoActuator):
+            actual = actuator.angle
+        else:
+            actual = actuator.state
+        observations = []
+        for route in self.readback_routes:
+            if route.get("writeCapability") != capability or route.get("writeSubtargetKey", "") != subtarget:
+                continue
+            selected = {route["selectorPath"]: actual} if route.get("selectorKey") == "OBJECT_FIELD" else actual
+            observations.append((route["readSensorType"], route["readCapabilityKey"], selected, route["readUnit"]))
+        return observations

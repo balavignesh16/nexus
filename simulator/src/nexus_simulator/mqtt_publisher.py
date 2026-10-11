@@ -70,6 +70,15 @@ class MQTTPublisher(TelemetryPublisher):
             # Nothing to correlate an ACK against.
             return
         self._publish_ack(command_id, status, reason)
+        if status == "ACCEPTED" and self.simulated_device.command_handler.last_applied_new:
+            try:
+                command = json.loads(msg.payload.decode("utf-8"))
+                for sensor, key, value, unit in self.simulated_device.readback_observations(
+                        command["capability"], command["value"]):
+                    self.publish(self.device_id, sensor, value, unit,
+                                 readback_command_id=command_id, capability_key=key)
+            except (ValueError, KeyError, TypeError) as error:
+                logger.warning("[%s] Could not emit mapped simulator readback: %s", self.device_id, error)
 
     def _publish_ack(self, command_id: str, status: str, reason) -> None:
         payload = {
@@ -86,7 +95,8 @@ class MQTTPublisher(TelemetryPublisher):
             logger.error(f"[{self.device_id}] Failed to publish ACK for {command_id}: {e}")
 
     def publish(
-        self, device_id: str, sensor_type: str, value: any, unit: str
+        self, device_id: str, sensor_type: str, value: any, unit: str,
+        readback_command_id: str | None = None, capability_key: str | None = None
     ) -> tuple[bool, float]:
         start = time.time()
 
@@ -102,6 +112,10 @@ class MQTTPublisher(TelemetryPublisher):
             "value": value,
             "unit": unit
         }
+        if readback_command_id is not None:
+            payload["readbackCommandId"] = readback_command_id
+        if capability_key is not None:
+            payload["capabilityKey"] = capability_key
         payload_str = json.dumps(payload)
 
         try:
