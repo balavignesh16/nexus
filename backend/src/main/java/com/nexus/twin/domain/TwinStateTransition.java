@@ -42,6 +42,21 @@ public class TwinStateTransition {
     @Column(name="transitioned_at",nullable=false) private Instant transitionedAt;
     @Column(name="correlation_id") private String correlationId;
     @Column(name="command_id") private UUID commandId;
+    @Column(name="previous_verification_status") private String previousVerificationStatus;
+    @Column(name="new_verification_status") private String newVerificationStatus;
+    @Column(name="verification_command_id") private UUID verificationCommandId;
+    @Column(name="verification_mapping_id") private UUID verificationMappingId;
+    @Column(name="readback_telemetry_id") private UUID readbackTelemetryId;
+    @Column(name="readback_state_key") private String readbackStateKey;
+    @Column(name="readback_binding_id") private UUID readbackBindingId;
+    @Column(name="readback_event_time") private Instant readbackEventTime;
+    @Column(name="readback_received_at") private Instant readbackReceivedAt;
+    @Column(name="readback_evidence") private String readbackEvidence;
+    @Column(name="readback_attribution") private String readbackAttribution;
+    @Column(name="comparator_key") private String comparatorKey;
+    @Column(name="comparison_result") private String comparisonResult;
+    @Column(name="numeric_tolerance") private BigDecimal numericTolerance;
+    @Column(name="verification_reason") private String verificationReason;
 
     protected TwinStateTransition() {}
 
@@ -72,6 +87,43 @@ public class TwinStateTransition {
                 transitionedAt, correlationId, next.getCommandId());
         row.capabilityDefinitionId=next.getCapabilityDefinitionId(); row.capabilityKey=next.getCapabilityKey();
         row.requestedAt=next.getRequestedAt(); row.acceptedForDispatchAt=next.getAcceptedForDispatchAt();
+        return row;
+    }
+
+    public static TwinStateTransition convergence(DesiredTwinState desired,VerificationStatus previous,
+            CurrentTwinVerificationState current,Instant transitionedAt,String correlationId) {
+        TwinStateTransition row=create(desired.getDeviceId(),desired.getTargetKey(),desired.getBindingId(),
+                desired.getLegacyCapabilityType(),desired.getSubtargetKey(),TwinTransitionType.CONVERGENCE_CHANGED,
+                TwinTransitionSource.SYSTEM,desired.getValueType(),null,null,null,null,
+                current.getLastReadbackEventTime(),current.getLastReadbackReceivedAt(),transitionedAt,
+                correlationId,desired.getCommandId());
+        row.capabilityDefinitionId=desired.getCapabilityDefinitionId();row.capabilityKey=desired.getCapabilityKey();
+        row.previousVerificationStatus=previous==null?null:previous.name();
+        row.newVerificationStatus=current.getVerificationStatus().name();
+        row.verificationCommandId=current.getDesiredCommandId();row.verificationMappingId=current.getMappingId();
+        row.readbackTelemetryId=current.getLastReadbackTelemetryId();
+        row.readbackStateKey=current.getLastReadbackStateKey();row.readbackBindingId=current.getLastReadbackBindingId();
+        row.readbackEventTime=current.getLastReadbackEventTime();row.readbackReceivedAt=current.getLastReadbackReceivedAt();
+        row.readbackEvidence=current.getReadbackEvidence();row.readbackAttribution=current.getReadbackAttribution();
+        row.comparatorKey=current.getComparatorKey();row.comparisonResult=current.getComparisonResult();
+        row.numericTolerance=current.getNumericTolerance();row.verificationReason=current.getDiscrepancyReason();
+        return row;
+    }
+
+    public static TwinStateTransition desiredCleared(DesiredTwinState previous,Instant at,String correlationId) {
+        TwinStateTransition row=create(previous.getDeviceId(),previous.getTargetKey(),previous.getBindingId(),
+                previous.getLegacyCapabilityType(),previous.getSubtargetKey(),TwinTransitionType.DESIRED_STATE_CLEARED,
+                TwinTransitionSource.SYSTEM,previous.getValueType(),previous.typedValue(),null,previous.getUnit(),null,
+                null,null,at,correlationId,previous.getCommandId());
+        row.capabilityDefinitionId=previous.getCapabilityDefinitionId();row.capabilityKey=previous.getCapabilityKey();
+        return row;
+    }
+
+    public static TwinStateTransition convergenceCleared(DesiredTwinState desired,
+            CurrentTwinVerificationState previous,Instant at,String correlationId) {
+        TwinStateTransition row=convergence(desired,previous.getVerificationStatus(),previous,at,correlationId);
+        row.newVerificationStatus="NO_DESIRED_STATE";
+        row.verificationReason="DESIRED_STATE_EXPLICITLY_CLEARED";
         return row;
     }
 
@@ -108,6 +160,21 @@ public class TwinStateTransition {
     public Instant getReceivedAt(){return receivedAt;} public Instant getTransitionedAt(){return transitionedAt;}
     public Instant getRequestedAt(){return requestedAt;} public Instant getAcceptedForDispatchAt(){return acceptedForDispatchAt;}
     public String getCorrelationId(){return correlationId;} public UUID getCommandId(){return commandId;}
+    public String getPreviousVerificationStatus(){return previousVerificationStatus;}
+    public String getNewVerificationStatus(){return newVerificationStatus;}
+    public UUID getVerificationCommandId(){return verificationCommandId;}
+    public UUID getVerificationMappingId(){return verificationMappingId;}
+    public UUID getReadbackTelemetryId(){return readbackTelemetryId;}
+    public String getReadbackStateKey(){return readbackStateKey;}
+    public UUID getReadbackBindingId(){return readbackBindingId;}
+    public Instant getReadbackEventTime(){return readbackEventTime;}
+    public Instant getReadbackReceivedAt(){return readbackReceivedAt;}
+    public String getReadbackEvidence(){return readbackEvidence;}
+    public String getReadbackAttribution(){return readbackAttribution;}
+    public String getComparatorKey(){return comparatorKey;}
+    public String getComparisonResult(){return comparisonResult;}
+    public BigDecimal getNumericTolerance(){return numericTolerance;}
+    public String getVerificationReason(){return verificationReason;}
     public Object previousValue(){return value(previousNumericValue,previousBooleanValue,previousStringValue,previousObjectValue);}
     public Object newValue(){return value(newNumericValue,newBooleanValue,newStringValue,newObjectValue);}
     private Object value(BigDecimal number,Boolean bool,String string,Map<String,Object> object){return switch(valueType){case NUMBER->number;case BOOLEAN->bool;case STRING,ENUM->string;case OBJECT->object;};}

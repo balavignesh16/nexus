@@ -54,6 +54,11 @@ public class ActionHistoryRecord {
     @Column(name = "ack_message")
     private String ackMessage;
 
+    @Column(name = "published_at") private Instant publishedAt;
+    @Column(name = "ack_backend_received_at") private Instant ackBackendReceivedAt;
+    @Column(name = "ack_device_timestamp") private Instant ackDeviceTimestamp;
+    @Column(name = "ack_deadline_at") private Instant ackDeadlineAt;
+
     protected ActionHistoryRecord() {}
 
     public ActionHistoryRecord(UUID requestId, UUID matchId, UUID deviceId, ActionType actionType, ExecutionStatus status, Map<String, Object> parameters, Instant timestamp, String message) {
@@ -114,4 +119,8 @@ public class ActionHistoryRecord {
     public AcknowledgementStatus getAckStatus() { return ackStatus; }
     public Instant getAckReceivedAt() { return ackReceivedAt; }
     public String getAckMessage() { return ackMessage; }
+    public Instant getPublishedAt() { return publishedAt; }
+    public Instant getAckBackendReceivedAt() { return ackBackendReceivedAt; }
+    public Instant getAckDeviceTimestamp() { return ackDeviceTimestamp; }
+    public Instant getAckDeadlineAt() { return ackDeadlineAt; }
 }
