@@ -537,3 +537,44 @@ numbers that were initially wrong and had to be reconciled against raw SQL).
   action, generic MQTT, and legacy MQTT loop regressions pass with this order.
 - P2.4 convergence, an outbox/retry subsystem, new realtime topics, and
   READ_WRITE remain out of scope. Five implementation commits were created; no tag or push was made.
+
+## 21. P2.4 implementation (2026-10-11; committed, acceptance and forensic final review complete)
+
+- Baseline `1197ae314bd42b078aaf7459862efc90643d21ea` on clean `main`.
+  V24 only; V21–V23, firmware, hardware tests, and result artifacts untouched.
+- V24 introduces explicit normalized template/runtime WRITE-to-READ mappings,
+  current durable verification, backend ACK receipt, publication/ACK deadlines,
+  and convergence transition evidence. Provisioning materializes template
+  mappings against concrete binding IDs. No implicit name-based readback.
+- Desired, publication, software ACK, qualified reported readback, and current
+  verification remain separate. `ExecutionStatus.SUCCESS` still means MQTT
+  publication; additive `CommandStatus` derives ACK/timeout facts. Duplicate
+  or conflicting ACK cannot overwrite the first ACK. ACK never writes reported
+  state. No ACK retry worker, outbox, or delivery recovery was added.
+- Qualified convergence currently requires an explicitly mapped GOOD
+  `COMMAND_ECHO` telemetry observation with the current command ID. `NONE`
+  remains unverified. Registered selectors/comparators support identity,
+  object field, exact, and same-unit numeric tolerance. Verification records
+  pending, converged, diverged, timed-out, or unverified with status-change
+  history. A bounded deadline scan is database/restart-safe; late qualified
+  readback can show drift/recovery. Desired is not auto-cleared.
+- API/UI expose mapping and independent command/verification evidence. The
+  simulator emits mapped correlated echoes; existing physical ESP telemetry
+  lacks this proof and must not be described as physical convergence.
+- The P2.4 acceptance ledger records all 32 mandatory scenarios and recovery
+  cases 33–35 with exact automated evidence. Post-review full validation ran
+  829 backend tests (zero failures/errors/skips), 440 frontend tests, and 56
+  simulator passes with three live-stack skips.
+  Lint had zero errors and 12 existing warnings; the production build,
+  `validate_nexus.py --fast`, and `--full` passed. Separate V24 migration,
+  generic real-Mosquitto loop, and verification restart checks passed. The
+  MQTT loop uses an in-test simulated actuator and explicitly published mapped
+  `COMMAND_ECHO`; it is software evidence, not a Python-simulator or physical
+  ESP run. Restart evidence recreates Spring application contexts against one
+  persistent PostgreSQL database, not separate OS processes. Forensic review
+  strengthened lock-order and same-value readback tests and corrected the UI
+  rendering of derived statuses when no desired row exists. No Phase 3 work.
+- After user approval, P2.4 implementation was committed in scoped stages:
+  persistence `77826b4`; backend behavior, API and regressions `1f0b228`;
+  frontend `b814027`; simulator `4ae5f23`. The final documentation closeout
+  follows these four implementation commits. No tag or push was made.

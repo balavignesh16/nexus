@@ -1,14 +1,38 @@
-# Proposed Twin 2.0 contract — P2.0 review draft
+# Twin 2.0 contract — implemented through P2.4
 
-**Implemented contract through P2.3.** P2.1/V21, P2.2/V22, and P2.3/V23 are implemented. P2.4 must still
-implement/test their sections before those sections become API guarantees.
+**P2.4/V24 implemented and committed; acceptance matrix and forensic final review complete.** P2.1/V21,
+P2.2/V22, and P2.3/V23 are committed. P2.4 sections describe the tested
+software contract within the qualification and physical-evidence limits below.
 Existing Twin routes and `latest*` summaries remain additive/compatible.
 
 **CURRENT BEHAVIOR:** `CapabilityDirection` has only `READ` and `WRITE`;
-reported `digital_twins` and its cache are still keyed by `(deviceId,
-latestSensorType)`. P2.1 durably accepts ActionHistory plus current desired
-state before MQTT publish. Existing API `SUCCESS` still means publish success.
-The current ACK timestamp is device-supplied, not backend receipt time.
+reported `digital_twins` uses P2.2 canonical `(deviceId,stateKey)` identity.
+P2.1 durably accepts ActionHistory plus current desired state before MQTT
+publish. Existing API `SUCCESS` still means publish success.
+The legacy `ack_received_at` remains device-supplied. V24 adds a separate
+authoritative backend ACK receipt timestamp.
+
+**P2.4 qualification boundary:** normalized mappings explicitly connect a
+WRITE binding/subtarget to a distinct enabled READ binding. Template mappings
+materialize to device binding IDs at provisioning. The current modes are
+`COMMAND_ECHO` (a matching telemetry `readbackCommandId` for the current
+desired command) and `NONE` (never qualifies convergence). A GOOD mapped
+readback is required; value equality, publication, and ACK alone are never
+proof. `IDENTITY`/`OBJECT_FIELD` selectors and `EXACT`/
+`NUMERIC_TOLERANCE` comparators are implemented. No generic unit conversion
+or implicit READ_WRITE binding is introduced. The existing physical ESP
+telemetry has no qualified command echo and stays unverified.
+
+`CommandStatus` is additive and derived from durable publication, ACK, and
+deadline facts, with a `Clock`-derived ACK timeout. It does not redefine
+`ExecutionStatus.SUCCESS`. The backend preserves ACK payload time separately,
+guards duplicate/conflicting ACK updates, and never uses ACK to write reported
+state. Verification is durable and independently reconciled, including a
+restart-safe pending-deadline scan and status-change-only convergence history.
+Newer qualified observations can show drift/recovery; quality decay alone
+does not rewrite stored convergence. Desired intent is not auto-cleared.
+There is no P2.4 outbox, retry, delivery recovery, public desired-clear
+endpoint, or Phase 3 implementation.
 
 ## Identity and authority
 
@@ -46,7 +70,7 @@ row is copied verbatim to a no-retention reconciliation-audit table with the
 chosen state key/reason before removal from current-state storage. No row is
 silently discarded and no synthetic state transition is invented.
 
-**P2 TARGET BEHAVIOR:** a WRITE binding may have a separately defined READ
+**P2.4 BEHAVIOR:** a WRITE binding may have a separately defined READ
 binding as readback. This is a validated explicit mapping, including subtarget
 selector and comparable unit/value type, not an assumed `READ_WRITE` direction
 or same-key lookup. Without mapping, convergence is UNVERIFIED. One definition

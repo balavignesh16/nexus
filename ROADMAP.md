@@ -256,6 +256,25 @@ version should not use the same expiration policy.
 
 ### 2.4 Convergence and reconciliation
 
+Implementation status: **V24 implemented and committed; acceptance matrix and forensic final review complete.**
+The five independent axes are desired intent, MQTT publication, software ACK,
+qualified reported readback, and current verification. The additive derived
+`CommandStatus` does not change `ExecutionStatus.SUCCESS` (publish success).
+V24 adds explicit validated WRITE-binding/subtarget to READ-binding mappings,
+backend ACK receipt/deadline timestamps, and durable verification with
+`PENDING`, `CONVERGED`, `DIVERGED`, `TIMED_OUT`, and `UNVERIFIED` states.
+`NOT_APPLICABLE` and `NO_DESIRED_STATE` are derived presentation states.
+Only a GOOD mapped readback satisfying the configured qualification can
+establish convergence; current P2.4 qualification supports `COMMAND_ECHO`
+and `NONE` (the latter cannot establish convergence). The simulator can emit
+correlated echo telemetry for mapped simulated devices; existing physical ESP
+telemetry is not physical convergence proof. Deadline reconciliation survives
+restart, while late qualified observations can show drift or recovery. Desired
+state is never automatically cleared. ACK timeout is derived from the
+published/deadline/ACK facts; there is no retry, outbox, or delivery recovery.
+An isolated real-MQTT software loop covers mapped command/ACK/readback
+convergence; it does not substitute for physical-device evidence.
+
 For writable capabilities:
 
 1. Desired state changes.
@@ -270,13 +289,15 @@ For writable capabilities:
 - [ ] A multi-capability Twin survives restart without losing state.
 - [ ] Desired and reported state are separately inspectable.
 - [x] State changes include history and correlation IDs.
-- [ ] Failed convergence is visible and actionable.
+- [ ] Failed convergence is visible with persisted evidence; operational alerting/action workflow remains future work.
 - [x] Stale state cannot silently drive safety-critical rules.
 
 P2.1 foundation is implemented and committed: V21 desired intent,
 pre-publish durable command acceptance, and derived effective state. Final
 implementation review passed on 2026-10-05. P2.2 history and P2.3 quality are
-implemented together, final-review approved, and committed; P2.4 convergence remains open.
+implemented together, final-review approved, and committed; P2.4 core is
+implemented and committed with the mandatory acceptance matrix closed and
+forensic final review complete.
 
 ---
 
