@@ -1,16 +1,26 @@
 import { apiClient } from './apiClient';
 
 export interface ActionHistoryResponse {
-  historyId: string;
+  executionId: string;
+  historyId?: string;
   requestId: string;
-  ruleId: string;
-  deviceId: string;
+  matchId: string | null;
+  deviceId: string | null;
   actionType: string;
   status: string;
   message: string;
   timestamp: string;
   parameters: Record<string, unknown>;
-  correlationId: string;
+  correlationId?: string;
+  ackStatus?: 'ACCEPTED' | 'REJECTED' | null;
+  ackReceivedAt?: string | null;
+  ackMessage?: string | null;
+  executionStatus?: string;
+  commandStatus?: 'ACCEPTED_FOR_DISPATCH' | 'PUBLISHED' | 'ACKNOWLEDGED' | 'REJECTED' | 'FAILED' | 'TIMED_OUT' | null;
+  publishedAt?: string | null;
+  ackBackendReceivedAt?: string | null;
+  ackDeviceTimestamp?: string | null;
+  ackDeadlineAt?: string | null;
 }
 
 export const actionApi = {

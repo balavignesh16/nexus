@@ -118,12 +118,18 @@ export function ActionsTab({ deviceId }: { deviceId: string }) {
                         color: action.status === 'FAILURE' ? 'var(--danger)' : 'var(--success)',
                       }}
                     >
-                      {action.status}
+                      {action.actionType === 'SEND_COMMAND' && action.status === 'SUCCESS' ? 'PUBLISHED TO MQTT' : action.status}
                     </span>
                     <span className="text-xs font-mono text-foundation-tertiary-fg shrink-0">
                       {new Date(action.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
                   </div>
+                  {action.actionType === 'SEND_COMMAND' && <p className="text-xs text-foundation-muted-fg mt-1">
+                    Command: {action.commandStatus ?? (action.status === 'SUCCESS' ? 'PUBLISHED' : action.status)}
+                    {' · '}Execution: {action.executionStatus ?? action.status}
+                    {action.ackDeadlineAt ? ` · ACK deadline ${new Date(action.ackDeadlineAt).toLocaleString()}` : ''}
+                    {action.ackBackendReceivedAt && action.ackDeadlineAt && new Date(action.ackBackendReceivedAt) > new Date(action.ackDeadlineAt) ? ' · Late ACK' : ''}
+                  </p>}
                   <p className="text-sm text-foundation-fg/90 mt-1.5">
                     {action.message || 'Action executed'}
                   </p>

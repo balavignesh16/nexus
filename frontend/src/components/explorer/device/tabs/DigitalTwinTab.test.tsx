@@ -57,6 +57,103 @@ describe('DigitalTwinTab - migrated onto useLatestTwins(100)', () => {
 
   afterEach(() => vi.useRealTimers());
 
+  it('keeps ACK, qualified readback, and stale last verification separate', () => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Simulated actuator' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+      desiredState: { 'binding:write/channel:2': { typedValue: { channel: 2, state: true },
+        commandId: 'command-2', deliveryStatus: 'SUCCESS', ackStatus: 'ACCEPTED' } },
+      verification: { 'binding:write/channel:2': { status: 'CONVERGED', readbackEvidence: 'COMMAND_ECHO',
+        readbackValue: true, comparisonResult: 'MATCH', readbackStateQuality: { state: 'STALE' } } },
+    }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getByText('Desired intent · binding:write/channel:2')).toBeInTheDocument();
+    expect(screen.getByText('MQTT publication: Published')).toBeInTheDocument();
+    expect(screen.getByText('Device ACK: Device ACK accepted')).toBeInTheDocument();
+    expect(screen.getByText('Qualified readback: COMMAND_ECHO')).toBeInTheDocument();
+    expect(screen.getByText('Verification: Last verified converged · current readback stale')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['UNVERIFIED', /Readback unavailable.*unverified/],
+    ['PENDING', /Awaiting qualified readback/],
+    ['DIVERGED', /Observed state drifted from desired state/],
+    ['TIMED_OUT', /Verification timed out/],
+    ['CONVERGED', /Readback matched.*converged/],
+  ])('keeps publication and ACK distinct from %s verification', (status, expected) => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Actuator' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+      desiredState: { 'binding:write/channel:2': { typedValue: { channel: 2, state: true },
+        commandId: 'command-2', deliveryStatus: 'SUCCESS', ackStatus: 'ACCEPTED' } },
+      verification: { 'binding:write/channel:2': { status } },
+    }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getByText(/Desired intent.*binding:write\/channel:2/)).toBeInTheDocument();
+    expect(screen.getByText('MQTT publication: Published')).toBeInTheDocument();
+    expect(screen.getByText('Device ACK: Device ACK accepted')).toBeInTheDocument();
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    if (status !== 'CONVERGED') expect(screen.queryByText(/Verification:.*converged/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/physically verified/i)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['FAILURE', undefined, 'UNVERIFIED', 'FAILURE', 'No ACK yet', /unverified/],
+    ['SUCCESS', 'REJECTED', 'UNVERIFIED', 'Published', 'Device ACK rejected', /unverified/],
+    ['SUCCESS', undefined, 'CONVERGED', 'Published', 'No ACK yet', /converged/],
+  ])('shows delivery %s and ACK %s independently of %s verification',
+    (deliveryStatus, ackStatus, status, publication, ack, verification) => {
+      mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Actuator' } });
+      mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+        desiredState: { 'binding:write': { typedValue: true, commandId: 'current-command', deliveryStatus, ackStatus } },
+        verification: { 'binding:write': { status, desiredCommandId: 'current-command' } },
+      }] });
+      render(<DigitalTwinTab deviceId="dev-1" />);
+      expect(screen.getByText(`MQTT publication: ${publication}`)).toBeInTheDocument();
+      expect(screen.getByText(`Device ACK: ${ack}`)).toBeInTheDocument();
+      expect(screen.getByText(verification)).toBeInTheDocument();
+      expect(screen.queryByText(/physically verified/i)).not.toBeInTheDocument();
+    });
+
+  it.each(['STALE', 'OFFLINE', 'UNKNOWN'])('renders %s quality separately from persisted convergence', quality => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Actuator' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+      desiredState: { 'binding:write': { typedValue: true, commandId: 'current-command', deliveryStatus: 'SUCCESS' } },
+      verification: { 'binding:write': { status: 'CONVERGED', desiredCommandId: 'current-command',
+        readbackStateQuality: { state: quality } } },
+    }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getByText(new RegExp(`Verification: Last verified converged.*current readback ${quality.toLowerCase()}`))).toBeInTheDocument();
+    expect(screen.getByText('Device ACK: No ACK yet')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['NO_DESIRED_STATE', 'No desired intent'],
+    ['NOT_APPLICABLE', 'Verification not applicable'],
+  ])('renders derived %s verification without fabricating desired intent', (status, label) => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Actuator' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+      desiredState: {}, verification: { 'binding:read': { status } },
+    }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getByText('State · binding:read')).toBeInTheDocument();
+    expect(screen.getByText(`Verification: ${label}`)).toBeInTheDocument();
+    expect(screen.queryByText(/^Desired intent ·/i)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['ON', 'OFF'],
+    ['on', 'ON'],
+  ])('renders exact typed desired/readback members %s and %s', (desiredValue, readbackValue) => {
+    mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Actuator' } });
+    mockUseLatestTwins.mockReturnValue({ data: [{ deviceId: 'dev-1', reportedState: {},
+      desiredState: { 'binding:write': { typedValue: desiredValue, commandId: 'current-command', deliveryStatus: 'SUCCESS' } },
+      verification: { 'binding:write': { status: 'PENDING', readbackValue, comparisonResult: 'MISMATCH' } },
+    }] });
+    render(<DigitalTwinTab deviceId="dev-1" />);
+    expect(screen.getByText(new RegExp(`Value: ${JSON.stringify(desiredValue)}.*Command: current-command`))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`Readback value: ${JSON.stringify(readbackValue)}.*MISMATCH`))).toBeInTheDocument();
+    expect(screen.getByText('Verification: Awaiting qualified readback')).toBeInTheDocument();
+  });
+
   it('requests twins via useLatestTwins(100), matching the old ["twins", 100] capacity', () => {
     mockUseDevice.mockReturnValue({ data: { id: 'dev-1', name: 'Gas Sensor 1' } });
     mockUseLatestTwins.mockReturnValue({ data: [] });

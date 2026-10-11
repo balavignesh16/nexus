@@ -12,6 +12,7 @@ import { LoadingBlock } from '../../../foundation/LoadingState';
 import { Button } from '../../../foundation/Button';
 import { Select } from '../../../foundation/Input';
 import { twinApi, type TwinHistoryItem } from '../../../../api/twinApi';
+import { ReadbackMappingPanel } from './ReadbackMappingPanel';
 import { useQueryClient } from '@tanstack/react-query';
 
 export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
@@ -70,6 +71,18 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
   const previousJson = selected ? JSON.stringify({ value: selected.previousValue, unit: selected.previousUnit }, null, 2) : currentJson;
   const changedJson = selected ? JSON.stringify({ value: selected.newValue, unit: selected.newUnit }, null, 2) : currentJson;
   const displayedQuality = (state: NonNullable<typeof currentTwin>[string]) => state.stateQuality?.state ?? state.quality;
+  const verificationLabel = (status?: string, quality?: string) => {
+    switch (status) {
+      case 'PENDING': return 'Awaiting qualified readback';
+      case 'CONVERGED': return quality && quality !== 'GOOD'
+        ? `Last verified converged · current readback ${quality.toLowerCase()}` : 'Readback matched · converged';
+      case 'DIVERGED': return 'Observed state drifted from desired state';
+      case 'TIMED_OUT': return 'Verification timed out';
+      case 'NO_DESIRED_STATE': return 'No desired intent';
+      case 'NOT_APPLICABLE': return 'Verification not applicable';
+      default: return 'Readback unavailable · unverified';
+    }
+  };
 
   if (!device) return <LoadingBlock className="h-full mt-6" />;
 
@@ -140,12 +153,34 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
         </Card>
       </div>
 
+      {/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(deviceId) && <ReadbackMappingPanel deviceId={deviceId} />}
+
       {/* Content Area */}
       <GlassPanel level="glass" radius="panel-lg" className="flex-1 min-h-0 overflow-hidden relative">
 
         {/* Visual Mode */}
         {viewMode === 'visual' && (
           <div className="p-6 overflow-y-auto h-full custom-scrollbar">
+            {Object.entries(deviceTwin?.desiredState ?? {}).map(([key, desired]) => {
+              const verification = deviceTwin?.verification?.[key];
+              return <div key={key} className="mb-4 rounded-[var(--radius-panel)] p-4 border border-foundation-border bg-foundation-surface">
+                <h4 className="text-sm font-semibold text-foundation-fg">Desired intent · {key}</h4>
+                <p className="text-xs text-foundation-muted-fg mt-1">Value: {JSON.stringify(desired.typedValue)} · Command: {desired.commandId}</p>
+                <p className="text-xs text-foundation-muted-fg">MQTT publication: {desired.deliveryStatus === 'SUCCESS' ? 'Published' : desired.deliveryStatus === 'ACCEPTED_FOR_DISPATCH' ? 'Durably accepted' : desired.deliveryStatus}</p>
+                <p className="text-xs text-foundation-muted-fg">Device ACK: {desired.ackStatus === 'ACCEPTED' ? 'Device ACK accepted' : desired.ackStatus === 'REJECTED' ? 'Device ACK rejected' : 'No ACK yet'}</p>
+                <p className="text-xs text-foundation-muted-fg">Qualified readback: {verification?.readbackEvidence ?? 'None'}</p>
+                <p className="text-xs font-semibold text-foundation-fg">Verification: {verificationLabel(verification?.status, verification?.readbackStateQuality?.state)}</p>
+                {verification?.readbackValue != null && <p className="text-xs text-foundation-muted-fg">Readback value: {JSON.stringify(verification.readbackValue)} · {verification.comparisonResult}</p>}
+                {verification?.deadlineAt && <p className="text-xs text-foundation-muted-fg">Deadline: {new Date(verification.deadlineAt).toLocaleString()}</p>}
+                {verification?.discrepancyReason && <p className="text-xs text-foundation-muted-fg">Reason: {verification.discrepancyReason}</p>}
+              </div>;
+            })}
+            {Object.entries(deviceTwin?.verification ?? {})
+              .filter(([key]) => !deviceTwin?.desiredState?.[key])
+              .map(([key, verification]) => <div key={key} className="mb-4 rounded-[var(--radius-panel)] p-4 border border-foundation-border bg-foundation-surface">
+                <h4 className="text-sm font-semibold text-foundation-fg">State · {key}</h4>
+                <p className="text-xs font-semibold text-foundation-fg mt-1">Verification: {verificationLabel(verification.status, verification.readbackStateQuality?.state)}</p>
+              </div>)}
             {currentTwin ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {Object.entries(currentTwin).map(([key, value]) => {
@@ -219,6 +254,7 @@ export function DigitalTwinTab({ deviceId }: { deviceId: string }) {
               <Select aria-label="History transition type" value={historyType} onChange={event => setHistoryType(event.target.value)}>
                 <option value="">All transitions</option><option value="REPORTED_STATE_CHANGED">Reported</option>
                 <option value="DESIRED_STATE_CHANGED">Desired</option><option value="DESIRED_STATE_CLEARED">Desired cleared</option>
+                <option value="CONVERGENCE_CHANGED">Verification</option>
               </Select>
               <Select aria-label="History transition" value={selectedTransition} onChange={event => setSelectedTransition(Number(event.target.value))}>
                 {history.length === 0 && <option value={0}>No durable transitions</option>}

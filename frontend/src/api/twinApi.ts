@@ -17,11 +17,26 @@ export interface DigitalTwinResponse {
     stateId: string; typedValue: unknown; valueType: string; unit: string | null;
     source: string; commandId: string; requestedAt: string;
     acceptedForDispatchAt: string; deliveryStatus: string; ackStatus: string | null;
+    commandStatus?: string | null; publishedAt?: string | null;
+    ackBackendReceivedAt?: string | null; ackDeadlineAt?: string | null;
   }>;
   effectiveState?: Record<string, {
     stateId: string; value: unknown; source: 'REPORTED' | 'DESIRED_UNVERIFIED' | 'NONE';
     observedValue: unknown; intentValue: unknown; stateQuality?: TwinStateQualityEvidence | null;
+    verification?: string | null;
   }>;
+  verification?: Record<string, TwinVerificationState>;
+}
+
+export interface TwinVerificationState {
+  status: 'UNVERIFIED' | 'PENDING' | 'CONVERGED' | 'DIVERGED' | 'TIMED_OUT' | 'NO_DESIRED_STATE' | 'NOT_APPLICABLE';
+  updatedAt: string | null; deadlineAt: string | null; desiredCommandId: string | null;
+  mappingId: string | null; readbackBindingId: string | null; readbackStateKey: string | null;
+  readbackValue: unknown; readbackEventTime: string | null; readbackReceivedAt: string | null;
+  readbackStateQuality: TwinStateQualityEvidence | null; readbackEvidence: string | null;
+  attribution: string | null; comparator: string | null; tolerance: number | null;
+  comparisonResult: string | null; discrepancyReason: string | null;
+  readbackTelemetryId: string | null;
 }
 
 export interface TwinCapabilityState {
@@ -55,6 +70,14 @@ export interface TwinHistoryItem {
   newUnit: string | null; eventTime: string | null; receivedAt: string | null;
   requestedAt: string | null; acceptedForDispatchAt: string | null;
   transitionedAt: string; correlationId: string | null; commandId: string | null;
+  previousVerificationStatus?: string | null; newVerificationStatus?: string | null;
+  verificationCommandId?: string | null; verificationMappingId?: string | null;
+  readbackTelemetryId?: string | null; readbackStateKey?: string | null;
+  readbackBindingId?: string | null; readbackEventTime?: string | null;
+  readbackReceivedAt?: string | null; readbackEvidence?: string | null;
+  readbackAttribution?: string | null; comparatorKey?: string | null;
+  comparisonResult?: string | null; numericTolerance?: number | null;
+  verificationReason?: string | null;
 }
 export interface TwinHistoryPage { items: TwinHistoryItem[]; nextCursor: string | null }
 export interface TwinHistoryFilters { bindingId?: string; legacyKey?: string; transitionType?: string; from?: string; to?: string; limit?: number; cursor?: string }

@@ -42,10 +42,10 @@ export default function ActionsPage() {
 
   // Real ExecutionStatus values from the backend - the comparison always
   // uses the real 'FAILURE' spelling; only the displayed label is humanized.
-  const getActionStatus = (status: string) => {
+  const getActionStatus = (status: string, actionType?: string) => {
     switch (status) {
       case 'ACCEPTED_FOR_DISPATCH': return { label: 'Delivery unknown', icon: Clock, color: 'var(--warning)' };
-      case 'SUCCESS': return { label: 'SUCCESS', icon: CheckCircle2, color: 'var(--success)' };
+      case 'SUCCESS': return { label: actionType === 'SEND_COMMAND' ? 'Published to MQTT' : 'SUCCESS', icon: CheckCircle2, color: 'var(--success)' };
       case 'FAILURE': return { label: 'Failed', icon: XCircle, color: 'var(--danger)' };
       case 'UNSUPPORTED': return { label: 'Unsupported', icon: XCircle, color: 'var(--warning)' };
       case 'IGNORED': return { label: 'Ignored', icon: RotateCw, color: 'var(--foundation-muted-fg)' };
@@ -139,7 +139,7 @@ export default function ActionsPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 {filteredActions.map((action: any, i: number) => {
-                  const status = getActionStatus(action.status);
+                  const status = getActionStatus(action.status,action.actionType);
                   const targetDevice = action.deviceId || action.parameters?.deviceId || 'System';
                   return (
                     <GlassPanel
@@ -186,6 +186,12 @@ export default function ActionsPage() {
                             Device: {targetDevice}
                           </div>
                           <p className="text-sm text-foundation-fg/90 mt-1.5">{action.message || 'Action executed'}</p>
+                          {action.actionType === 'SEND_COMMAND' && <p className="text-xs text-foundation-muted-fg mt-1">
+                            Command: {action.commandStatus ?? (action.status === 'SUCCESS' ? 'PUBLISHED' : action.status)}
+                            {' · '}Execution: {action.executionStatus ?? action.status}
+                            {action.ackDeadlineAt ? ` · ACK deadline ${new Date(action.ackDeadlineAt).toLocaleString()}` : ''}
+                            {action.ackBackendReceivedAt && action.ackDeadlineAt && new Date(action.ackBackendReceivedAt) > new Date(action.ackDeadlineAt) ? ' · Late ACK' : ''}
+                          </p>}
 
                           <div className="flex flex-wrap items-center gap-3 mt-2.5 pt-2.5 border-t border-foundation-border">
                             <span
