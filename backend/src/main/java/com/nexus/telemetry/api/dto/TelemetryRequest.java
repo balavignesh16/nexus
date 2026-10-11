@@ -18,9 +18,14 @@ public record TelemetryRequest(
 
         String unit,
 
-        String capabilityKey
+        String capabilityKey,
+
+        UUID readbackCommandId
 ) {
+    public TelemetryRequest(UUID deviceId,Instant timestamp,String sensorType,Object value,String unit,String capabilityKey) {
+        this(deviceId,timestamp,sensorType,value,unit,capabilityKey,null);
+    }
     public TelemetryRequest(UUID deviceId, Instant timestamp, String sensorType, Double value, String unit) {
-        this(deviceId, timestamp, sensorType, value, unit, null);
+        this(deviceId, timestamp, sensorType, value, unit, null,null);
     }
 }

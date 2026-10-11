@@ -9,6 +9,9 @@ import com.nexus.action.domain.ExecutionStatus;
 import com.nexus.realtime.RealtimePublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -43,7 +46,7 @@ class DeviceCommandAckMessageHandlerTest {
     @BeforeEach
     void setUp() {
         actionHistoryRepository = mock(ActionHistoryRepository.class);
-        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), nullable(String.class)))
+        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), any(), nullable(String.class)))
                 .thenReturn(1);
         realtimePublisher = mock(RealtimePublisher.class);
         ObjectMapper objectMapper = new ObjectMapper();
@@ -74,7 +77,7 @@ class DeviceCommandAckMessageHandlerTest {
         handler.handle(topic, bytes(payload));
 
         verify(actionHistoryRepository).updateAcknowledgement(eq(commandId), eq(deviceId),
-                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), nullable(String.class));
+                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), any(), nullable(String.class));
         verify(realtimePublisher).publishActionAcknowledged(eq(commandId), eq(deviceId), eq(AcknowledgementStatus.ACCEPTED), any(), any());
     }
 
@@ -92,7 +95,7 @@ class DeviceCommandAckMessageHandlerTest {
         handler.handle(topic, bytes(payload));
 
         verify(actionHistoryRepository).updateAcknowledgement(eq(commandId), eq(deviceId),
-                eq(AcknowledgementStatus.REJECTED), eq(Instant.ofEpochSecond(1735689600)), eq("STALE"));
+                eq(AcknowledgementStatus.REJECTED), eq(Instant.ofEpochSecond(1735689600)), any(), eq("STALE"));
         verify(realtimePublisher).publishActionAcknowledged(eq(commandId), eq(deviceId), eq(AcknowledgementStatus.REJECTED), eq("STALE"), any());
     }
 
@@ -161,20 +164,28 @@ class DeviceCommandAckMessageHandlerTest {
     // ---------- 7. duplicate ACK ----------
 
     @Test
-    void duplicateAck_isIdempotent_noDuplicatePersistenceRow() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void duplicateAck_isIdempotent_noDuplicatePersistenceRow(CapturedOutput output) {
         UUID deviceId = UUID.randomUUID();
         UUID commandId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/commands/ack";
         ActionHistoryRecord record = existingRecord(commandId, deviceId);
-        when(actionHistoryRepository.findById(commandId)).thenReturn(Optional.of(record));
+        ActionHistoryRecord acknowledged = existingRecord(commandId,deviceId);
+        acknowledged.applyAcknowledgement(AcknowledgementStatus.ACCEPTED,Instant.ofEpochSecond(1735689600),null);
+        when(actionHistoryRepository.findById(commandId)).thenReturn(Optional.of(record),Optional.of(acknowledged),
+                Optional.of(acknowledged));
 
         String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}";
         handler.handle(topic, bytes(payload));
         handler.handle(topic, bytes(payload));
+        handler.handle(topic, bytes(payload.replace("ACCEPTED","REJECTED")));
 
-        verify(actionHistoryRepository, times(2)).updateAcknowledgement(eq(commandId), eq(deviceId),
-                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), nullable(String.class));
-        verify(actionHistoryRepository, times(2)).findById(commandId);
+        verify(actionHistoryRepository, times(1)).updateAcknowledgement(eq(commandId), eq(deviceId),
+                eq(AcknowledgementStatus.ACCEPTED), eq(Instant.ofEpochSecond(1735689600)), any(), nullable(String.class));
+        verify(actionHistoryRepository, times(3)).findById(commandId);
+        verify(realtimePublisher,times(1)).publishActionAcknowledged(eq(commandId),eq(deviceId),
+                eq(AcknowledgementStatus.ACCEPTED),any(),any());
+        org.junit.jupiter.api.Assertions.assertTrue(output.getAll().contains("Conflicting duplicate ACK for command "+commandId));
     }
 
     // ---------- 11. malformed JSON ----------
@@ -198,7 +209,7 @@ class DeviceCommandAckMessageHandlerTest {
         String topic = "nexus/devices/" + deviceId + "/commands/ack";
         ActionHistoryRecord record = existingRecord(commandId, deviceId);
         when(actionHistoryRepository.findById(commandId)).thenReturn(Optional.of(record));
-        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), any()))
+        when(actionHistoryRepository.updateAcknowledgement(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("simulated DB failure"));
 
         String payload = "{\"commandId\":\"" + commandId + "\",\"status\":\"ACCEPTED\",\"timestamp\":1735689600}";

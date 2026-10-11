@@ -12,7 +12,14 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.Clock;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.nexus.twin.application.VerificationService;
+import com.nexus.device.domain.DeviceRepository;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Tier 5E: all command-acknowledgement logic lives here, isolated from
@@ -44,16 +51,39 @@ public class DeviceCommandAckMessageHandler {
     private final ActionHistoryRepository actionHistoryRepository;
     private final RealtimePublisher realtimePublisher;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
+    private final DeviceRepository devices;
+    private VerificationService verification;
+
+    @Autowired
+    void setVerification(VerificationService verification){this.verification=verification;}
 
     public DeviceCommandAckMessageHandler(ActionHistoryRepository actionHistoryRepository,
                                            RealtimePublisher realtimePublisher,
                                            ObjectMapper objectMapper) {
+        this(actionHistoryRepository,realtimePublisher,objectMapper,Clock.systemUTC(),null);
+    }
+
+    public DeviceCommandAckMessageHandler(ActionHistoryRepository actionHistoryRepository,
+                                           RealtimePublisher realtimePublisher,
+                                           ObjectMapper objectMapper, Clock clock) {
+        this(actionHistoryRepository,realtimePublisher,objectMapper,clock,null);
+    }
+
+    @Autowired
+    public DeviceCommandAckMessageHandler(ActionHistoryRepository actionHistoryRepository,
+                                           RealtimePublisher realtimePublisher,
+                                           ObjectMapper objectMapper, Clock clock,DeviceRepository devices) {
         this.actionHistoryRepository = actionHistoryRepository;
         this.realtimePublisher = realtimePublisher;
         this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.devices = devices;
     }
 
+    @Transactional
     public void handle(String topic, byte[] payload) {
+        Instant backendReceivedAt = clock.instant();
         UUID topicDeviceId = parseDeviceIdOrNull(topic);
         if (topicDeviceId == null) {
             log.warn("Malformed command-ack topic '{}'. Acknowledging and dropping (not retryable).", topic);
@@ -87,6 +117,11 @@ public class DeviceCommandAckMessageHandler {
         }
         String reason = node.hasNonNull("reason") ? node.get("reason").asText() : null;
 
+        if(devices!=null && devices.findByIdForUpdate(topicDeviceId).isEmpty()) {
+            log.warn("Command-ack for unknown device {} ignored",topicDeviceId);
+            return;
+        }
+
         ActionHistoryRecord record = actionHistoryRepository.findById(commandId).orElse(null);
         if (record == null) {
             log.warn("Command-ack for unknown commandId {}. Acknowledging and dropping (not retryable); no row fabricated.", commandId);
@@ -101,10 +136,27 @@ public class DeviceCommandAckMessageHandler {
 
         // Update ACK fields only: a concurrent publish-result update must not
         // erase this ACK, and an ACK never changes the current desired row.
+        if (record.getAckStatus() != null) {
+            if (record.getAckStatus() != status || !ackReceivedAt.equals(record.getAckReceivedAt())
+                    || !java.util.Objects.equals(reason, record.getAckMessage()))
+                log.warn("Conflicting duplicate ACK for command {}; first ACK preserved",commandId);
+            return;
+        }
         if (actionHistoryRepository.updateAcknowledgement(commandId, topicDeviceId,
-                status, ackReceivedAt, reason) == 0) return;
+                status, ackReceivedAt, backendReceivedAt, reason) == 0) {
+            log.warn("Guarded ACK update skipped for command {}; first ACK preserved",commandId);
+            return;
+        }
 
-        realtimePublisher.publishActionAcknowledged(commandId, topicDeviceId, status, reason, ackReceivedAt);
+        if(status==AcknowledgementStatus.REJECTED && verification!=null)
+            verification.commandFailed(topicDeviceId,commandId,"DEVICE_COMMAND_REJECTED");
+        Runnable publish=()->{try{realtimePublisher.publishActionAcknowledged(commandId, topicDeviceId, status, reason, ackReceivedAt);}
+            catch(RuntimeException realtimeFailure){log.error("Post-commit ACK realtime publication failed command={}",commandId,realtimeFailure);}};
+        if(TransactionSynchronizationManager.isSynchronizationActive())
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
+                @Override public void afterCommit(){publish.run();}
+            });
+        else publish.run();
         log.info("Command {} acknowledged by device {}: {}", commandId, topicDeviceId, status);
     }
 

@@ -8,6 +8,7 @@ import com.nexus.telemetry.api.dto.TelemetryResponse;
 import com.nexus.telemetry.domain.TelemetryRecord;
 import com.nexus.telemetry.domain.TelemetryRepository;
 import com.nexus.twin.application.DigitalTwinService;
+import com.nexus.twin.application.VerificationService;
 import com.nexus.pipeline.domain.PipelineTrace;
 import com.nexus.pipeline.domain.PipelineStage;
 import com.nexus.pipeline.application.PipelineService;
@@ -47,6 +48,7 @@ public class TelemetryService {
     private final OnboardingLifecycleService onboarding;
     private final BindingConstraintService bindingConstraints;
     private final Clock clock;
+    private VerificationService verification;
 
     public TelemetryService(TelemetryRepository telemetryRepository, DeviceRepository deviceRepository,
                             DigitalTwinService digitalTwinService, RealtimePublisher realtimePublisher,
@@ -89,6 +91,9 @@ public class TelemetryService {
         this.bindingConstraints = bindingConstraints;
         this.clock=clock;
     }
+
+    @Autowired
+    void setVerification(VerificationService verification){this.verification=verification;}
 
     @Transactional
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
@@ -136,6 +141,8 @@ public class TelemetryService {
 
         telemetryRepository.save(record);
         DigitalTwinService.Mutation mutation=digitalTwinService.prepareUpdate(normalized,correlationId,receivedAt);
+        if(verification!=null && mutation.updated())
+            verification.observed(record,mutation.current(),request.readbackCommandId(),correlationId,receivedAt);
         afterCommit(() -> {
             digitalTwinService.projectAfterCommit(mutation);
             try {

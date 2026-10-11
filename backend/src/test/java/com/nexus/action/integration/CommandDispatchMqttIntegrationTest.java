@@ -353,7 +353,7 @@ class CommandDispatchMqttIntegrationTest {
                 ActionType.SEND_COMMAND, ExecutionStatus.ACCEPTED_FOR_DISPATCH,
                 Map.of("deviceId", deviceId.toString()), Instant.now(), "accepted"));
         actionHistoryRepository.updateAcknowledgement(command, deviceId,
-                com.nexus.action.domain.AcknowledgementStatus.ACCEPTED, Instant.now(), null);
+                com.nexus.action.domain.AcknowledgementStatus.ACCEPTED, Instant.now(), Instant.now(), null);
         actionHistoryRepository.updatePublishResultIfAccepted(command, ExecutionStatus.SUCCESS,
                 Instant.now(), "published");
         var action = actionHistoryRepository.findById(command).orElseThrow();

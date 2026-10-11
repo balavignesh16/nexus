@@ -26,6 +26,11 @@ import com.nexus.space.domain.Space;
 import com.nexus.space.persistence.SpaceRepository;
 import com.nexus.telemetry.domain.TelemetryRepository;
 import com.nexus.twin.domain.DigitalTwinRepository;
+import com.nexus.twin.domain.CurrentTwinVerificationRepository;
+import com.nexus.twin.domain.VerificationStateId;
+import com.nexus.twin.domain.VerificationStatus;
+import com.nexus.twin.domain.DesiredTwinStateRepository;
+import com.nexus.twin.application.ReadbackMappingService;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.junit.jupiter.api.*;
@@ -90,6 +95,9 @@ class GenericPhysicalIntelligenceLoopSmokeTest {
     @Autowired ObjectMapper json;
     @Autowired RuntimeCapabilityResolver resolver;
     @Autowired CapabilityValueValidator valueValidator;
+    @Autowired ReadbackMappingService readbackMappings;
+    @Autowired CurrentTwinVerificationRepository verifications;
+    @Autowired DesiredTwinStateRepository desired;
 
     private MqttClient simulatedDevice;
     private UUID deviceId;
@@ -141,6 +149,14 @@ class GenericPhysicalIntelligenceLoopSmokeTest {
 
     @Test @Timeout(60)
     void arbitraryGenericTelemetryTriggersRuleAndAcknowledgedSimulatedCommand() throws Exception {
+        String readbackKey="led_loop_readback_"+UUID.randomUUID().toString().replace("-", "");
+        UUID readbackDefinitionId=UUID.randomUUID();
+        definitions.save(new CapabilityDefinition(readbackDefinitionId,readbackKey,"LED readback",null,
+                CapabilityDirection.READ,CapabilityValueType.BOOLEAN,"BOOLEAN",List.of("BOOLEAN"),
+                null,null,List.of(),List.of(),"actuator",Map.of(),Map.of()));
+        UUID readbackBindingId=bind(readbackDefinitionId,"BOOLEAN","{\"telemetryKey\":\"LED_READBACK\"}");
+        readbackMappings.addDevice(deviceId,new ReadbackMappingService.Policy(ledBindingId,"",readbackBindingId,
+                "IDENTITY",null,"EXACT",null,"COMMAND_ECHO",20));
         BlockingQueue<MqttMessage> receivedCommands = new ArrayBlockingQueue<>(2);
         simulatedDevice.setCallback(new MqttCallback() {
             public void connectionLost(Throwable cause) {}
@@ -179,6 +195,21 @@ class GenericPhysicalIntelligenceLoopSmokeTest {
         ActionHistoryRecord action = awaitAck(commandId);
         assertEquals(ExecutionStatus.SUCCESS, action.getStatus());
         assertEquals(AcknowledgementStatus.ACCEPTED, action.getAckStatus());
+        var verificationId=new VerificationStateId(deviceId,"binding:"+ledBindingId,"");
+        assertEquals(VerificationStatus.PENDING,verifications.findById(verificationId).orElseThrow().getVerificationStatus());
+        rules.disable(ruleId);
+        publish("nexus/devices/"+deviceId+"/telemetry",json.writeValueAsString(Map.of(
+                "deviceId",deviceId.toString(),"timestamp",Instant.now().toString(),
+                "sensorType","LED_READBACK","capabilityKey",readbackKey,"value",true,
+                "unit","BOOLEAN","readbackCommandId",commandId.toString())));
+        long convergenceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+        while(System.nanoTime()<convergenceDeadline && verifications.findById(verificationId).stream()
+                .noneMatch(v->v.getVerificationStatus()==VerificationStatus.CONVERGED))Thread.sleep(100);
+        var converged=verifications.findById(verificationId).orElseThrow();
+        assertEquals(VerificationStatus.CONVERGED,converged.getVerificationStatus());
+        assertEquals("COMMAND_ECHO",converged.getReadbackEvidence());
+        assertEquals(commandId,desired.findById(new com.nexus.twin.domain.DesiredTwinStateId(
+                deviceId,"binding:"+ledBindingId,"")).orElseThrow().getCommandId());
         assertEquals(deviceId, action.getDeviceId());
         assertEquals("led", action.getParameters().get("capabilityKey"));
         var target = resolver.resolve(deviceId, "led", CapabilityDirection.WRITE);

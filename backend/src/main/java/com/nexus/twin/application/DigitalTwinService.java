@@ -73,7 +73,10 @@ public class DigitalTwinService {
     public Mutation prepareUpdate(NormalizedTelemetry request,String correlationId,Instant receivedAt) {
         long stageStart=System.currentTimeMillis();
         String stateKey=stateKey(request);
-        if (request.timestamp().isAfter(receivedAt.plus(maximumFutureSkew))) {
+        // PostgreSQL persists timestamp(6). Compare at that precision so an
+        // exact replay cannot appear newer solely due to truncated nanoseconds.
+        Instant eventTime=request.timestamp().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        if (eventTime.isAfter(receivedAt.plus(maximumFutureSkew))) {
             log.warn("Ignoring future-dated Twin candidate device={} stateKey={} eventTime={} receivedAt={}",
                     request.deviceId(),stateKey,request.timestamp(),receivedAt);
             return new Mutation(null,null,correlationId,stageStart,false,true);
@@ -83,7 +86,7 @@ public class DigitalTwinService {
         Optional<DigitalTwin> existing=repository!=null
                 ? repository.findByDeviceIdAndStateKey(request.deviceId(),stateKey)
                 : registry.get(request.deviceId(),request.externalIdentifier());
-        if(existing.isPresent()&&!request.timestamp().isAfter(existing.get().latestTimestamp())) {
+        if(existing.isPresent()&&!eventTime.isAfter(existing.get().latestTimestamp())) {
             log.debug("Ignored replay/out-of-order telemetry device={} stateKey={}",request.deviceId(),stateKey);
             return new Mutation(existing.get(),null,correlationId,stageStart,false,false);
         }

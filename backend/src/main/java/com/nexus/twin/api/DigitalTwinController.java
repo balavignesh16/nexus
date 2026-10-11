@@ -7,6 +7,8 @@ import com.nexus.twin.domain.DesiredTwinStateRepository;
 import com.nexus.action.domain.ActionHistoryRecord;
 import com.nexus.action.domain.ActionHistoryRepository;
 import com.nexus.twin.application.TwinStateQualityEvaluator;
+import com.nexus.twin.domain.CurrentTwinVerificationRepository;
+import com.nexus.twin.domain.DeviceReadbackMappingRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +25,18 @@ public class DigitalTwinController {
     private final DesiredTwinStateRepository desiredRepository;
     private final ActionHistoryRepository actionRepository;
     private final TwinStateQualityEvaluator qualityEvaluator;
+    private CurrentTwinVerificationRepository verificationRepository;
+    private DeviceReadbackMappingRepository mappingRepository;
+    private java.time.Clock clock=java.time.Clock.systemUTC();
+
+    @Autowired
+    void setClock(java.time.Clock clock){this.clock=clock;}
+
+    @Autowired
+    void setVerificationRepository(CurrentTwinVerificationRepository repository){this.verificationRepository=repository;}
+
+    @Autowired
+    void setMappingRepository(DeviceReadbackMappingRepository repository){this.mappingRepository=repository;}
 
     public DigitalTwinController(DigitalTwinService twinService) {
         this(twinService, null, null,null);
@@ -47,7 +61,8 @@ public class DigitalTwinController {
         if (states.isEmpty() && desired.isEmpty()) {
             throw new com.nexus.shared.exception.ResourceNotFoundException("DigitalTwin", deviceId.toString());
         }
-        return ResponseEntity.ok(DigitalTwinResponse.from(states, desired, actionsFor(desired),qualities(states,desired)));
+        return ResponseEntity.ok(DigitalTwinResponse.from(states, desired, actionsFor(desired),qualities(states,desired),
+                verifications(deviceId),mappings(deviceId),clock));
     }
 
     @GetMapping("/twins")
@@ -65,7 +80,8 @@ public class DigitalTwinController {
             var states = twinService.getTwinCapabilities(id);
             if (states.isEmpty() && reportedDevices.containsKey(id)) states = List.of(reportedDevices.get(id));
             var desired = desiredByDevice.getOrDefault(id, List.of());
-            return DigitalTwinResponse.from(states, desired, actionsFor(desired),qualities(states,desired));
+            return DigitalTwinResponse.from(states, desired, actionsFor(desired),qualities(states,desired),
+                    verifications(id),mappings(id),clock);
         }).collect(Collectors.toList());
                 
         return ResponseEntity.ok(twins);
@@ -77,6 +93,13 @@ public class DigitalTwinController {
         for (var action : actionRepository.findAllById(desired.stream().map(DesiredTwinState::getCommandId).toList()))
             result.put(action.getRequestId(), action);
         return result;
+    }
+
+    private List<com.nexus.twin.domain.CurrentTwinVerificationState> verifications(UUID deviceId){
+        return verificationRepository==null?List.of():verificationRepository.findByDeviceId(deviceId);
+    }
+    private List<com.nexus.twin.domain.DeviceReadbackMapping> mappings(UUID deviceId){
+        return mappingRepository==null?List.of():mappingRepository.findByDeviceId(deviceId);
     }
 
     private java.util.Map<String,com.nexus.twin.domain.TwinStateQualityEvidence> qualities(List<com.nexus.twin.domain.DigitalTwin> states,List<DesiredTwinState> desired){

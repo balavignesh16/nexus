@@ -14,6 +14,7 @@ import com.nexus.twin.domain.DesiredTwinStateId;
 import com.nexus.twin.domain.TwinStateTransition;
 import com.nexus.twin.domain.TwinStateTransitionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.nexus.twin.application.VerificationService;
 
 /** The device row lock serializes durable acceptance, including first intent for a target. */
 @Service
@@ -24,6 +25,7 @@ public class CommandAcceptanceService {
     private final DesiredTwinStateRepository desired;
     private final TwinStateTransitionRepository transitions;
     private final Clock clock;
+    private VerificationService verification;
 
     public CommandAcceptanceService(DeviceRepository devices, CommandExecutor executor,
             ActionHistoryRepository actions, DesiredTwinStateRepository desired) {
@@ -37,6 +39,9 @@ public class CommandAcceptanceService {
         this.devices=devices; this.executor=executor; this.actions=actions; this.desired=desired;
         this.transitions=transitions; this.clock=clock;
     }
+
+    @Autowired
+    void setVerification(VerificationService verification){this.verification=verification;}
 
     // Rule actions can run inside the telemetry transaction. A separate commit
     // is required before the caller is permitted to publish MQTT.
@@ -68,6 +73,7 @@ public class CommandAcceptanceService {
                 request.requestId(), requestedAt, acceptedAt);
         desired.saveAndFlush(next);
         if(transitions!=null)transitions.save(TwinStateTransition.desired(previous,next,clock.instant(),correlationId));
+        if(verification!=null)verification.accepted(next,correlationId);
         return target;
     }
 }

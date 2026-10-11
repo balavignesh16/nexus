@@ -13,6 +13,7 @@ import com.nexus.device.template.*;
 import com.nexus.shared.exception.ResourceNotFoundException;
 import com.nexus.space.persistence.SpaceRepository;
 import com.nexus.twin.application.FreshnessPolicy;
+import com.nexus.twin.application.ReadbackMappingService;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,10 @@ public class DeviceProvisioningService {
     private final ObjectMapper canonicalMapper;
     private final Clock clock;
     private final FreshnessPolicy freshness;
+    private ReadbackMappingService readbackMappings;
+
+    @Autowired
+    void setReadbackMappings(ReadbackMappingService readbackMappings){this.readbackMappings=readbackMappings;}
 
     @Autowired
     public DeviceProvisioningService(DeviceOnboardingSessionRepository sessions, DeviceTemplateRepository templates,
@@ -118,6 +123,8 @@ public class DeviceProvisioningService {
         }
         assertUnambiguous(created);
         bindings.saveAll(created);
+        bindings.flush();
+        if(readbackMappings!=null)readbackMappings.materialize(device.getId(),template.getId(),created);
         DeviceOnboardingSession session = sessions.save(new DeviceOnboardingSession(UUID.randomUUID(),
                 device.getId(), template.getId(), request.requestKey(), hash,
                 now.plus(Duration.ofMinutes(5)), now));

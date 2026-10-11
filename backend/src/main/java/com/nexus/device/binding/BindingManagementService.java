@@ -9,6 +9,8 @@ import com.nexus.rule.domain.RuleField;
 import com.nexus.rule.persistence.RuleRegistry;
 import com.nexus.shared.exception.ResourceNotFoundException;
 import com.nexus.twin.application.FreshnessPolicy;
+import com.nexus.twin.application.VerificationService;
+import com.nexus.twin.domain.DeviceReadbackMappingRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,13 @@ public class BindingManagementService {
     private final BindingConstraintService constraints;
     private final RuleRegistry rules;
     private final FreshnessPolicy freshness;
+    private DeviceReadbackMappingRepository readbackMappings;
+    private VerificationService verification;
+
+    @Autowired
+    void setReadbackLifecycle(DeviceReadbackMappingRepository mappings,VerificationService verification){
+        this.readbackMappings=mappings;this.verification=verification;
+    }
 
     public BindingManagementService(DeviceCapabilityBindingRepository bindings,
             CapabilityDefinitionRepository definitions, DeviceRepository devices,
@@ -47,7 +56,7 @@ public class BindingManagementService {
 
     @Transactional
     public DeviceCapabilityBindingResponse create(UUID deviceId, BindingMutationRequest request) {
-        if (!devices.existsById(deviceId)) throw new ResourceNotFoundException("Device", deviceId.toString());
+        devices.findByIdForUpdate(deviceId).orElseThrow(() -> new ResourceNotFoundException("Device", deviceId.toString()));
         if (request.capabilityDefinitionId() == null) throw new IllegalArgumentException("capabilityDefinitionId is required");
         var definition = definitions.findById(request.capabilityDefinitionId())
                 .orElseThrow(() -> new ResourceNotFoundException("CapabilityDefinition", request.capabilityDefinitionId().toString()));
@@ -72,6 +81,7 @@ public class BindingManagementService {
 
     @Transactional
     public DeviceCapabilityBindingResponse update(UUID deviceId, UUID bindingId, BindingMutationRequest request) {
+        devices.findByIdForUpdate(deviceId).orElseThrow(() -> new ResourceNotFoundException("Device",deviceId.toString()));
         var binding = bindings.findById(bindingId)
                 .orElseThrow(() -> new ResourceNotFoundException("DeviceCapabilityBinding", bindingId.toString()));
         if (!binding.getDeviceId().equals(deviceId)) throw new ResourceNotFoundException("DeviceCapabilityBinding", bindingId.toString());
@@ -93,6 +103,10 @@ public class BindingManagementService {
                 || !Objects.equals(threshold,binding.getFreshnessThresholdSeconds())) && activeRuleReferences(deviceId, binding.getDefinition().getKey()))
             throw new IllegalStateException("Active Rule references this binding");
         binding.update(enabled, unit, configuration, external,threshold,Instant.now());
+        bindings.flush();
+        if(readbackMappings!=null && verification!=null)for(var mapping:readbackMappings.findByDeviceId(deviceId))
+            if(mapping.isEnabled() && (bindingId.equals(mapping.getWriteBindingId()) || bindingId.equals(mapping.getReadBindingId())))
+                verification.mappingUnavailable(deviceId,mapping.getWriteBindingId(),mapping.getWriteSubtargetKey());
         DeviceProvisioningService.assertUnambiguous(bindings.findByDeviceId(deviceId));
         return DeviceCapabilityBindingResponse.from(binding);
     }

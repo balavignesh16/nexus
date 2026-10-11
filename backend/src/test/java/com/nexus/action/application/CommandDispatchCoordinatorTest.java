@@ -3,6 +3,7 @@ package com.nexus.action.application;
 import com.nexus.action.application.executor.CommandExecutor;
 import com.nexus.action.domain.*;
 import com.nexus.device.capability.definition.CapabilityValueType;
+import com.nexus.twin.application.VerificationService;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import java.time.Instant;
@@ -36,18 +37,21 @@ class CommandDispatchCoordinatorTest {
         InOrder order = inOrder(acceptance, executor, actions);
         order.verify(acceptance).accept(eq(request), eq(context), any(),eq(CORRELATION_ID));
         order.verify(executor).publishPrepared(request, prepared);
-        order.verify(actions).updatePublishResultIfAccepted(request.requestId(), ExecutionStatus.SUCCESS,
-                result.timestamp(), result.message());
+        order.verify(actions).updatePublishResultIfAccepted(eq(request.requestId()), eq(ExecutionStatus.SUCCESS),
+                any(), any(), eq(result.message()));
     }
 
     @Test void publishFailureStillHasAcceptedIntent() {
+        var reconciliation=mock(VerificationService.class);
+        coordinator.setVerification(reconciliation);
         when(acceptance.accept(eq(request), eq(context), any(),eq(CORRELATION_ID))).thenReturn(prepared);
         when(executor.publishPrepared(request, prepared)).thenReturn(new ActionExecutionResult(
                 request.requestId(), request, ExecutionStatus.FAILURE, Instant.now(), "MQTT failed"));
         var outcome = coordinator.dispatch(request, context,CORRELATION_ID);
         assertTrue(outcome.accepted());
         assertEquals(ExecutionStatus.FAILURE, outcome.result().status());
-        verify(actions).updatePublishResultIfAccepted(eq(request.requestId()), eq(ExecutionStatus.FAILURE), any(), any());
+        verify(actions).updatePublishResultIfAccepted(eq(request.requestId()), eq(ExecutionStatus.FAILURE), any(), isNull(), any());
+        verify(reconciliation).commandFailed(deviceId,request.requestId(),"MQTT_PUBLICATION_FAILED");
     }
 
     @Test void rejectedRequestCannotPublishOrBecomeAccepted() {

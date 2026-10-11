@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.time.Clock;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 @RequestMapping("/api/v1/actions")
@@ -21,10 +23,17 @@ public class ActionController {
 
     private final ActionHistoryRepository historyRepository;
     private final ActionExecutorRegistry registry;
+    private final Clock clock;
 
     public ActionController(ActionHistoryRepository historyRepository, ActionExecutorRegistry registry) {
+        this(historyRepository,registry,Clock.systemUTC());
+    }
+
+    @Autowired
+    public ActionController(ActionHistoryRepository historyRepository, ActionExecutorRegistry registry,Clock clock) {
         this.historyRepository = historyRepository;
         this.registry = registry;
+        this.clock = clock;
     }
 
     /**
@@ -52,7 +61,7 @@ public class ActionController {
             records = historyRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, limit)).getContent();
         }
         List<ActionHistoryResponse> responses = records.stream()
-                .map(ActionHistoryResponse::from)
+                .map(row -> ActionHistoryResponse.from(row,clock))
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);
     }

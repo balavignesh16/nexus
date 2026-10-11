@@ -5,6 +5,8 @@ import com.nexus.action.domain.ActionExecutionResult;
 import com.nexus.action.domain.ActionHistoryRecord;
 import com.nexus.action.domain.ActionType;
 import com.nexus.action.domain.ExecutionStatus;
+import com.nexus.action.domain.CommandStatus;
+import java.time.Clock;
 
 import java.time.Instant;
 import java.util.Map;
@@ -22,8 +24,20 @@ public record ActionHistoryResponse(
     String message,
     AcknowledgementStatus ackStatus,
     Instant ackReceivedAt,
-    String ackMessage
+    String ackMessage,
+    ExecutionStatus executionStatus,
+    CommandStatus commandStatus,
+    Instant publishedAt,
+    Instant ackBackendReceivedAt,
+    Instant ackDeviceTimestamp,
+    Instant ackDeadlineAt
 ) {
+    public ActionHistoryResponse(UUID executionId, UUID requestId, UUID matchId, UUID deviceId,
+            ActionType actionType, Map<String,Object> parameters, ExecutionStatus status, Instant timestamp,
+            String message, AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage) {
+        this(executionId,requestId,matchId,deviceId,actionType,parameters,status,timestamp,message,
+                ackStatus,ackReceivedAt,ackMessage,status,null,null,null,null,null);
+    }
     /**
      * Built from the immediate publish result only - ackStatus/ackReceivedAt/
      * ackMessage are always null here, since {@link ActionExecutionResult}
@@ -45,7 +59,12 @@ public record ActionHistoryResponse(
                 result.message(),
                 null,
                 null,
-                null
+                null,
+                result.status(),
+                result.request().actionType() != ActionType.SEND_COMMAND ? null :
+                result.status() == ExecutionStatus.SUCCESS ? CommandStatus.PUBLISHED :
+                        result.status() == ExecutionStatus.ACCEPTED_FOR_DISPATCH ? CommandStatus.ACCEPTED_FOR_DISPATCH : CommandStatus.FAILED,
+                null,null,null,null
         );
     }
 
@@ -56,6 +75,10 @@ public record ActionHistoryResponse(
      * every non-SEND_COMMAND action type.
      */
     public static ActionHistoryResponse from(ActionHistoryRecord record) {
+        return from(record,Clock.systemUTC());
+    }
+
+    public static ActionHistoryResponse from(ActionHistoryRecord record, Clock clock) {
         return new ActionHistoryResponse(
                 record.getRequestId(),
                 record.getRequestId(),
@@ -68,7 +91,10 @@ public record ActionHistoryResponse(
                 record.getMessage(),
                 record.getAckStatus(),
                 record.getAckReceivedAt(),
-                record.getAckMessage()
+                record.getAckMessage(),
+                record.getStatus(), record.getActionType()==ActionType.SEND_COMMAND?CommandStatus.from(record,clock):null,
+                record.getPublishedAt(),
+                record.getAckBackendReceivedAt(),record.getAckDeviceTimestamp(),record.getAckDeadlineAt()
         );
     }
 }
