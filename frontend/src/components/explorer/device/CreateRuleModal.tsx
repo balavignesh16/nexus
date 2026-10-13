@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { ruleApi, type Rule, type RuleCondition, type RuleOperator } from '../../../api/ruleApi';
@@ -98,6 +98,8 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [baseRevision, setBaseRevision] = useState<number | undefined>();
+  const openedRule = useRef<string | null>(null);
 
   const triggerDevice = useMemo(() => devices.find((d) => d.id === triggerDeviceId), [devices, triggerDeviceId]);
   const readCapabilities = useMemo(() => readCapabilitiesOf(triggerDevice), [triggerDevice]);
@@ -153,7 +155,10 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
   // fields it writes) - the seed effects above only backfill a field when
   // it is still empty, so they never clobber what this sets.
   useEffect(() => {
-    if (!isOpen || !editingRule) return;
+    if (!isOpen) { openedRule.current = null; return; }
+    if (!editingRule || openedRule.current === editingRule.ruleId) return;
+    openedRule.current = editingRule.ruleId;
+    setBaseRevision(editingRule.rowRevision);
     setName(editingRule.name);
     setPriority(editingRule.priority);
     setEnabled(editingRule.enabled);
@@ -300,7 +305,7 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
     }];
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (draftOnly = false) => {
     setError(null);
     if (!name.trim()) {
       setError('Name is required.');
@@ -336,7 +341,13 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
     setSubmitting(true);
     try {
       if (editingRule) {
-        await ruleApi.updateRule(editingRule.ruleId, { ...body, ruleId: editingRule.ruleId });
+        if (baseRevision !== undefined) {
+          await ruleApi.saveDraft(editingRule.ruleId, body, baseRevision);
+        } else {
+          await ruleApi.updateRule(editingRule.ruleId, { ...body, ruleId: editingRule.ruleId });
+        }
+      } else if (draftOnly) {
+        await ruleApi.createDraft({ ...body, enabled: false });
       } else {
         await ruleApi.createRule(body);
       }
@@ -629,19 +640,21 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
           </div>
 
           {error && <div data-testid="create-rule-error" className="text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
+          {baseRevision !== undefined && <p className="text-xs">Saving a draft does not pause or replace the active version. Use the lifecycle controls to validate, activate or pause. On conflict, your entries remain here; close and reopen only when ready to reload.</p>}
         </div>
 
         <div className="flex items-center justify-end gap-3 p-5 border-t border-foundation-border">
+          {!editingRule && <button disabled={submitting} onClick={() => handleSubmit(true)} className="px-4 py-2 text-xs">Create Draft</button>}
           <button onClick={handleClose} className="px-4 py-2 text-xs font-medium text-foundation-muted-fg hover:text-foundation-fg">
             Cancel
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={submitting}
             className="px-4 py-2 rounded-[var(--radius-pill)] text-xs font-medium transition-colors disabled:opacity-50"
             style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' }}
           >
-            {submitting ? (editingRule ? 'Saving...' : 'Creating...') : (editingRule ? 'Save Changes' : 'Create Rule')}
+            {submitting ? (editingRule ? 'Saving...' : 'Creating...') : (editingRule ? (baseRevision !== undefined ? 'Save Draft' : 'Save Changes') : 'Create Rule')}
           </button>
         </div>
       </div>

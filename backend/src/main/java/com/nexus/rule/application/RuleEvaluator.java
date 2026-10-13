@@ -37,6 +37,8 @@ import java.util.UUID;
  */
 @Component
 public class RuleEvaluator {
+    private RuleCapabilityValidator references;
+    @Autowired void setReferences(RuleCapabilityValidator references){this.references=references;}
 
     private static final String MISSING = "MISSING";
 
@@ -94,6 +96,12 @@ public class RuleEvaluator {
     }
 
     private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event, UUID resolvedDeviceId) {
+        // DEVICE_ID always compares the canonical source scope, never a capability value.
+        if(condition.field()==RuleField.DEVICE_ID){
+            Object actual=extractActualValue(condition,event);boolean met=false;
+            if(event.deviceId()!=null)try{boolean same=event.deviceId().equals(UUID.fromString(condition.expectedValue()));met=condition.operator()==com.nexus.rule.domain.RuleOperator.EQ?same:condition.operator()==com.nexus.rule.domain.RuleOperator.NE&&!same;}catch(IllegalArgumentException invalid){/* Invalid scope fails closed. */}
+            return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met);
+        }
         if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(condition,resolvedDeviceId);
         if (condition.capabilityType() != null) {
             return evaluateCapabilityCondition(condition, resolvedDeviceId);
@@ -105,10 +113,20 @@ public class RuleEvaluator {
 
     private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId){
         if(deviceId==null)return evidence(condition,MISSING,false,null,null);
-        Optional<DigitalTwin> found=digitalTwinRegistry.getAllForDevice(deviceId).stream().filter(t->condition.capabilityKey().equals(t.capabilityKey())||condition.capabilityKey().equalsIgnoreCase(t.latestSensorType())).findFirst();
+        com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved=null;
+        if(references!=null){
+            try{resolved=references.resolveInstalled(deviceId,condition.capabilityKey(),com.nexus.device.capability.CapabilityDirection.READ);}
+            catch(RuntimeException invalid){return evidence(condition,MISSING,false,null,null);}
+        }
+        final var reference=resolved;
+        var candidates=digitalTwinRegistry.getAllForDevice(deviceId).stream().filter(t->reference==null?
+            condition.capabilityKey().equalsIgnoreCase(t.capabilityKey()==null?"":t.capabilityKey())||condition.capabilityKey().equalsIgnoreCase(t.latestSensorType()):
+            reference.binding()!=null?reference.binding().getId().equals(t.bindingId()):reference.definition().getKey().equals(t.capabilityKey())).toList();
+        Optional<DigitalTwin> found=candidates.size()==1?Optional.of(candidates.getFirst()):Optional.empty();
         if(found.isEmpty()||found.get().typedValue()==null)return evidence(condition,MISSING,false,found.orElse(null),null);
         DigitalTwin twin=found.get(); TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(twin);
-        Object actual=twin.typedValue(); boolean met=(quality==null||quality.state()==TwinStateQuality.GOOD)
+        boolean compatible=hasCompatibleUnits(condition,twin,resolved);
+        Object actual=twin.typedValue(); boolean met=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD)
                 &&evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
         return evidence(condition,actual,met,twin,quality);
     }
@@ -121,41 +139,71 @@ public class RuleEvaluator {
         return false;
     }
 
-    /**
-     * Reads current state for (resolvedDeviceId, condition.capabilityType)
-     * from DigitalTwinRegistry - never from the triggering event's payload.
-     * A device the rule couldn't resolve, or a capability the device has
-     * never reported, is MISSING: evaluates to not-met, recorded explicitly
-     * as "MISSING" evidence, never silently coerced to a false/zero value.
-     * A present-but-old twin row still counts (no TTL/staleness rejection in
-     * Phase 13) - its timestamp is recorded in evidence regardless.
-     */
+    /** Legacy syntax retains its comparisons, not historical wire-name ownership or inferred units. */
     private ConditionEvidence evaluateCapabilityCondition(RuleCondition condition, UUID resolvedDeviceId) {
         if (resolvedDeviceId == null) {
-            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), MISSING, false, null);
+            return evidence(condition,MISSING,false,null,null);
         }
-
-        Optional<DigitalTwin> twin = digitalTwinRegistry.get(resolvedDeviceId, condition.capabilityType().name());
-        if (twin.isEmpty() || twin.get().latestValue() == null) {
-            Instant twinTimestamp = twin.map(DigitalTwin::latestTimestamp).orElse(null);
-            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), MISSING, false, twinTimestamp);
+        com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved=null;
+        Optional<DigitalTwin> twin;
+        if(references!=null){
+            try{
+                resolved=references.resolveInstalled(resolvedDeviceId,
+                    com.nexus.device.capability.definition.LegacyCapabilityDefinitionMapping.keyFor(condition.capabilityType()),
+                    com.nexus.device.capability.CapabilityDirection.READ);
+                var reference=resolved;
+                String stateKey=reference.binding()!=null?"binding:"+reference.binding().getId():"legacy:"+condition.capabilityType().name();
+                twin=digitalTwinRegistry.getByStateKey(resolvedDeviceId,stateKey).filter(t->
+                    resolvedDeviceId.equals(t.deviceId()) && stateKey.equals(t.stateKey())
+                    && (reference.binding()!=null?
+                        reference.binding().getId().equals(t.bindingId()) && reference.definition().getId().equals(t.capabilityDefinitionId()):
+                        t.bindingId()==null && condition.capabilityType().name().equals(t.legacyCapabilityType())
+                            && (t.capabilityDefinitionId()==null || reference.definition().getId().equals(t.capabilityDefinitionId())))
+                    && (t.capabilityKey()==null || reference.definition().getKey().equals(t.capabilityKey())));
+            }catch(RuntimeException invalid){return evidence(condition,MISSING,false,null,null);}
+        }else{
+            // Existing manually constructed legacy unit fixtures have no installed authority.
+            // Spring's mandatory setReferences injection always selects the canonical branch above.
+            twin=digitalTwinRegistry.get(resolvedDeviceId,condition.capabilityType().name());
         }
-
+        if(twin.isEmpty() || twin.get().typedValue()==null)return evidence(condition,MISSING,false,twin.orElse(null),null);
         DigitalTwin currentTwin = twin.get();
         TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(currentTwin);
-        double rawValue = currentTwin.latestValue();
+        boolean compatible=hasCompatibleUnits(condition,currentTwin,resolved);
+        boolean eligible=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD);
         CapabilityValueKind kind = CapabilityValueKind.of(condition.capabilityType());
-        boolean conditionMet = (quality==null||quality.state()==TwinStateQuality.GOOD)&&evaluateTypedConditionMet(condition, rawValue, kind);
-        Object actualValueForEvidence = kind == CapabilityValueKind.BOOLEAN ? (rawValue != 0.0) : rawValue;
+        Object actual=currentTwin.typedValue();
+        boolean met=false;
+        if(actual instanceof Number number){
+            double raw=number.doubleValue();
+            actual=kind==CapabilityValueKind.BOOLEAN?(raw!=0.0):raw;
+            met=eligible&&Double.isFinite(raw)&&evaluateTypedConditionMet(condition,raw,kind);
+        }else if(kind==CapabilityValueKind.BOOLEAN && actual instanceof Boolean bool){
+            Boolean expected=parseBooleanOrNull(condition.expectedValue());
+            met=eligible&&expected!=null && switch(condition.operator()){
+                case EQ->bool.equals(expected);case NE->!bool.equals(expected);default->false;
+            };
+        }
+        return evidence(condition,actual,met,currentTwin,quality);
+    }
 
-        return evidence(condition,actualValueForEvidence,conditionMet,currentTwin,quality);
+    private boolean hasCompatibleUnits(RuleCondition condition,DigitalTwin twin,
+            com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved){
+        String effectiveUnit=resolved==null?twin.latestUnit():resolved.effectiveUnit();
+        // NULL equality is safe only for an explicitly unitless installed contract,
+        // not an unresolved choice of dimensional units. Preserve manual fixtures without references.
+        boolean unitEstablished=resolved==null || effectiveUnit!=null || resolved.definition().getAllowedUnits().isEmpty();
+        return unitEstablished&&java.util.Objects.equals(twin.latestUnit(),effectiveUnit)
+            && (condition.unit()==null || java.util.Objects.equals(condition.unit(),effectiveUnit));
     }
 
     private ConditionEvidence evidence(RuleCondition condition,Object actual,boolean met,DigitalTwin twin,TwinStateQualityEvidence q){
+        boolean legacyCapability=condition.capabilityKey()==null && condition.capabilityType()!=null;
+        String key=condition.capabilityKey()!=null?condition.capabilityKey():legacyCapability&&twin!=null?twin.capabilityKey():null;
         return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met,
-                twin==null?null:twin.latestTimestamp(),condition.capabilityKey(),twin==null?null:twin.capabilityDefinitionId(),
+                twin==null?null:twin.latestTimestamp(),key,twin==null?null:twin.capabilityDefinitionId(),
                 twin==null?null:twin.bindingId(),twin==null||twin.valueType()==null?null:twin.valueType().name(),
-                condition.unit()!=null?condition.unit():twin==null?null:twin.latestUnit(),q==null?null:q.state().name(),
+                legacyCapability&&twin!=null?twin.latestUnit():condition.unit()!=null?condition.unit():twin==null?null:twin.latestUnit(),q==null?null:q.state().name(),
                 q==null?null:q.reason(),q==null?null:q.evaluatedAt(),q==null?null:q.receivedAt(),
                 q==null?null:q.thresholdSeconds(),q==null?null:q.connectivity());
     }
@@ -228,7 +276,7 @@ public class RuleEvaluator {
     private Object extractActualValue(RuleCondition condition, DomainEvent event) {
         return switch (condition.field()) {
             case EVENT_TYPE -> event.eventType().name();
-            case DEVICE_ID -> event.deviceId().toString();
+            case DEVICE_ID -> event.deviceId()==null?null:event.deviceId().toString();
             case SEVERITY -> event.severity();
             case SENSOR_TYPE -> {
                 Map<String, Object> payload = event.payload();

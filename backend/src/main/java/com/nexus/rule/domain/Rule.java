@@ -19,8 +19,19 @@ public record Rule(
     List<RuleCondition> conditions,
     List<RuleAction> actions,
     Map<String, String> metadata,
-    Integer cooldownSeconds
+    Integer cooldownSeconds,
+    RuleExecutionIdentity executionIdentity
 ) {
+    public Rule {
+        if(conditions!=null)conditions=java.util.Collections.unmodifiableList(new java.util.ArrayList<>(conditions));
+        if(actions!=null)actions=java.util.Collections.unmodifiableList(new java.util.ArrayList<>(actions));
+        if(metadata!=null)metadata=java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(metadata));
+    }
+    public Rule(UUID ruleId, String name, boolean enabled, int priority,
+                List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata,
+                Integer cooldownSeconds) {
+        this(ruleId, name, enabled, priority, conditions, actions, metadata, cooldownSeconds, null);
+    }
     public Rule(UUID ruleId, String name, boolean enabled, int priority,
                 List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata) {
         this(ruleId, name, enabled, priority, conditions, actions, metadata, null);

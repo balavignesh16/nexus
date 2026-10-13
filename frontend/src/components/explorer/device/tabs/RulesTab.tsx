@@ -26,13 +26,17 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
   const [busyRuleId, setBusyRuleId] = useState<string | null>(null);
   const [detailRule, setDetailRule] = useState<any | null>(null);
   const [editingRule, setEditingRule] = useState<any | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const toggleEnabled = async (rule: any) => {
     const id = rule.ruleId ?? rule.id;
     setBusyRuleId(id);
+    setMutationError(null);
     try {
-      await (rule.enabled ? ruleApi.disableRule(id) : ruleApi.enableRule(id));
+      if (rule.rowRevision !== undefined) await ruleApi.transition(id, rule.enabled ? 'pause' : rule.lifecycle === 'PAUSED' ? 'resume' : 'activate', rule.rowRevision);
+      else await (rule.enabled ? ruleApi.disableRule(id) : ruleApi.enableRule(id));
       await refetch();
+    } catch (error) { setMutationError(error instanceof Error ? error.message : 'Rule conflict; reload and review.');
     } finally {
       setBusyRuleId(null);
     }
@@ -42,8 +46,10 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
     const id = rule.ruleId ?? rule.id;
     setBusyRuleId(id);
     try {
-      await ruleApi.deleteRule(id);
+      if (rule.rowRevision !== undefined) await ruleApi.transition(id, 'archive', rule.rowRevision);
+      else await ruleApi.deleteRule(id);
       await refetch();
+    } catch (error) { setMutationError(error instanceof Error ? error.message : 'Archive failed; reload and review.');
     } finally {
       setBusyRuleId(null);
     }
@@ -60,6 +66,7 @@ export function RulesTab({ deviceId }: { deviceId: string }) {
   );
 
   if (isLoading) return <LoadingBlock className="h-64 mt-6" />;
+  if (mutationError) return <ErrorState message={mutationError} action={<button onClick={() => { setMutationError(null); void refetch(); }}>Reload and review</button>} />;
 
   if (isError) {
     return (

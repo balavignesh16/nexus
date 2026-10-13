@@ -22,6 +22,9 @@ import java.util.stream.Collectors;
  */
 @Service
 public class DeviceCapabilityService {
+    private com.nexus.rule.application.ActiveRuleReferenceGuard activeVersions;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setActiveVersions(com.nexus.rule.application.ActiveRuleReferenceGuard guard){this.activeVersions=guard;}
 
     private final DeviceCapabilityRepository capabilityRepository;
     private final DeviceRepository deviceRepository;
@@ -61,11 +64,15 @@ public class DeviceCapabilityService {
 
     @Transactional
     public void deleteCapability(UUID deviceId, UUID capabilityId) {
+        if(activeVersions!=null) {
+            deviceRepository.findByIdForUpdate(deviceId).orElseThrow(()->new DeviceNotFoundException(deviceId));
+        }
         // Ownership-scoped lookup (both id AND deviceId must match) - a
         // capability belonging to a different device is simply not found,
         // never deleted, regardless of which device's URL is used.
         DeviceCapability capability = capabilityRepository.findByIdAndDeviceId(capabilityId, deviceId)
                 .orElseThrow(() -> new ResourceNotFoundException("DeviceCapability", capabilityId.toString()));
+        if(activeVersions!=null)activeVersions.reject(deviceId,com.nexus.device.capability.definition.LegacyCapabilityDefinitionMapping.keyFor(capability.getCapabilityType()));
         capabilityRepository.delete(capability);
     }
 

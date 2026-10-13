@@ -37,6 +37,7 @@ public class AiExplanationContextMapper {
     private Map<String, Object> sanitizeRuleSnapshot(Map<String, Object> ruleSnapshot) {
         Map<String, Object> sanitized = new LinkedHashMap<>(ruleSnapshot);
         sanitized.remove("ruleId");
+        sanitized.remove("executionIdentity");
         return sanitized;
     }
 }

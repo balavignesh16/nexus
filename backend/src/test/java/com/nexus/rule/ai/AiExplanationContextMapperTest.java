@@ -25,6 +25,7 @@ class AiExplanationContextMapperTest {
         UUID ruleId = UUID.randomUUID();
         Map<String, Object> ruleSnapshot = Map.of(
                 "ruleId", ruleId.toString(),
+                "executionIdentity", Map.of("ruleVersionId",UUID.randomUUID().toString(),"ruleRevision",1,"executionEpoch",3),
                 "name", "High Temperature Alert",
                 "enabled", true,
                 "priority", 1,
@@ -40,6 +41,7 @@ class AiExplanationContextMapperTest {
         AiExplanationContext aiContext = mapper.toAiContext(context);
 
         assertFalse(aiContext.ruleSnapshot().containsKey("ruleId"), "ruleId must never leave NEXUS, even nested inside ruleSnapshot");
+        assertFalse(aiContext.ruleSnapshot().containsKey("executionIdentity"),"Internal version/epoch identity must not leave NEXUS");
         assertEquals("High Temperature Alert", aiContext.ruleSnapshot().get("name"), "the rest of the snapshot must survive intact");
     }
 

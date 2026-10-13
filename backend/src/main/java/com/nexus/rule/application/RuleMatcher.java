@@ -26,6 +26,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class RuleMatcher implements EventListener {
+    private java.time.Clock clock=java.time.Clock.systemUTC();
+    @org.springframework.beans.factory.annotation.Autowired
+    void setClock(java.time.Clock clock){this.clock=clock;}
+    private com.nexus.event.persistence.DomainEventPersister durableSources;
+    private RuleExecutionAuthorization authorization;
+    private RuleCapabilityValidator runtimeValidator;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setRuntimeValidator(RuleCapabilityValidator validator){this.runtimeValidator=validator;}
+    @org.springframework.beans.factory.annotation.Autowired
+    void setFoundation(com.nexus.event.persistence.DomainEventPersister durableSources,RuleExecutionAuthorization authorization){this.durableSources=durableSources;this.authorization=authorization;}
 
     private static final Logger log = LoggerFactory.getLogger(RuleMatcher.class);
 
@@ -91,6 +101,11 @@ public class RuleMatcher implements EventListener {
 
     @Override
     public void onEvent(DomainEvent event) {
+        if(durableSources!=null) {
+            if(!java.util.Set.of(com.nexus.event.domain.EventType.TWIN_CREATED,com.nexus.event.domain.EventType.TWIN_UPDATED,com.nexus.event.domain.EventType.SENSOR_VALUE_CHANGED).contains(event.eventType()))return;
+            try { event=durableSources.persistRequired(event); }
+            catch(RuntimeException failure) { log.error("RULE_SOURCE_PERSISTENCE_SUPPRESSED {}",event.eventId(),failure);return; }
+        }
         List<Rule> activeRules = ruleRegistry.listEnabledOrderedByPriority();
         for (Rule rule : activeRules) {
             Object lock = ruleLocks.computeIfAbsent(rule.ruleId(), id -> new Object());
@@ -99,13 +114,25 @@ public class RuleMatcher implements EventListener {
                     if (isInCooldown(rule)) {
                         continue;
                     }
+                    if(runtimeValidator!=null) {
+                        Rule validationRule=rule;
+                        boolean explicit=rule.conditions().stream().anyMatch(c->c.field()==com.nexus.rule.domain.RuleField.DEVICE_ID);
+                        if(!explicit) {
+                            if(event.deviceId()==null){log.warn("RULE_SCOPE_SUPPRESSED {}",rule.ruleId());continue;}
+                            var conditions=new java.util.ArrayList<>(rule.conditions());
+                            conditions.add(new com.nexus.rule.domain.RuleCondition(com.nexus.rule.domain.RuleField.DEVICE_ID,com.nexus.rule.domain.RuleOperator.EQ,event.deviceId().toString()));
+                            validationRule=new Rule(rule.ruleId(),rule.name(),rule.enabled(),rule.priority(),conditions,rule.actions(),rule.metadata(),rule.cooldownSeconds(),rule.executionIdentity());
+                        }
+                        var diagnostics=runtimeValidator.inspect(validationRule);
+                        if(!diagnostics.isEmpty()){log.warn("RULE_RUNTIME_CONTRACT_SUPPRESSED {} {}",rule.ruleId(),diagnostics);continue;}
+                    }
 
                     RuleEvaluationResult result = ruleEvaluator.evaluate(rule, event);
                     if (result.matched()) {
                         log.info("Rule matched! Rule: '{}', Event: {}", rule.name(), event.eventType());
                         RuleMatchedEvent matchedEvent = new RuleMatchedEvent(
                                 UUID.randomUUID(),
-                                Instant.now(),
+                                clock.instant(),
                                 result,
                                 event.correlationId()
                         );
@@ -116,9 +143,11 @@ public class RuleMatcher implements EventListener {
                         // update, is unreachable if persist() throws, so a
                         // persistence failure can never create a cooldown
                         // window for a match that was never actually recorded.
-                        ruleMatchPersister.persist(matchedEvent);
+                        boolean cooldownEligible=ruleMatchPersister.persist(matchedEvent);
 
-                        if (rule.cooldownSeconds() != null) {
+                        // Preserve eligibility decided inside the committed match transaction.
+                        // A later owner change cannot erase a legitimate logical-rule cooldown.
+                        if (rule.cooldownSeconds() != null && (authorization==null || cooldownEligible)) {
                             lastMatchedAt.put(rule.ruleId(), matchedEvent.timestamp());
                         }
 
@@ -141,6 +170,6 @@ public class RuleMatcher implements EventListener {
         if (last == null) {
             return false;
         }
-        return Instant.now().isBefore(last.plusSeconds(rule.cooldownSeconds()));
+        return clock.instant().isBefore(last.plusSeconds(rule.cooldownSeconds()));
     }
 }

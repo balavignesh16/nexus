@@ -35,6 +35,14 @@ import static org.mockito.Mockito.*;
  * with the evaluator's result.
  */
 class RuleMatcherTest {
+    @Test
+    void requiredSourcePersistenceFailureStopsBeforeEvaluation() {
+        var source=mock(com.nexus.event.persistence.DomainEventPersister.class);
+        ruleMatcher.setFoundation(source,mock(RuleExecutionAuthorization.class));
+        doThrow(new RuntimeException("source failed")).when(source).persistRequired(any());
+        ruleMatcher.onEvent(sampleEvent("failed-source"));
+        verifyNoInteractions(ruleEvaluator,ruleMatchPersister,applicationEventPublisher,matchStore);
+    }
 
     private EventDispatcher eventDispatcher;
     private RuleRegistry ruleRegistry;

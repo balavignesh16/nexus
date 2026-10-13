@@ -23,6 +23,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class DeviceService {
+    private com.nexus.rule.application.ActiveRuleReferenceGuard activeVersions;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setActiveVersions(com.nexus.rule.application.ActiveRuleReferenceGuard guard){this.activeVersions=guard;}
 
     private final DeviceRepository deviceRepository;
     private final SpaceRepository spaceRepository;
@@ -106,6 +109,10 @@ public class DeviceService {
 
     @Transactional
     public void deleteDevice(UUID id) {
+        if(activeVersions!=null) {
+            deviceRepository.findByIdForUpdate(id).orElseThrow(()->new DeviceNotFoundException(id));
+            activeVersions.reject(id,null);
+        }
         if (!deviceRepository.existsById(id)) {
             throw new DeviceNotFoundException(id);
         }

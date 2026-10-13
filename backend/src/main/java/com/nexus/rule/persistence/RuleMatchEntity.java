@@ -25,6 +25,18 @@ import java.util.UUID;
 @Entity
 @Table(name = "rule_matches")
 public class RuleMatchEntity {
+    @Column(name="cooldown_eligible",nullable=false) private boolean cooldownEligible=true;
+    public void setCooldownEligible(boolean eligible){this.cooldownEligible=eligible;}
+    public boolean isCooldownEligible(){return cooldownEligible;}
+    @Column(name="rule_version_id") private UUID ruleVersionId;
+    @Column(name="rule_revision") private Long ruleRevision;
+    @Column(name="execution_epoch") private Long executionEpoch;
+    public void attribute(com.nexus.rule.domain.RuleExecutionIdentity identity) {
+        if(identity!=null) { ruleVersionId=identity.ruleVersionId();ruleRevision=identity.ruleRevision();executionEpoch=identity.executionEpoch(); }
+    }
+    public UUID getRuleVersionId(){return ruleVersionId;}
+    public Long getRuleRevision(){return ruleRevision;}
+    public Long getExecutionEpoch(){return executionEpoch;}
 
     @Id
     @Column(name = "match_id")

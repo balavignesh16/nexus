@@ -25,6 +25,9 @@ import java.util.Map;
  */
 @Component
 public class RuleMatchPersister {
+    private org.springframework.jdbc.core.JdbcTemplate ownership;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setOwnership(org.springframework.jdbc.core.JdbcTemplate ownership){this.ownership=ownership;}
 
     private final RuleMatchRepository repository;
     private final ObjectMapper objectMapper;
@@ -35,7 +38,7 @@ public class RuleMatchPersister {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void persist(RuleMatchedEvent event) {
+    public boolean persist(RuleMatchedEvent event) {
         RuleEvaluationResult result = event.result();
 
         @SuppressWarnings("unchecked")
@@ -52,7 +55,17 @@ public class RuleMatchPersister {
                 result.message()
         );
 
+        entity.attribute(result.rule().executionIdentity());
+        var identity=result.rule().executionIdentity();
+        if(ownership!=null && identity!=null) {
+            // History may persist after a switch, but cannot poison restored cooldown.
+            var roots=ownership.queryForList("SELECT lifecycle,active_version_id,execution_epoch FROM rules WHERE rule_id=? FOR SHARE",result.rule().ruleId());
+            entity.setCooldownEligible(!roots.isEmpty()&&"ACTIVE".equals(roots.getFirst().get("lifecycle"))
+                && identity.ruleVersionId().equals(roots.getFirst().get("active_version_id"))
+                && identity.executionEpoch()==((Number)roots.getFirst().get("execution_epoch")).longValue());
+        }
         repository.save(entity);
+        return identity==null || entity.isCooldownEligible();
     }
 
     private Map<String, Object> buildEvaluationEvidence(RuleEvaluationResult result) {

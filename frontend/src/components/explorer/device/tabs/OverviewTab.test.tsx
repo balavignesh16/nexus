@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const mockUseDevice = vi.fn();
@@ -43,6 +43,23 @@ vi.mock('../../../../realtime/streams/useDeviceConnectivityStream', () => ({
   useDeviceConnectivityStream: () => undefined,
 }));
 
+// Keep real usePolling/useQuery, but do not start the global backend monitor
+// (fetches and an undisposed interval) in this component's mocked REST fixture.
+vi.mock('../../../../services/ConnectionManager', () => ({
+  useConnectionStatus: () => ({ realtimeStatus: 'disconnected' }),
+}));
+
+// Developer mode is off in this render tree. Isolate its null overlay instead
+// of importing DeviceWorkspace and all sibling tabs during the timed callback.
+vi.mock('../DebugOverlay', () => ({ DebugOverlay: () => null }));
+
+const ownedQueryClients = new Set<QueryClient>();
+afterEach(() => {
+  cleanup();
+  ownedQueryClients.forEach((client) => client.clear());
+  ownedQueryClients.clear();
+});
+
 function device(overrides: Record<string, any> = {}) {
   return {
     id: 'dev-1',
@@ -55,6 +72,7 @@ function device(overrides: Record<string, any> = {}) {
 
 function renderWithQueryClient(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  ownedQueryClients.add(client);
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 

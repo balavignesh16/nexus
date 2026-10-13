@@ -11,6 +11,11 @@ import java.util.UUID;
 
 @Service
 public class CapabilityDefinitionService {
+    private com.nexus.rule.application.ActiveRuleReferenceGuard activeVersions;
+    private org.springframework.jdbc.core.JdbcTemplate locks;
+    private jakarta.persistence.EntityManager entities;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setRuleAuthority(com.nexus.rule.application.ActiveRuleReferenceGuard guard,org.springframework.jdbc.core.JdbcTemplate locks,jakarta.persistence.EntityManager entities){this.activeVersions=guard;this.locks=locks;this.entities=entities;}
     private final CapabilityDefinitionRepository repository;
 
     public CapabilityDefinitionService(CapabilityDefinitionRepository repository) {
@@ -44,7 +49,15 @@ public class CapabilityDefinitionService {
 
     @Transactional
     public CapabilityDefinitionResponse update(UUID id, UpdateCapabilityDefinitionRequest request) {
+        if(locks!=null){locks.queryForList("SELECT id FROM capability_definitions WHERE id=? FOR UPDATE",id);entities.clear();}
         CapabilityDefinition definition = find(id);
+        if(activeVersions!=null && (!java.util.Objects.equals(request.unit(),definition.getUnit())
+            || !java.util.Objects.equals(request.allowedUnits(),definition.getAllowedUnits())
+            || !java.util.Objects.equals(request.minimum(),definition.getMinimum())
+            || !java.util.Objects.equals(request.maximum(),definition.getMaximum())
+            || !java.util.Objects.equals(request.enumValues(),definition.getEnumValues())
+            || !java.util.Objects.equals(request.supportedCommands(),definition.getSupportedCommands())
+            || !java.util.Objects.equals(request.objectConstraints(),definition.getObjectConstraints())))activeVersions.reject(null,definition.getKey());
         definition.update(request.displayName(), request.description(), request.unit(),
                 request.allowedUnits(), request.minimum(), request.maximum(), request.enumValues(),
                 request.supportedCommands(), request.semanticCategory(),

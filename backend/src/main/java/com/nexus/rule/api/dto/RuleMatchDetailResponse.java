@@ -23,8 +23,12 @@ public record RuleMatchDetailResponse(
     String correlationId,
     Map<String, Object> evaluationEvidence,
     Instant matchedAt,
-    String message
+    String message,
+    UUID ruleVersionId,
+    Long ruleRevision,
+    Long executionEpoch
 ) {
+    public RuleMatchDetailResponse(UUID matchId,UUID ruleId,Map<String,Object> snapshot,UUID eventId,String correlationId,Map<String,Object> evidence,Instant at,String message){this(matchId,ruleId,snapshot,eventId,correlationId,evidence,at,message,null,null,null);}
     public static RuleMatchDetailResponse from(RuleMatchEntity entity) {
         return new RuleMatchDetailResponse(
                 entity.getMatchId(),
@@ -34,7 +38,8 @@ public record RuleMatchDetailResponse(
                 entity.getCorrelationId(),
                 entity.getEvaluationEvidence(),
                 entity.getMatchedAt(),
-                entity.getMessage()
+                entity.getMessage(),
+                entity.getRuleVersionId(),entity.getRuleRevision(),entity.getExecutionEpoch()
         );
     }
 }

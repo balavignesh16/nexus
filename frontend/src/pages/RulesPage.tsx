@@ -51,8 +51,19 @@ export function RulesPage() {
   const disabledCount = globalRules.length - enabledCount;
 
   const [busyRuleId, setBusyRuleId] = useState<string | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const lifecycleAction = async (rule: any, operation: 'validate' | 'activate' | 'pause' | 'resume' | 'archive') => {
+    setBusyRuleId(rule.ruleId); setLifecycleError(null);
+    try {
+      const result = await ruleApi.transition(rule.ruleId, operation, rule.rowRevision);
+      if (result?.diagnostics?.length) setLifecycleError(result.diagnostics.map(d => `${d.path}: ${d.message}`).join('; '));
+      await refetch();
+    } catch (error) { setLifecycleError(error instanceof Error ? error.message : 'Lifecycle change failed; reload and review.'); }
+    finally { setBusyRuleId(null); }
+  };
 
   const toggleEnabled = async (rule: any) => {
+    if (rule.rowRevision !== undefined) { await lifecycleAction(rule, rule.enabled ? 'pause' : rule.lifecycle === 'PAUSED' ? 'resume' : 'activate'); return; }
     const id = rule.ruleId ?? rule.id;
     setBusyRuleId(id);
     try {
@@ -64,6 +75,7 @@ export function RulesPage() {
   };
 
   const deleteRule = async (rule: any) => {
+    if (rule.rowRevision !== undefined) { await lifecycleAction(rule, 'archive'); return; }
     const id = rule.ruleId ?? rule.id;
     setBusyRuleId(id);
     try {
@@ -115,6 +127,7 @@ export function RulesPage() {
           </div>
         </div>
 
+        {lifecycleError && <p role="alert" className="text-destructive">{lifecycleError}</p>}
         {/* STATISTICS - real counts from the loaded (possibly device-filtered) rule set */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <MetricCard label="Total Rules" value={globalRules.length} icon={<FileJson size={18} />} />
@@ -156,6 +169,14 @@ export function RulesPage() {
                   <p className="text-xs text-foundation-muted-fg mb-4">
                     {rule.description || 'Monitors telemetry streams and triggers automated actions.'}
                   </p>
+                  {rule.lifecycle && <div className="text-xs mb-3" onClick={e => e.stopPropagation()}>
+                    <p>{rule.lifecycle} · Active: {rule.activeVersionId ?? 'none'} · Working: {rule.workingVersionId ?? 'none'} ({rule.workingVersionState}) · Revision: {rule.rowRevision}</p>
+                    <p>Reconciliation: {rule.reconciliation}</p>
+                    {rule.originalEnabled != null && <p>Imported originally enabled: {String(rule.originalEnabled)}</p>}
+                    {rule.diagnostics?.map((d: any, i: number) => <p key={i}>{d.code}: {d.message}</p>)}
+                    <button disabled={busyRuleId === rule.ruleId} onClick={() => lifecycleAction(rule, 'validate')}>Validate draft</button>
+                    {' · '}<button disabled={busyRuleId === rule.ruleId} onClick={() => lifecycleAction(rule, 'activate')}>Activate working version</button>
+                  </div>}
 
                   <div className="rounded-[var(--radius-panel)] p-3 text-xs font-mono space-y-1.5 mb-4" style={{ backgroundColor: 'var(--foundation-bg)', border: '1px solid var(--foundation-border)' }}>
                     {rule.conditions?.[0] ? (

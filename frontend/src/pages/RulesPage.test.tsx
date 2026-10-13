@@ -22,6 +22,7 @@ const mockUpdateRule = vi.fn();
 const mockEnableRule = vi.fn().mockResolvedValue(undefined);
 const mockDisableRule = vi.fn().mockResolvedValue(undefined);
 const mockDeleteRule = vi.fn().mockResolvedValue(undefined);
+const mockTransition = vi.fn().mockResolvedValue(null);
 vi.mock('../api/ruleApi', () => ({
   ruleApi: {
     createRule: (...args: any[]) => mockCreateRule(...args),
@@ -29,6 +30,7 @@ vi.mock('../api/ruleApi', () => ({
     enableRule: (...args: any[]) => mockEnableRule(...args),
     disableRule: (...args: any[]) => mockDisableRule(...args),
     deleteRule: (...args: any[]) => mockDeleteRule(...args),
+    transition: (...args: any[]) => mockTransition(...args),
   },
 }));
 
@@ -84,9 +86,45 @@ function renderPage() {
 }
 
 describe('RulesPage - real rules, real matches, no fabrication', () => {
+  it('activates a new DRAFT with revision zero rather than trying to resume it', async () => {
+    mockPolling({ data: [rule({ enabled: false, lifecycle: 'DRAFT', rowRevision: 0, workingVersionState: 'DRAFT' })], isLoading: false });
+    renderPage();
+    fireEvent.click(screen.getByLabelText('Enable rule'));
+    await waitFor(() => expect(mockTransition).toHaveBeenCalledWith('r1', 'activate', 0));
+    expect(mockEnableRule).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTransition.mockReset().mockResolvedValue(null);
     mockUseActiveDevices.mockReturnValue({ data: [{ id: 'dev-1', name: 'Gas Sensor 1' }] });
+  });
+  it('shows active V1 separately from working V2 and truthful reconciliation diagnostics', () => {
+    mockPolling({ data: [rule({ lifecycle: 'ACTIVE', rowRevision: 5, activeVersionId: 'active-v1', workingVersionId: 'draft-v2', workingVersionState: 'DRAFT', reconciliation: 'REQUIRES_REVIEW', originalEnabled: true, diagnostics: [{ code: 'UNIT_MISMATCH', message: 'Expected CELSIUS' }] })], isLoading: false });
+    renderPage();
+    expect(screen.getByText(/Active: active-v1.*Working: draft-v2/)).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation: REQUIRES_REVIEW')).toBeInTheDocument();
+    expect(screen.getByText('Imported originally enabled: true')).toBeInTheDocument();
+    expect(screen.getByText('UNIT_MISMATCH: Expected CELSIUS')).toBeInTheDocument();
+  });
+  it.each([
+    ['validate', 'Validate draft'], ['activate', 'Activate working version'],
+  ])('explicitly invokes %s with the displayed revision', async (operation, label) => {
+    const refetch = vi.fn(); mockPolling({ data: [rule({ lifecycle: 'ACTIVE', rowRevision: 5 })], isLoading: false, refetch }); renderPage();
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await waitFor(() => expect(mockTransition).toHaveBeenCalledWith('r1', operation, 5)); expect(refetch).toHaveBeenCalled();
+  });
+  it.each([
+    [true, 'ACTIVE', 'Disable rule', 'pause'], [false, 'PAUSED', 'Enable rule', 'resume'], [true, 'ACTIVE', 'Delete rule', 'archive'],
+  ])('uses tokened lifecycle controls for %s %s', async (enabled, lifecycle, label, operation) => {
+    const refetch = vi.fn(); mockPolling({ data: [rule({ enabled, lifecycle, rowRevision: 9 })], isLoading: false, refetch }); renderPage();
+    fireEvent.click(screen.getByRole('button', { name: label as string }));
+    await waitFor(() => expect(mockTransition).toHaveBeenCalledWith('r1', operation, 9)); expect(refetch).toHaveBeenCalled(); expect(mockEnableRule).not.toHaveBeenCalled(); expect(mockDisableRule).not.toHaveBeenCalled(); expect(mockDeleteRule).not.toHaveBeenCalled();
+  });
+  it('shows lifecycle validation failure without inventing activation or retrying', async () => {
+    mockTransition.mockRejectedValue(new Error('UNIT_MISMATCH: Expected CELSIUS'));
+    mockPolling({ data: [rule({ lifecycle: 'ACTIVE', rowRevision: 5 })], isLoading: false }); renderPage(); fireEvent.click(screen.getByRole('button', { name: 'Activate working version' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('UNIT_MISMATCH'));
+    expect(mockTransition).toHaveBeenCalledTimes(1);
   });
 
   it('renders real rules with a real enabled state, never a hardcoded Active', () => {

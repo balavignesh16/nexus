@@ -36,6 +36,15 @@ export interface Rule {
   metadata: Record<string, string>;
   /** Phase 13: seconds a matched rule must wait before it can match again. Undefined/null = no cooldown. */
   cooldownSeconds?: number | null;
+  lifecycle?: 'DRAFT' | 'VALIDATED' | 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
+  activeVersionId?: string | null;
+  workingVersionId?: string | null;
+  workingVersionState?: 'DRAFT' | 'VALIDATED';
+  rowRevision?: number;
+  executionEpoch?: number;
+  reconciliation?: string;
+  originalEnabled?: boolean | null;
+  diagnostics?: { code: string; message: string; path: string }[];
 }
 
 export const ruleApi = {
@@ -43,8 +52,13 @@ export const ruleApi = {
     apiClient.get<Rule[]>(deviceId ? `/rules?deviceId=${encodeURIComponent(deviceId)}` : '/rules'),
   getRule: (id: string) => apiClient.get<Rule>(`/rules/${id}`),
   createRule: (rule: Omit<Rule, 'ruleId'>) => apiClient.post<Rule>('/rules', rule),
-  updateRule: (id: string, rule: Rule) => apiClient.put<Rule>(`/rules/${id}`, rule),
+  updateRule: (id: string, rule: Rule) => apiClient.put<Rule>(`/rules/${id}`, { ...rule, expectedRevision: rule.rowRevision }),
   deleteRule: (id: string) => apiClient.delete(`/rules/${id}`),
   enableRule: (id: string) => apiClient.post<void>(`/rules/${id}/enable`, {}),
   disableRule: (id: string) => apiClient.post<void>(`/rules/${id}/disable`, {}),
+  saveDraft: (id: string, definition: Omit<Rule, 'ruleId'>, expectedRevision: number) =>
+    apiClient.post<Rule>(`/rules/${id}/draft`, { definition, expectedRevision }),
+  createDraft: (definition: Omit<Rule, 'ruleId'>) => apiClient.post<Rule>('/rules/drafts', { definition, expectedRevision: 0 }),
+  transition: (id: string, operation: 'validate' | 'activate' | 'pause' | 'resume' | 'archive', expectedRevision: number) =>
+    apiClient.post<Rule | null>(`/rules/${id}/lifecycle/${operation}`, { expectedRevision }),
 };

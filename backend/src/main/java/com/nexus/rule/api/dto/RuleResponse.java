@@ -16,8 +16,25 @@ public record RuleResponse(
     List<RuleCondition> conditions,
     List<RuleAction> actions,
     Map<String, String> metadata,
-    Integer cooldownSeconds
+    Integer cooldownSeconds,
+    String lifecycle,
+    UUID activeVersionId,
+    UUID workingVersionId,
+    String workingVersionState,
+    Long rowRevision,
+    Long executionEpoch,
+    String reconciliation,
+    List<Map<String,Object>> diagnostics,
+    Boolean originalEnabled
 ) {
+    public RuleResponse(UUID id,String name,boolean enabled,int priority,List<RuleCondition> conditions,List<RuleAction> actions,Map<String,String> metadata,Integer cooldown) {
+        this(id,name,enabled,priority,conditions,actions,metadata,cooldown,null,null,null,null,null,null,null,null,null);
+    }
+    public static RuleResponse from(com.nexus.rule.persistence.RuleVersionStore.View view) {
+        Rule r=view.definition();
+        return new RuleResponse(r.ruleId(),r.name(),r.enabled(),r.priority(),r.conditions(),r.actions(),r.metadata(),r.cooldownSeconds(),
+            view.lifecycle(),view.activeVersionId(),view.workingVersionId(),view.workingState(),view.rowRevision(),view.executionEpoch(),view.reconciliation(),view.diagnostics(),view.originalEnabled());
+    }
     public static RuleResponse from(Rule rule) {
         return new RuleResponse(
                 rule.ruleId(),

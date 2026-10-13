@@ -170,12 +170,9 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
     try {
       const viewport = reactFlowInstance ? reactFlowInstance.getViewport() : { x: 0, y: 0, zoom: 1 };
       const rule = compileGraphToRule(nodes, edges, viewport, initialRule?.ruleId);
-      // Mocking API call to save
-      await new Promise(r => setTimeout(r, 500));
-      console.log('Saved rule:', rule);
-      setValidationErrors([]);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      void rule;
+      setSaveSuccess(false);
+      setValidationErrors([{ message: 'Canvas persistence is not implemented. Save a supported definition through the Rule form; no graph has been saved.' }]);
     } catch (e: any) {
       setValidationErrors([{ message: e.message || 'Failed to save rule' }]);
     }
@@ -238,9 +235,11 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
           </button>
           <button 
             onClick={handleSave}
+            disabled
+            title="Canvas persistence is not implemented; use the Rule form. No graph is saved."
             className="flex items-center gap-2 px-3 py-1.5 rounded bg-primary hover:bg-primary/90 text-sm font-medium transition-colors text-primary-foreground"
           >
-            <Save size={14} /> Save Rule
+            <Save size={14} /> Save unavailable
           </button>
         </div>
       </div>

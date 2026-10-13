@@ -20,6 +20,9 @@ import java.util.*;
 
 @Service
 public class BindingManagementService {
+    private com.nexus.rule.application.ActiveRuleReferenceGuard activeVersions;
+    @Autowired
+    void setActiveVersions(com.nexus.rule.application.ActiveRuleReferenceGuard guard){this.activeVersions=guard;}
     private final DeviceCapabilityBindingRepository bindings;
     private final CapabilityDefinitionRepository definitions;
     private final DeviceRepository devices;
@@ -60,6 +63,7 @@ public class BindingManagementService {
         if (request.capabilityDefinitionId() == null) throw new IllegalArgumentException("capabilityDefinitionId is required");
         var definition = definitions.findById(request.capabilityDefinitionId())
                 .orElseThrow(() -> new ResourceNotFoundException("CapabilityDefinition", request.capabilityDefinitionId().toString()));
+        if(activeVersions!=null)activeVersions.reject(deviceId,definition.getKey());
         if (bindings.findByDeviceIdAndDefinitionKeyAndEnabledTrue(deviceId, definition.getKey()).isPresent()
                 || bindings.findByDeviceId(deviceId).stream().anyMatch(b -> b.getDefinition().getId().equals(definition.getId())))
             throw new IllegalStateException("Capability is already bound to device");
@@ -112,6 +116,7 @@ public class BindingManagementService {
     }
 
     private boolean activeRuleReferences(UUID deviceId, String key) {
+        if(activeVersions!=null)return activeVersions.references(deviceId,key);
         return rules.listEnabledOrderedByPriority().stream().anyMatch(rule -> {
             boolean deviceScoped = rule.conditions().stream().anyMatch(c -> c.field() == RuleField.DEVICE_ID
                     && deviceId.toString().equals(c.expectedValue()));

@@ -28,6 +28,25 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class RuleRegistry {
+    private com.nexus.rule.application.RuleLifecycleService lifecycle;
+    private RuleVersionStore versions;
+    private final ConcurrentHashMap<UUID,Long> projectionRevisions=new ConcurrentHashMap<>();
+    @org.springframework.transaction.event.TransactionalEventListener(phase=org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
+    public void project(com.nexus.rule.domain.RuleProjectionChanged event) {
+        try {
+            var current=versions.get(event.ruleId());
+            long revision=current.map(RuleVersionStore.View::rowRevision).orElse(event.rowRevision());
+            projectionRevisions.compute(event.ruleId(),(id,previous)->{
+                if(previous!=null&&previous>revision)return previous;
+                if(current.isEmpty())rules.remove(id);else rules.put(id,current.get().definition());
+                return revision;
+            });
+        }catch(RuntimeException failure){rules.remove(event.ruleId());org.slf4j.LoggerFactory.getLogger(RuleRegistry.class).error("Rule projection evicted after failure {}",event.ruleId(),failure);}
+    }
+    @Autowired
+    void setLifecycle(com.nexus.rule.application.RuleLifecycleService lifecycle,RuleVersionStore versions) {
+        this.lifecycle=lifecycle;this.versions=versions;
+    }
 
     private final ConcurrentHashMap<UUID, Rule> rules = new ConcurrentHashMap<>();
     private final RuleRepository repository;
@@ -61,22 +80,29 @@ public class RuleRegistry {
      */
     @PostConstruct
     public void init() {
+        if(versions!=null) { for(var view:versions.list(false)){rules.put(view.ruleId(),view.definition());projectionRevisions.put(view.ruleId(),view.rowRevision());} return; }
         for (RuleEntity entity : repository.findAll()) {
             rules.put(entity.ruleId(), entity.toDomain());
         }
     }
 
     public void register(Rule rule) {
+        if(lifecycle!=null) { lifecycle.legacySave(rule,null); return; }
         validate(rule);
         persistAndCache(rule);
     }
 
     public void unregister(UUID ruleId) {
+        if(lifecycle!=null) { if(versions.get(ruleId).isPresent())lifecycle.transition(ruleId,"archive",null); return; }
         repository.deleteById(ruleId);
         rules.remove(ruleId);
     }
 
     public void enable(UUID ruleId) {
+        if(lifecycle!=null) { if(versions.get(ruleId).isPresent()) {
+            var result=lifecycle.transition(ruleId,"activate",null);
+            if(!result.diagnostics().isEmpty())throw new com.nexus.rule.application.RuleDefinitionValidationException(result.diagnostics());
+        } return; }
         Rule current = rules.get(ruleId);
         if (current == null) {
             return;
@@ -87,6 +113,7 @@ public class RuleRegistry {
     }
 
     public void disable(UUID ruleId) {
+        if(lifecycle!=null) { if(versions.get(ruleId).isPresent())lifecycle.transition(ruleId,"pause",null); return; }
         Rule current = rules.get(ruleId);
         if (current == null) {
             return;
@@ -109,10 +136,12 @@ public class RuleRegistry {
     }
 
     public Optional<Rule> get(UUID ruleId) {
+        if(versions!=null)return versions.get(ruleId).map(RuleVersionStore.View::definition);
         return Optional.ofNullable(rules.get(ruleId));
     }
 
     public List<Rule> list() {
+        if(versions!=null)return versions.list(false).stream().map(RuleVersionStore.View::definition).toList();
         return new ArrayList<>(rules.values());
     }
 
@@ -121,6 +150,7 @@ public class RuleRegistry {
     }
 
     public List<Rule> listEnabledOrderedByPriority() {
+        if(versions!=null)return versions.list(true).stream().map(RuleVersionStore.View::definition).toList();
         return rules.values().stream()
                 .filter(Rule::enabled)
                 .sorted(Comparator.comparingInt(Rule::priority))

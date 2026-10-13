@@ -18,6 +18,15 @@ import java.util.Map;
  * RuleRegistry (registration-time, fail-fast).
  */
 public final class CommandValueValidator {
+    /** Shared configured RELAY subtarget check, independent of broker/connectivity. */
+    public static void validateRelayBinding(com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved,Object value) {
+        if(!"relay".equals(resolved.definition().getKey()))return;
+        Object configured=resolved.effectiveConstraints().get("channels");
+        Object raw=value instanceof Map<?,?> map?map.get("channel"):null;
+        if(!(configured instanceof List<?> channels)||!(raw instanceof Number channel)||channel.intValue()<1
+            ||channel.doubleValue()!=channel.intValue()||channels.stream().noneMatch(c->c instanceof Number allowed&&allowed.intValue()==channel.intValue()))
+            throw new CommandValidationException("RELAY channel is not configured for this binding");
+    }
 
     public static final String SET_STATE = "SET_STATE";
 

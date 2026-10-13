@@ -189,16 +189,7 @@ public class CommandExecutor implements ActionExecutor {
                 if (!result.isValid()) throw new CommandRejectedException(result.errors().getFirst().message());
                 if (bindingConstraints != null && resolved.binding() != null)
                     bindingConstraints.validateValue(resolved.definition(), resolved.binding().getConfiguration(), value);
-                if ("relay".equals(resolved.definition().getKey())) {
-                    Object configured = resolved.effectiveConstraints().get("channels");
-                    Object rawChannel = value instanceof Map<?, ?> map ? map.get("channel") : null;
-                    if (!(configured instanceof java.util.List<?> channels)
-                            || !(rawChannel instanceof Number channel)
-                            || channel.intValue() < 1 || channel.doubleValue() != channel.intValue()
-                            || channels.stream().noneMatch(c -> c instanceof Number allowed
-                                    && allowed.intValue() == channel.intValue()))
-                        throw new CommandRejectedException("RELAY channel is not configured for this binding");
-                }
+                CommandValueValidator.validateRelayBinding(resolved,value);
                 genericBindingResolved = resolved.resolutionSource() == CapabilityResolutionSource.GENERIC_BINDING;
                 bindingId = resolved.binding() == null ? null : resolved.binding().getId();
                 definitionId = resolved.definition().getId();

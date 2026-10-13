@@ -34,6 +34,11 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/v1")
 public class RuleController {
+    private com.nexus.rule.persistence.RuleVersionStore versions;
+    private com.nexus.rule.application.RuleLifecycleService lifecycle;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setFoundation(com.nexus.rule.persistence.RuleVersionStore versions,com.nexus.rule.application.RuleLifecycleService lifecycle){this.versions=versions;this.lifecycle=lifecycle;}
+    private RuleResponse response(Rule rule){return versions==null?RuleResponse.from(rule):RuleResponse.from(versions.get(rule.ruleId()).orElseThrow());}
 
     private static final int MAX_HISTORY_LIMIT = 500;
 
@@ -60,7 +65,7 @@ public class RuleController {
                 request.cooldownSeconds()
         );
         ruleRegistry.register(rule);
-        return ResponseEntity.status(HttpStatus.CREATED).body(RuleResponse.from(rule));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response(rule));
     }
 
     /**
@@ -82,20 +87,24 @@ public class RuleController {
         }
         List<RuleResponse> rules = ruleRegistry.list().stream()
                 .filter(rule -> deviceId == null || belongsToDevice(rule, deviceId))
-                .map(RuleResponse::from)
+                .map(this::response)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(rules);
     }
 
     private boolean belongsToDevice(Rule rule, String deviceId) {
-        return rule.conditions().stream().anyMatch(c ->
-                c.field() == com.nexus.rule.domain.RuleField.DEVICE_ID && deviceId.equals(c.expectedValue()));
+        return rule.conditions()!=null && rule.conditions().stream().anyMatch(c ->
+                c != null && c.field() == com.nexus.rule.domain.RuleField.DEVICE_ID && (deviceId.equals(c.expectedValue()) || sameDeviceIdentity(deviceId,c.expectedValue())));
+    }
+    private boolean sameDeviceIdentity(String requested,String declared){
+        try{return UUID.fromString(requested).equals(UUID.fromString(declared));}
+        catch(IllegalArgumentException|NullPointerException invalid){return false;}
     }
 
     @GetMapping("/rules/{id}")
     public ResponseEntity<RuleResponse> getRule(@PathVariable UUID id) {
         return ruleRegistry.get(id)
-                .map(RuleResponse::from)
+                .map(this::response)
                 .map(ResponseEntity::ok)
                 .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Rule", id.toString()));
     }
@@ -115,8 +124,8 @@ public class RuleController {
                 request.metadata(),
                 request.cooldownSeconds()
         );
-        ruleRegistry.register(rule);
-        return ResponseEntity.ok(RuleResponse.from(rule));
+        if(lifecycle!=null)lifecycle.legacySave(rule,request.expectedRevision());else ruleRegistry.register(rule);
+        return ResponseEntity.ok(response(rule));
     }
 
     @DeleteMapping("/rules/{id}")

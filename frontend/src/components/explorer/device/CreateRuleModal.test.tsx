@@ -7,7 +7,7 @@ vi.mock('../../../api/ruleApi', async () => {
   const actual = await vi.importActual<typeof import('../../../api/ruleApi')>('../../../api/ruleApi');
   return {
     ...actual,
-    ruleApi: { ...actual.ruleApi, createRule: vi.fn(), updateRule: vi.fn() },
+    ruleApi: { ...actual.ruleApi, createRule: vi.fn(), updateRule: vi.fn(), saveDraft: vi.fn(), createDraft: vi.fn() },
   };
 });
 
@@ -219,6 +219,45 @@ describe('CreateRuleModal - capability-aware rule creation, no fabrication', () 
     ],
     metadata: {},
   };
+  it('pins the opening revision despite polling and preserves entered data on stale conflict', async () => {
+    const openRule = { ...relayRule, rowRevision: 4, lifecycle: 'ACTIVE' as const };
+    vi.mocked(ruleApi.saveDraft).mockRejectedValue(new Error('Stale rule revision; reload explicitly'));
+    const onCreated = vi.fn();
+    const props = { deviceId: 'dev-1', isOpen: true, onClose: vi.fn(), onCreated };
+    const view = render(<CreateRuleModal {...props} editingRule={openRule} />);
+    fireEvent.change(screen.getByDisplayValue(relayRule.name), { target: { value: 'Unsaved edit' } });
+    view.rerender(<CreateRuleModal {...props} editingRule={{ ...openRule, name: 'Polled edit', rowRevision: 5 }} />);
+    expect(screen.getByDisplayValue('Unsaved edit')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Save Draft'));
+    await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalledWith('rule-99', expect.objectContaining({ name: 'Unsaved edit' }), 4));
+    await waitFor(() => expect(screen.getByTestId('create-rule-error')).toHaveTextContent('Stale rule revision'));
+    expect(screen.getByDisplayValue('Unsaved edit')).toBeInTheDocument();
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(ruleApi.updateRule).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(ruleApi.saveDraft).toHaveBeenCalledTimes(1);
+    view.rerender(<CreateRuleModal {...props} editingRule={{ ...openRule, rowRevision: 6 }} />);
+    expect(ruleApi.saveDraft).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('Unsaved edit')).toBeInTheDocument();
+  });
+  it('successfully creates a modern draft without activating or calling legacy create', async () => {
+    vi.mocked(ruleApi.createDraft).mockResolvedValue(relayRule);
+    const onClose = vi.fn(); const onCreated = vi.fn();
+    render(<CreateRuleModal deviceId="dev-1" isOpen onClose={onClose} onCreated={onCreated} />);
+    fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'New draft' } });
+    fireEvent.change(screen.getByTestId('condition-numeric-value-input'), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Draft' }));
+    await waitFor(() => expect(ruleApi.createDraft).toHaveBeenCalledWith(expect.objectContaining({ name: 'New draft', enabled: false })));
+    expect(ruleApi.createRule).not.toHaveBeenCalled(); expect(onCreated).toHaveBeenCalledTimes(1); expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it('successfully saves only the working draft with the opening revision', async () => {
+    vi.mocked(ruleApi.saveDraft).mockResolvedValue(relayRule);
+    const onClose = vi.fn(); const onCreated = vi.fn();
+    render(<CreateRuleModal deviceId="dev-1" editingRule={{ ...relayRule, enabled: true, rowRevision: 7 }} isOpen onClose={onClose} onCreated={onCreated} />);
+    fireEvent.change(screen.getByDisplayValue(relayRule.name), { target: { value: 'Working V2' } }); fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalledWith('rule-99', expect.objectContaining({ name: 'Working V2' }), 7));
+    expect(ruleApi.updateRule).not.toHaveBeenCalled(); expect(ruleApi.createRule).not.toHaveBeenCalled(); expect(onCreated).toHaveBeenCalledTimes(1); expect(onClose).toHaveBeenCalledTimes(1);
+  });
 
   it('edit mode shows "Edit Rule" / "Save Changes" instead of the create-mode labels', () => {
     render(<CreateRuleModal deviceId="dev-1" editingRule={relayRule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);

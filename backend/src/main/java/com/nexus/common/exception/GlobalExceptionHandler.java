@@ -19,6 +19,15 @@ import java.time.Instant;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(com.nexus.rule.application.RuleDefinitionValidationException.class)
+    public ResponseEntity<java.util.Map<String,Object>> handleRuleValidation(com.nexus.rule.application.RuleDefinitionValidationException ex){
+        return ResponseEntity.badRequest().body(java.util.Map.of("status",400,"error","Bad Request","message",ex.getMessage(),"timestamp",Instant.now(),"details",ex.diagnostics()));
+    }
+    @ExceptionHandler(com.nexus.rule.application.RuleMutationException.class)
+    public ResponseEntity<ErrorResponse> handleRuleMutation(com.nexus.rule.application.RuleMutationException ex) {
+        var status=HttpStatus.valueOf(ex.getStatusCode().value());
+        return new ResponseEntity<>(new ErrorResponse(status.value(),status.getReasonPhrase(),ex.getReason(),Instant.now()),status);
+    }
 
     @ExceptionHandler(com.nexus.device.onboarding.OnboardingConflictException.class)
     public ResponseEntity<ErrorResponse> handleOnboardingConflict(com.nexus.device.onboarding.OnboardingConflictException ex) {

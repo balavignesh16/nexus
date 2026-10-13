@@ -19,6 +19,14 @@ import com.nexus.twin.application.VerificationService;
 /** The device row lock serializes durable acceptance, including first intent for a target. */
 @Service
 public class CommandAcceptanceService {
+    private com.nexus.rule.application.RuleExecutionAuthorization ruleAuthorization;
+    private org.springframework.jdbc.core.JdbcTemplate contractLocks;
+    private jakarta.persistence.EntityManager entities;
+    private com.nexus.rule.application.RuleCapabilityValidator ruleValidator;
+    @Autowired
+    void setContractBoundary(org.springframework.jdbc.core.JdbcTemplate locks,jakarta.persistence.EntityManager entities,com.nexus.rule.application.RuleCapabilityValidator validator){this.contractLocks=locks;this.entities=entities;this.ruleValidator=validator;}
+    @Autowired
+    void setRuleAuthorization(com.nexus.rule.application.RuleExecutionAuthorization authorization){this.ruleAuthorization=authorization;}
     private final DeviceRepository devices;
     private final CommandExecutor executor;
     private final ActionHistoryRepository actions;
@@ -54,13 +62,25 @@ public class CommandAcceptanceService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CommandExecutor.PreparedCommand accept(ActionExecutionRequest request, ActionContext context,
             Instant requestedAt,String correlationId) {
+        boolean ruleOrigin=context!=null&&context.matchedRule()!=null;
         Object rawDevice = request.parameters() == null ? null : request.parameters().get("deviceId");
         java.util.UUID deviceId;
         try { deviceId = java.util.UUID.fromString(String.valueOf(rawDevice)); }
-        catch (RuntimeException e) { throw new CommandExecutor.CommandRejectedException("Missing or invalid deviceId parameter"); }
+        catch (RuntimeException e) { if(ruleOrigin)throw new com.nexus.rule.application.RuleExecutionSuppressedException("INVALID_TARGET_DEVICE");throw new CommandExecutor.CommandRejectedException("Missing or invalid deviceId parameter"); }
         devices.findByIdForUpdate(deviceId).orElseThrow(() ->
-                new CommandExecutor.CommandRejectedException("Device not found: " + deviceId));
-        CommandExecutor.PreparedCommand target = executor.prepare(request);
+                ruleOrigin?new com.nexus.rule.application.RuleExecutionSuppressedException("TARGET_DEVICE_UNAVAILABLE"):new CommandExecutor.CommandRejectedException("Device not found: " + deviceId));
+        if(contractLocks!=null){contractLocks.queryForList("SELECT id FROM capability_definitions ORDER BY id FOR SHARE");entities.clear();}
+        CommandExecutor.PreparedCommand target;
+        try {
+            if(ruleOrigin&&ruleValidator!=null)ruleValidator.validate(new com.nexus.rule.domain.Rule(context.matchedRule().ruleId(),"Action safety",false,0,
+                java.util.List.of(new com.nexus.rule.domain.RuleCondition(com.nexus.rule.domain.RuleField.EVENT_TYPE,com.nexus.rule.domain.RuleOperator.EQ,"TWIN_UPDATED")),
+                java.util.List.of(new com.nexus.rule.domain.RuleAction("SEND_COMMAND",request.parameters())),java.util.Map.of()));
+            target = executor.prepare(request);
+        }catch(RuntimeException invalid){
+            if(ruleOrigin)throw new com.nexus.rule.application.RuleExecutionSuppressedException("INVALID_ACTION_TARGET: "+invalid.getMessage());
+            throw invalid;
+        }
+        if(ruleAuthorization!=null)ruleAuthorization.check(request,context);
         Instant acceptedAt = clock.instant();
         String source = context != null && context.matchedRule() != null ? "RULE_ACTION" : "MANUAL_COMMAND";
         actions.saveAndFlush(new ActionHistoryRecord(request.requestId(), request.matchId(), deviceId,

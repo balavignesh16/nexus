@@ -23,6 +23,9 @@ import java.util.Optional;
 
 @Component
 public class ActionExecutionEngine {
+    private com.nexus.rule.application.RuleNonCommandExecutionService nonCommand;
+    @Autowired
+    void setNonCommand(com.nexus.rule.application.RuleNonCommandExecutionService service){this.nonCommand=service;}
 
     private static final Logger log = LoggerFactory.getLogger(ActionExecutionEngine.class);
 
@@ -53,12 +56,17 @@ public class ActionExecutionEngine {
             long stageStart = System.currentTimeMillis();
             boolean durablyAcceptedCommand = false;
             ActionExecutionResult result;
+            try {
             if (request.actionType() == ActionType.SEND_COMMAND && commandDispatch != null) {
                 CommandDispatchCoordinator.Outcome outcome = commandDispatch.dispatch(request, context,correlationId);
                 result = outcome.result();
                 durablyAcceptedCommand = outcome.accepted();
             } else {
                 result = executeSingleRequest(request, context);
+            }
+            } catch(com.nexus.rule.application.RuleExecutionSuppressedException suppression) {
+                log.warn("Rule action suppressed before acceptance: {} {}",request.requestId(),suppression.getMessage());
+                continue; // Not MQTT FAILURE, and no ActionHistory acceptance/result is fabricated.
             }
 
             pipelineService.recordTrace(
@@ -112,7 +120,11 @@ public class ActionExecutionEngine {
         }
 
         try {
+            if(nonCommand!=null && context!=null && context.matchedRule()!=null)
+                return nonCommand.execute(request,context,executorOpt.get());
             return executorOpt.get().execute(request, context);
+        } catch(com.nexus.rule.application.RuleExecutionSuppressedException suppression) {
+            throw suppression;
         } catch (Exception e) {
             log.error("Execution failed for request {}", request.requestId(), e);
             return new ActionExecutionResult(

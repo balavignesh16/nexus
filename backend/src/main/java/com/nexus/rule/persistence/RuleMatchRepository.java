@@ -21,7 +21,7 @@ public interface RuleMatchRepository extends JpaRepository<RuleMatchEntity, UUID
      * rebuild in-memory cooldown state from the durable source of truth.
      * Never called per-event (see RuleMatcher.hydrateCooldownState).
      */
-    @Query("SELECT rm.ruleId, MAX(rm.matchedAt) FROM RuleMatchEntity rm GROUP BY rm.ruleId")
+    @Query("SELECT rm.ruleId, MAX(rm.matchedAt) FROM RuleMatchEntity rm WHERE rm.cooldownEligible = true GROUP BY rm.ruleId")
     List<Object[]> findLastMatchedAtByRule();
 
     /**
