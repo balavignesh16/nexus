@@ -91,7 +91,13 @@ class RuleTypedTelemetryRoutingIntegrationTest extends TypedTriggerSupport {
         assertEquals(0, count("SELECT count(*) FROM rule_matches WHERE rule_id=? AND event_id IS NULL", legacy), "legacy rule never receives typed facts");
         assertEquals(0, count("SELECT count(*) FROM rule_matches WHERE rule_id=? AND event_id IS NOT NULL", typed), "typed rule never receives legacy events");
         assertEquals(1, count("SELECT count(*) FROM rule_matches WHERE rule_id=? AND event_id IS NOT NULL AND trigger_fact_id IS NULL", legacy));
-        assertEquals(0, count("SELECT count(*) FROM rule_action_candidates WHERE rule_id=?", legacy), "legacy matches keep the C13 exception, not typed plans");
+        // C13 is retired: the legacy match is decided by a persisted plan keyed by its DomainEvent, the typed match by a plan keyed by its fact.
+        assertEquals(1, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p ON p.plan_id=c.plan_id WHERE c.rule_id=? AND p.event_id IS NOT NULL AND p.fact_id IS NULL", legacy),
+            "the legacy match has a persisted candidate in an event-keyed plan");
+        assertEquals(1, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p ON p.plan_id=c.plan_id WHERE c.rule_id=? AND p.fact_id IS NOT NULL AND p.event_id IS NULL", typed),
+            "the typed match has a persisted candidate in a fact-keyed plan");
+        assertEquals(0, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p ON p.plan_id=c.plan_id WHERE c.rule_id=? AND p.fact_id IS NOT NULL", legacy), "a legacy rule is never planned from a typed fact");
+        assertEquals(0, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p ON p.plan_id=c.plan_id WHERE c.rule_id=? AND p.event_id IS NOT NULL", typed), "a typed rule is never planned from a legacy event");
     }
 
     @Test void typedActionWithoutAPersistedPlanCandidateIsDenied() {

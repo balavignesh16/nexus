@@ -34,6 +34,9 @@ public class ActionExecutionEngine {
     private final RealtimePublisher realtimePublisher;
     private final PipelineService pipelineService;
     private final CommandDispatchCoordinator commandDispatch;
+    private com.nexus.rule.plan.RuleCandidateOutcomes outcomes;
+    @Autowired(required = false)
+    void setOutcomes(com.nexus.rule.plan.RuleCandidateOutcomes outcomes) { this.outcomes = outcomes; }
 
     public ActionExecutionEngine(ActionExecutorRegistry registry, ApplicationEventPublisher eventPublisher,
                                  RealtimePublisher realtimePublisher, PipelineService pipelineService) {
@@ -66,6 +69,7 @@ public class ActionExecutionEngine {
             }
             } catch(com.nexus.rule.application.RuleExecutionSuppressedException suppression) {
                 log.warn("Rule action suppressed before acceptance: {} {}",request.requestId(),suppression.getMessage());
+                if (outcomes != null) outcomes.denied(request.requestId(), suppression.getMessage());   // evidence on the persisted candidate
                 continue; // Not MQTT FAILURE, and no ActionHistory acceptance/result is fabricated.
             }
 

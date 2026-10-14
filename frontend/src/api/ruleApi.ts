@@ -25,6 +25,7 @@ export interface TriggerSubscription {
 }
 
 export type RepeatPolicy = 'EVERY_TRIGGER_WHILE_TRUE' | 'EDGE_TRUE';
+export type CooldownScope = 'GLOBAL' | 'PER_SCOPE';
 
 export interface ScheduleSpec {
   kind: 'ONE_SHOT' | 'FIXED_INTERVAL';
@@ -47,6 +48,9 @@ export interface TemporalSpec {
   countMode?: 'SAMPLES' | 'EDGES' | null;
 }
 
+/** Explicit numeric hysteresis: the condition's expectedValue is the ENTER threshold, `exit` the EXIT threshold (same unit). */
+export interface HysteresisSpec { exit: string }
+
 export interface RuleCondition {
   field: RuleField;
   operator: RuleOperator;
@@ -57,6 +61,7 @@ export interface RuleCondition {
   /** Stable identity inside an immutable version; required for temporal conditions. */
   conditionId?: string;
   temporal?: TemporalSpec;
+  hysteresis?: HysteresisSpec;
 }
 
 export interface RuleAction {
@@ -87,6 +92,8 @@ export interface Rule {
   triggers?: TriggerSubscription[];
   repeatPolicy?: RepeatPolicy;
   schedule?: ScheduleSpec;
+  /** GLOBAL (default; one cooldown per logical rule) or an explicit PER_SCOPE opt-in (one per resolved device). */
+  cooldownScope?: CooldownScope;
 }
 
 /** Persisted runtime facts for one rule: timers, temporal state/evidence, arbitration outcomes and matches. */
@@ -94,9 +101,32 @@ export interface RuleRuntimeSnapshot {
   timers: { timer_id: string; kind: string; due_at: string; status: string; invalidation_reason?: string | null; skipped_slots?: number; condition_id?: string | null }[];
   temporalState: { condition_id: string; operator: string; phase: string; due_at?: string | null; member_count: number; sequence: number; reset_reason?: string | null; generation: number }[];
   temporalEvidence: { seq: number; event: string; conditionId: string; occurredAt: string; details: Record<string, unknown> }[];
-  candidates: { candidate_id: string; action_type: string; target_key?: string | null; priority: number; disposition: string; reason: string }[];
+  candidates: { candidate_id: string; action_type: string; target_key?: string | null; priority: number; disposition: string; reason: string; outcome?: CandidateOutcome | null; outcome_reason?: string | null }[];
   matches: { match_id: string; trigger_type?: string | null; event_id?: string | null; matched_at: string }[];
 }
+
+export interface ExclusionMember { ruleId: string; rank: number }
+export interface ExclusionGroup { groupId: string; name: string; members: ExclusionMember[] }
+
+export interface ArbitrationCandidate {
+  candidate_id: string; match_id: string; rule_id: string; rule_revision: number; action_ordinal: number; action_type: string; target_key?: string | null;
+  priority: number; disposition: string; reason: string; winner_candidate_id?: string | null; request_id: string; outcome?: CandidateOutcome | null; outcome_reason?: string | null;
+  /** ActionHistory facts shown as separate evidence, never inferred from the outcome. */
+  history_status?: string | null; published_at?: string | null; ack_status?: string | null;
+  parameters: Record<string, unknown>; evidence: Record<string, unknown>;
+}
+export interface ArbitrationEvidence {
+  matchId: string;
+  plans: { planId: string; status: string; decidedAt: string; source: { kind: 'FACT' | 'EVENT'; id: string }; candidates: ArbitrationCandidate[] }[];
+  note: string;
+}
+
+/**
+ * What guarded acceptance / the executor PROVED for a selected candidate. ACCEPTED is a command that passed guarded acceptance (publication, ACK
+ * and convergence are separate facts: see history_status, published_at and ack_status). EXECUTED is a non-command executor that reported
+ * success (stub executors prove nothing outside the system). A missing outcome means nothing is known.
+ */
+export type CandidateOutcome = 'ACCEPTED' | 'EXECUTED' | 'EXECUTION_FAILED' | 'UNSUPPORTED' | 'IGNORED' | 'DENIED';
 
 export interface ManualExecutionResult { requestId: string; factId: string; ruleVersionId: string; note: string }
 
@@ -115,6 +145,13 @@ export const ruleApi = {
   transition: (id: string, operation: 'validate' | 'activate' | 'pause' | 'resume' | 'archive', expectedRevision: number) =>
     apiClient.post<Rule | null>(`/rules/${id}/lifecycle/${operation}`, { expectedRevision }),
   getRuntime: (id: string) => apiClient.get<RuleRuntimeSnapshot>(`/rules/${id}/runtime`),
+  /** Persisted arbitration evidence of one match: every candidate of its plan with disposition, reason, winner and what acceptance did. */
+  getArbitration: (matchId: string) => apiClient.get<ArbitrationEvidence>(`/rule-matches/history/${matchId}/arbitration`),
+  listExclusionGroups: () => apiClient.get<ExclusionGroup[]>('/rule-exclusion-groups'),
+  createExclusionGroup: (name: string) => apiClient.post<ExclusionGroup>('/rule-exclusion-groups', { name }),
+  setExclusionMember: (groupId: string, ruleId: string, rank: number) => apiClient.put<ExclusionGroup>(`/rule-exclusion-groups/${groupId}/members/${ruleId}`, { rank }),
+  removeExclusionMember: (groupId: string, ruleId: string) => apiClient.delete(`/rule-exclusion-groups/${groupId}/members/${ruleId}`),
+  deleteExclusionGroup: (groupId: string) => apiClient.delete(`/rule-exclusion-groups/${groupId}`),
   /** Persists a server-issued MANUAL request addressed to the active version; evaluation is a separate persisted fact. */
   executeManually: (id: string, expectedVersionId?: string | null) =>
     apiClient.post<ManualExecutionResult>(`/rules/${id}/manual-executions`, expectedVersionId ? { expectedVersionId } : {}),

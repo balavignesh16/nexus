@@ -6,6 +6,6 @@ public enum TriggerType {
     COMMAND_PUBLICATION_FAILED, COMMAND_ACK_REJECTED, COMMAND_ACK_TIMED_OUT,
     VERIFICATION_CHANGED, VERIFICATION_TIMED_OUT, MANUAL, SCHEDULE, TEMPORAL_DUE, RULE_MATCHED;
 
-    /** Only the legacy stream may use the C13 foundation compatibility path. */
+    /** Only the legacy stream uses the legacy-event adapter (its actions still pass through the persisted plan like every other trigger). */
     public boolean legacy(){return this==LEGACY_DOMAIN_EVENT;}
 }

@@ -42,6 +42,7 @@ public abstract class TypedTriggerSupport {
         r.add("nexus.rule.reconciliation-delay-ms", () -> "86400000");
         r.add("nexus.rule.ack-timeout-scan-ms", () -> "86400000");
         r.add("nexus.rule.timer-scan-ms", () -> "86400000");
+        r.add("nexus.rule.legacy-plan-recovery-scan-ms", () -> "86400000");
         r.add("nexus.twin.verification-scan-ms", () -> "86400000");
     }
 

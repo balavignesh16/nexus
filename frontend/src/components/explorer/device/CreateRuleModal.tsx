@@ -47,6 +47,9 @@ interface ConditionRow {
   capabilityKey?: string;
   unit?: string;
   origin?: number;
+  /** Stable condition identity (required when a hysteresis exit is set) and the optional EXIT threshold of a numeric hysteresis band. */
+  conditionId?: string;
+  hysteresisExit?: string;
 }
 
 /** A condition of an existing rule the form cannot edit (payload, severity, ...). It is preserved verbatim and in place. */
@@ -201,6 +204,7 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
           rows.push({
             id: Math.random().toString(36).slice(2), capabilityType: (c.capabilityType ?? '') as CapabilityType | '', operator: c.operator, value: c.expectedValue,
             ...(c.capabilityKey ? { capabilityKey: c.capabilityKey } : {}), ...(c.unit ? { unit: c.unit } : {}), origin,
+            ...(c.conditionId ? { conditionId: c.conditionId } : {}), ...(c.hysteresis?.exit != null ? { hysteresisExit: c.hysteresis.exit } : {}),
           });
         } else kept.push({ condition: c, origin });
       });
@@ -328,6 +332,8 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
           ...(c.capabilityType ? { capabilityType: c.capabilityType as CapabilityType } : {}),
           ...(c.capabilityKey ? { capabilityKey: c.capabilityKey } : {}),
           ...(c.unit ? { unit: c.unit } : {}),
+          ...(c.hysteresisExit && c.hysteresisExit.trim() ? { conditionId: c.conditionId ?? `hy-${c.id.slice(0, 8)}`, hysteresis: { exit: c.hysteresisExit.trim() } }
+            : c.conditionId ? { conditionId: c.conditionId } : {}),
         } as RuleCondition,
       }));
     return inOriginalOrder([{ condition: deviceCondition, origin: deviceOrigin }, ...capabilityConditions, ...preserved]);
@@ -569,6 +575,17 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
                           onChange={(e) => updateCondition(row.id, { value: e.target.value })}
                           className={`flex-1 ${inputClass}`}
                           data-testid="condition-numeric-value-input"
+                        />
+                      )}
+                      {!boolKind && ['GT', 'GTE', 'LT', 'LTE'].includes(row.operator) && (
+                        <input
+                          type="number"
+                          value={row.hysteresisExit ?? ''}
+                          onChange={(e) => updateCondition(row.id, { hysteresisExit: e.target.value })}
+                          placeholder="Exit (optional)"
+                          title="Hysteresis: the condition stays true until the value passes this exit threshold (same unit, no conversion)"
+                          className={`w-28 ${inputClass}`}
+                          data-testid="condition-hysteresis-exit"
                         />
                       )}
                       <button

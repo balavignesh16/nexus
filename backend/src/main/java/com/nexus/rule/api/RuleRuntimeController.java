@@ -40,7 +40,7 @@ public class RuleRuntimeController {
             FROM rule_temporal_state WHERE rule_id=? ORDER BY updated_at DESC LIMIT ?""", id, bounded));
         result.put("temporalEvidence", temporal.evidenceFor(id, bounded));
         result.put("candidates", jdbc.queryForList("""
-            SELECT c.candidate_id,c.match_id,c.action_ordinal,c.action_type,c.target_key,c.priority,c.disposition,c.reason,c.winner_candidate_id,p.fact_id
+            SELECT c.candidate_id,c.match_id,c.action_ordinal,c.action_type,c.target_key,c.priority,c.disposition,c.reason,c.winner_candidate_id,c.outcome,c.outcome_reason,p.fact_id,p.event_id
             FROM rule_action_candidates c JOIN rule_action_plans p USING(plan_id) WHERE c.rule_id=? ORDER BY p.decided_at DESC LIMIT ?""", id, bounded));
         result.put("matches", jdbc.queryForList("""
             SELECT match_id,trigger_type,trigger_fact_id,event_id,rule_version_id,rule_revision,execution_epoch,matched_at

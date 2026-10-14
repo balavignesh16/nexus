@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { RepeatPolicy, TemporalOperator } from '../../../api/ruleApi';
+import type { CooldownScope, RepeatPolicy, TemporalOperator } from '../../../api/ruleApi';
 import { TEMPORAL_OPERATORS, TRIGGER_TYPES, type TriggerConfig } from './ruleTriggerConfig';
 import type { TriggerType } from '../../../api/ruleApi';
 
@@ -20,7 +20,7 @@ export function RuleTriggerConfigSection({ config, onChange, hasDevice, selectCl
   const setTemporal = (patch: Partial<TriggerConfig['temporal']>) => onChange({ ...config, temporal: { ...config.temporal, ...patch } });
   const t = config.temporal;
   // The body renders only while expanded, so a rule that never uses these options keeps the original form untouched.
-  const configured = Object.keys(config.selected).length > 0 || t.enabled || config.repeatPolicy !== 'EVERY_TRIGGER_WHILE_TRUE';
+  const configured = Object.keys(config.selected).length > 0 || t.enabled || config.repeatPolicy !== 'EVERY_TRIGGER_WHILE_TRUE' || config.cooldownScope !== 'GLOBAL';
   const [userChoice, setUserChoice] = useState<boolean | null>(null);
   const open = userChoice ?? configured;   // an edited rule that already uses these options opens automatically
   const setOpen = (next: boolean) => setUserChoice(next);
@@ -128,6 +128,15 @@ export function RuleTriggerConfigSection({ config, onChange, hasDevice, selectCl
             <option value="EVERY_TRIGGER_WHILE_TRUE">Every qualifying trigger while true</option>
             <option value="EDGE_TRUE">Only on the transition into true</option>
           </select>
+        </div>
+
+        <div>
+          <label className="text-xs text-foundation-muted-fg mb-1 block">Cooldown scope</label>
+          <select value={config.cooldownScope} onChange={(e) => onChange({ ...config, cooldownScope: e.target.value as CooldownScope })} className={`w-full ${selectClass}`} data-testid="cooldown-scope">
+            <option value="GLOBAL">One cooldown for the whole rule</option>
+            <option value="PER_SCOPE">One cooldown per resolved device</option>
+          </select>
+          <p className="text-xs text-foundation-muted-fg mt-1">Applies only when a cooldown is set. Rules imported earlier always keep the single rule-wide cooldown.</p>
         </div>
       </div>}
     </div>

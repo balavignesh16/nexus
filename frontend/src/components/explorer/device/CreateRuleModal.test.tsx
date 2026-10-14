@@ -481,5 +481,98 @@ describe('CreateRuleModal - capability-aware rule creation, no fabrication', () 
       await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
       expect(body().conditions).toEqual([{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }]);
     });
+
+    it('a hysteresis band with its stable condition id round-trips unchanged and the exit threshold is editable', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS', conditionId: 'h1', hysteresis: { exit: '25' } },
+      ];
+      edit(base(conditions));
+      expect((screen.getByTestId('condition-hysteresis-exit') as HTMLInputElement).value).toBe('25');
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual(conditions);
+    });
+
+    it('editing the exit threshold changes only the exit', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS', conditionId: 'h1', hysteresis: { exit: '25' } },
+      ];
+      edit(base(conditions));
+      fireEvent.change(screen.getByTestId('condition-hysteresis-exit'), { target: { value: '20' } });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions[1]).toEqual({ ...conditions[1], hysteresis: { exit: '20' } });
+    });
+
+    it('clearing the exit removes the band but never the stable condition id; setting one on a plain condition creates an id', async () => {
+      saved();
+      const withBand: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS', conditionId: 'h1', hysteresis: { exit: '25' } },
+      ];
+      edit(base(withBand));
+      fireEvent.change(screen.getByTestId('condition-hysteresis-exit'), { target: { value: '' } });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions[1]).toEqual({ field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS', conditionId: 'h1' });
+    });
+
+    it('a plain numeric condition has no band until the user types an exit threshold', async () => {
+      saved();
+      edit(base([
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS' },
+      ]));
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions[1]).toEqual({ field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS' });
+    });
+
+    it('typing an exit threshold on a plain condition creates a stable band id', async () => {
+      saved();
+      edit(base([
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS' },
+      ]));
+      fireEvent.change(screen.getByTestId('condition-hysteresis-exit'), { target: { value: '22' } });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions[1].hysteresis).toEqual({ exit: '22' });
+      expect(body().conditions[1].conditionId).toMatch(/^hy-/);
+    });
+
+    it('a boolean capability offers no hysteresis control', () => {
+      saved();
+      edit(base([
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'EQ', expectedValue: 'true', capabilityType: 'MOTION' },
+      ]));
+      expect(screen.queryByTestId('condition-hysteresis-exit')).not.toBeInTheDocument();
+    });
+
+    it('an explicit per-scope cooldown survives editing and a default rule never sends a scope', async () => {
+      saved();
+      edit(base([{ field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' }, { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS' }],
+        { cooldownSeconds: 60, cooldownScope: 'PER_SCOPE' }));
+      expect((screen.getByTestId('cooldown-scope') as HTMLSelectElement).value).toBe('PER_SCOPE');
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().cooldownScope).toBe('PER_SCOPE');
+      expect(body().cooldownSeconds).toBe(60);
+    });
+
+    it('a rule that never opted in sends no cooldown scope at all', async () => {
+      saved();
+      edit(base([{ field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' }, { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS' }], { cooldownSeconds: 60 }));
+      fireEvent.click(screen.getByTestId('trigger-config-toggle'));
+      expect((screen.getByTestId('cooldown-scope') as HTMLSelectElement).value).toBe('GLOBAL');
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body()).not.toHaveProperty('cooldownScope');
+    });
   });
 });

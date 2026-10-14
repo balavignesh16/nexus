@@ -27,29 +27,19 @@ public class RuleExecutionAuthorization {
         if(!"ACTIVE".equals(owner.get("lifecycle")))throw new RuleExecutionSuppressedException("RULE_NOT_ACTIVE");
         if(!identity.ruleVersionId().equals(owner.get("active_version_id")) || identity.executionEpoch()!=((Number)owner.get("execution_epoch")).longValue())throw new RuleExecutionSuppressedException("STALE_VERSION_OR_EPOCH");
         if(!Set.of("PASSED","NOT_REQUIRED").contains(owner.get("reconciliation")))throw new RuleExecutionSuppressedException("RECONCILIATION_INELIGIBLE");
-        Boolean typed=jdbc.queryForObject("SELECT COALESCE((SELECT trigger_fact_id IS NOT NULL FROM rule_matches WHERE match_id=?),false)",Boolean.class,request.matchId());
-        Integer evidence;
-        if(Boolean.TRUE.equals(typed)) {
-            // Typed, scheduled, temporal and chained matches never use the legacy exception: a persisted,
-            // approved plan must have SELECTED exactly this request for this pinned version and committed fact.
-            evidence=jdbc.queryForObject("""
-                SELECT count(*) FROM rule_action_candidates c
-                JOIN rule_action_plans p ON p.plan_id=c.plan_id
-                JOIN rule_matches m ON m.match_id=c.match_id AND m.trigger_fact_id=p.fact_id
-                JOIN rule_trigger_facts f ON f.fact_id=p.fact_id
-                WHERE c.request_id=? AND c.match_id=? AND c.rule_id=? AND c.rule_version_id=? AND c.rule_revision=?
-                  AND m.execution_epoch=? AND c.disposition='SELECTED' AND p.status='APPROVED'
-                """,Integer.class,request.requestId(),request.matchId(),rule.ruleId(),identity.ruleVersionId(),identity.ruleRevision(),identity.executionEpoch());
-            if(evidence==null || evidence!=1)throw new RuleExecutionSuppressedException("PERSISTED_PLAN_AUTHORITY_REQUIRED");
-            requireRequestMatchesCandidate(request);
-            requireSourceStillCurrent(request);
-            return;
-        }
-        evidence=jdbc.queryForObject("""
-            SELECT count(*) FROM rule_matches m JOIN domain_events e ON e.event_id=m.event_id
-            WHERE m.match_id=? AND m.rule_id=? AND m.rule_version_id=? AND m.rule_revision=? AND m.execution_epoch=?
-            """,Integer.class,request.matchId(),rule.ruleId(),identity.ruleVersionId(),identity.ruleRevision(),identity.executionEpoch());
-        if(evidence==null || evidence!=1)throw new RuleExecutionSuppressedException("DURABLE_SOURCE_MATCH_REQUIRED");
+        // C13 is retired: EVERY rule action - typed or legacy DomainEvent - needs a persisted, approved plan that SELECTED exactly this
+        // request for this pinned version and committed source. There is no source-only exception any more.
+        Integer evidence=jdbc.queryForObject("""
+            SELECT count(*) FROM rule_action_candidates c
+            JOIN rule_action_plans p ON p.plan_id=c.plan_id
+            JOIN rule_matches m ON m.match_id=c.match_id
+             AND ((p.fact_id IS NOT NULL AND m.trigger_fact_id=p.fact_id) OR (p.event_id IS NOT NULL AND m.trigger_fact_id IS NULL AND m.event_id=p.event_id))
+            WHERE c.request_id=? AND c.match_id=? AND c.rule_id=? AND c.rule_version_id=? AND c.rule_revision=?
+              AND m.execution_epoch=? AND c.disposition='SELECTED' AND p.status='APPROVED'
+            """,Integer.class,request.requestId(),request.matchId(),rule.ruleId(),identity.ruleVersionId(),identity.ruleRevision(),identity.executionEpoch());
+        if(evidence==null || evidence!=1)throw new RuleExecutionSuppressedException("PERSISTED_PLAN_AUTHORITY_REQUIRED");
+        requireRequestMatchesCandidate(request);
+        requireSourceStillCurrent(request);
     }
     /**
      * A superseded source must not accept a command. This runs inside command acceptance, after the device row (FOR UPDATE), the
@@ -60,8 +50,11 @@ public class RuleExecutionAuthorization {
      * transaction holds, so no lock inversion exists; the source row lock is taken last and only ever waits for a short writer.
      */
     private void requireSourceStillCurrent(ActionExecutionRequest request) {
-        var facts=jdbc.queryForList("SELECT m.trigger_fact_id FROM rule_matches m WHERE m.match_id=?",request.matchId());
-        if(facts.isEmpty()||facts.getFirst().get("trigger_fact_id")==null)throw new RuleExecutionSuppressedException("PERSISTED_PLAN_AUTHORITY_REQUIRED");
+        var facts=jdbc.queryForList("SELECT m.trigger_fact_id,m.event_id FROM rule_matches m WHERE m.match_id=?",request.matchId());
+        if(facts.isEmpty())throw new RuleExecutionSuppressedException("PERSISTED_PLAN_AUTHORITY_REQUIRED");
+        // A legacy DomainEvent is an immutable fact of its own: it has no "latest source" to be superseded by.
+        if(facts.getFirst().get("trigger_fact_id")==null&&facts.getFirst().get("event_id")!=null)return;
+        if(facts.getFirst().get("trigger_fact_id")==null)throw new RuleExecutionSuppressedException("PERSISTED_PLAN_AUTHORITY_REQUIRED");
         var superseded=currentness.ofPersistedFact((UUID)facts.getFirst().get("trigger_fact_id"),true);
         if(superseded.isPresent())throw new RuleExecutionSuppressedException("SOURCE_SUPERSEDED: "+superseded.get());
     }

@@ -42,6 +42,8 @@ public class RuleEvaluationSnapshotService {
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final com.nexus.rule.trigger.RuleSourceCurrentness currentness;
+    private com.nexus.rule.persistence.RuleHysteresisStore hysteresisStore;
+    @org.springframework.beans.factory.annotation.Autowired void setHysteresisStore(com.nexus.rule.persistence.RuleHysteresisStore store){this.hysteresisStore=store;}
     private volatile Consumer<String> readProbe;
 
     public RuleEvaluationSnapshotService(RuleRegistry registry,RuleCapabilityValidator validator,DigitalTwinRepository twins,
@@ -134,7 +136,16 @@ public class RuleEvaluationSnapshotService {
         // The trigger's source identity is compared with the state captured ABOVE, in this same REPEATABLE READ transaction.
         var superseded=judgeSource&&event.typed()?currentness.againstSnapshot(event,twinRows,links):java.util.Optional.<String>empty();
         phase("CURRENTNESS");
-        return new RuleEvaluationSnapshot(UUID.randomUUID(),clock.instant(),evaluationTime,isolation,captured,twinRows,links,capabilities,unresolved,inputs,temporal,superseded);
+        var latches=new LinkedHashMap<String,Boolean>();
+        if(hysteresisStore!=null)for(CapturedRule c:captured){
+            var identity=c.rule().executionIdentity();
+            if(identity==null||c.scopeDeviceId()==null||c.rule().conditions()==null)continue;
+            for(RuleCondition condition:c.rule().conditions())
+                if(condition!=null&&condition.hysteresis()!=null&&condition.conditionId()!=null)
+                    latches.put(RuleEvaluationSnapshot.hysteresisKey(c.rule().ruleId(),condition.conditionId(),c.scopeDeviceId()),
+                        hysteresisStore.latched(c.rule().ruleId(),condition.conditionId(),c.scopeDeviceId(),identity.executionEpoch()));
+        }
+        return new RuleEvaluationSnapshot(UUID.randomUUID(),clock.instant(),evaluationTime,isolation,captured,twinRows,links,capabilities,unresolved,inputs,temporal,superseded,latches);
     }
 
     private void captureCapability(UUID scope,RuleCondition c,Map<String,CapturedCapability> out,Set<String> unresolved){

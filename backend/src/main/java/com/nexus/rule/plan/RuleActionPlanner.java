@@ -4,6 +4,7 @@ import com.nexus.action.application.ActionExecutionEngine;
 import com.nexus.action.domain.ActionContext;
 import com.nexus.action.domain.ActionExecutionRequest;
 import com.nexus.action.domain.ActionType;
+import com.nexus.event.domain.DomainEvent;
 import com.nexus.rule.domain.Rule;
 import com.nexus.rule.domain.RuleAction;
 import com.nexus.rule.domain.RuleMatchedEvent;
@@ -14,9 +15,10 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * Authority for actions of typed, scheduled, temporal and chained matches: candidates -> deterministic
- * arbitration -> persisted plan -> dispatch of SELECTED candidates only. It never serves legacy DomainEvent
- * matches, which keep the C13 foundation exception in ActionPlanner. A failed plan persistence dispatches nothing.
+ * The single authority for the actions of EVERY persisted match - typed, scheduled, temporal, chained and legacy DomainEvent:
+ * candidates -> deterministic arbitration -> persisted plan -> dispatch of SELECTED candidates only. The former independent
+ * per-match legacy dispatch (the C13 foundation exception) no longer exists. A failed plan persistence dispatches nothing, and the
+ * request that reaches guarded acceptance must equal the persisted SELECTED candidate (see RuleExecutionAuthorization).
  */
 @Component
 public class RuleActionPlanner {
@@ -25,12 +27,20 @@ public class RuleActionPlanner {
     private final ActionExecutionEngine engine;
     public RuleActionPlanner(RuleActionPlanStore store,ActionExecutionEngine engine){this.store=store;this.engine=engine;}
 
-    /** @param factId the committed source fact this batch of persisted matches belongs to */
-    public void planAndDispatch(UUID factId,List<RuleMatchedEvent> persistedMatches){
+    /** Typed batch: the committed source fact the persisted matches belong to. */
+    public void planAndDispatch(UUID factId,List<RuleMatchedEvent> persistedMatches){planAndDispatch(PlanSource.fact(factId),persistedMatches);}
+
+    /**
+     * @param source the committed fact or the persisted legacy event this batch of persisted matches belongs to
+     * @return true when THIS call created the plan (and dispatched its SELECTED candidates); false when the batch already had one
+     */
+    public boolean planAndDispatch(PlanSource source,List<RuleMatchedEvent> persistedMatches){
         var candidates=new ArrayList<ActionCandidate>();
+        var events=new HashMap<UUID,DomainEvent>();
         for(RuleMatchedEvent match:persistedMatches){
             Rule rule=match.result().rule();
-            if(rule.actions()==null||rule.executionIdentity()==null)continue;
+            if(rule.actions()==null||rule.executionIdentity()==null)continue;   // an unpinned rule can never be authorized
+            if(match.result().event()!=null)events.put(match.matchId(),match.result().event());
             for(int i=0;i<rule.actions().size();i++){
                 RuleAction action=rule.actions().get(i);
                 boolean command="SEND_COMMAND".equals(action.actionType());
@@ -38,24 +48,26 @@ public class RuleActionPlanner {
                     command?ActionArbiter.targetKey(action):null,ActionArbiter.equivalenceKey(action),rule.priority(),match.correlationId()));
             }
         }
-        var decisions=ActionArbiter.arbitrate(candidates);
-        Optional<UUID> plan;
-        try{plan=store.persist(factId,decisions);}
+        Optional<RuleActionPlanStore.Plan> plan;
+        try{plan=store.persist(source,candidates);}
         catch(RuntimeException failure){
-            log.error("RULE_ACTION_PLAN_PERSISTENCE_FAILED {} - no action will be dispatched; the fact stays recoverable",factId,failure);
-            // Surfaced, not swallowed: the router records the fact as FAILED and the recovery scanner rebuilds the plan from the persisted matches.
+            log.error("RULE_ACTION_PLAN_PERSISTENCE_FAILED {} - no action will be dispatched; the source stays recoverable",source,failure);
+            // Surfaced, not swallowed: a typed fact is recorded FAILED by the router and rebuilt by the recovery scanner.
             throw failure;
         }
-        if(plan.isEmpty()){log.info("RULE_ACTION_PLAN_ALREADY_DECIDED {}",factId);return;}
-        for(ActionDecision decision:decisions){
+        if(plan.isEmpty()){log.info("RULE_ACTION_PLAN_ALREADY_DECIDED {}",source);return false;}
+        for(ActionDecision decision:plan.get().decisions()){
             if(!decision.dispatches())continue;
             var c=decision.candidate();
             ActionType type;
             try{type=ActionType.valueOf(c.action().actionType().toUpperCase().replace("-","_"));}
             catch(IllegalArgumentException unknown){log.warn("Unknown ActionType requested: {}",c.action().actionType());continue;}
             var request=new ActionExecutionRequest(c.requestId(),c.matchId(),type,c.action().parameters());
-            try{engine.process(List.of(request),new ActionContext(null,c.rule()),c.correlationId());}
-            catch(RuntimeException failure){log.error("Typed rule action failed request={}",c.requestId(),failure);}
+            try{engine.process(List.of(request),new ActionContext(events.get(c.matchId()),c.rule()),c.correlationId());}
+            catch(RuntimeException failure){log.error("Rule action failed request={}",c.requestId(),failure);}
         }
+        try{store.recordOutcomes(plan.get().planId());}
+        catch(RuntimeException bookkeeping){log.warn("RULE_PLAN_OUTCOME_NOT_RECORDED {}: {}",plan.get().planId(),bookkeeping.getMessage());}
+        return true;
     }
 }

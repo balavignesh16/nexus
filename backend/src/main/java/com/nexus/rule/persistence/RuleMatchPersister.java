@@ -33,6 +33,9 @@ public class RuleMatchPersister {
     private com.nexus.rule.trigger.RuleTriggerFactRecorder chain;
     @org.springframework.beans.factory.annotation.Autowired
     void setChain(@org.springframework.context.annotation.Lazy com.nexus.rule.trigger.RuleTriggerFactRecorder chain){this.chain=chain;}
+    private RuleCooldownStore cooldowns;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setCooldowns(RuleCooldownStore cooldowns){this.cooldowns=cooldowns;}
     private final RuleMatchRepository repository;
     private final ObjectMapper objectMapper;
 
@@ -63,6 +66,8 @@ public class RuleMatchPersister {
         var trigger = result.context() == null ? null : result.context().trigger();
         if (trigger != null && trigger.typed()) entity.triggeredBy(trigger.type().name(), trigger.factId());
         var identity=result.rule().executionIdentity();
+        UUID scopeDevice = result.context() == null ? null : result.context().captured().scopeDeviceId();
+        String cooldownKey = RuleCooldownStore.scopeKey(result.rule(), scopeDevice);
         if(ownership!=null && identity!=null) {
             // History may persist after a switch, but cannot poison restored cooldown.
             var roots=ownership.queryForList("SELECT lifecycle,active_version_id,execution_epoch FROM rules WHERE rule_id=? FOR SHARE",result.rule().ruleId());
@@ -70,13 +75,34 @@ public class RuleMatchPersister {
                 && identity.ruleVersionId().equals(roots.getFirst().get("active_version_id"))
                 && identity.executionEpoch()==((Number)roots.getFirst().get("execution_epoch")).longValue());
         }
+        // A match from a version/epoch that is no longer the owner is history only: it neither obeys nor advances the gate
+        // (authorization will refuse its actions anyway).
+        boolean gated = ownership != null && cooldowns != null && identity != null && entity.isCooldownEligible();
+        if (gated) {
+            // Serialized across JVM instances: the (rule, scope) cooldown row is locked FOR UPDATE until this transaction ends, so the
+            // check, the match row and the advance are one atomic step. A failure anywhere below rolls the whole step back.
+            var last = cooldowns.lockAndRead(result.rule().ruleId(), cooldownKey);
+            Integer cooldownSeconds = result.rule().cooldownSeconds();
+            if (cooldownSeconds != null && last.isPresent() && event.timestamp().isBefore(last.get().plusSeconds(cooldownSeconds)))
+                throw new RuleMatchSuppressedException(RuleMatchSuppressedException.Reason.COOLDOWN, last.get());
+            if (result.rule().repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE && scopeDevice != null) {
+                // The edge is claimed atomically: the first claimant inserts (or flips) the latch inside this transaction; a concurrent
+                // claimant blocks on the same key and then finds it latched in the current generation.
+                long generation = identity.executionEpoch();
+                java.sql.Timestamp observed = java.sql.Timestamp.from(trigger == null ? event.timestamp() : trigger.recordedAt());
+                int claimed = ownership.update("INSERT INTO rule_repeat_state(rule_id,scope_device_id,generation,latched,updated_at,latched_at) VALUES(?,?,?,true,now(),?) ON CONFLICT (rule_id,scope_device_id) DO NOTHING",
+                    result.rule().ruleId(), scopeDevice, generation, observed);
+                if (claimed == 0) {
+                    var latch = ownership.queryForList("SELECT latched,generation FROM rule_repeat_state WHERE rule_id=? AND scope_device_id=? FOR UPDATE", result.rule().ruleId(), scopeDevice).getFirst();
+                    if (((Number) latch.get("generation")).longValue() == generation && Boolean.TRUE.equals(latch.get("latched")))
+                        throw new RuleMatchSuppressedException(RuleMatchSuppressedException.Reason.EDGE_LATCHED, null);
+                    ownership.update("UPDATE rule_repeat_state SET generation=?,latched=true,updated_at=now(),latched_at=? WHERE rule_id=? AND scope_device_id=?",
+                        generation, observed, result.rule().ruleId(), scopeDevice);
+                }
+            }
+        }
         repository.save(entity);
-        // The latch commits with the match, so an edge cannot be consumed without its attributed match (or vice versa).
-        if (ownership != null && identity != null && result.context() != null && result.rule().repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE
-                && result.context().captured().scopeDeviceId() != null)
-            ownership.update("INSERT INTO rule_repeat_state(rule_id,scope_device_id,generation,latched,updated_at) VALUES(?,?,?,true,now()) "
-                + "ON CONFLICT (rule_id,scope_device_id) DO UPDATE SET generation=EXCLUDED.generation,latched=true,updated_at=now()",
-                result.rule().ruleId(), result.context().captured().scopeDeviceId(), identity.executionEpoch());
+        if (gated) { repository.flush(); cooldowns.advance(result.rule().ruleId(), cooldownKey, event.matchId(), event.timestamp()); }
         if (trigger != null && chain != null && identity != null) recordChainFact(event, result, trigger, identity);
         return identity==null || entity.isCooldownEligible();
     }
@@ -129,6 +155,16 @@ public class RuleMatchPersister {
         if (ownership == null || factId == null) return java.util.Optional.empty();
         return ownership.queryForList("SELECT match_id FROM rule_matches WHERE rule_id=? AND rule_version_id=? AND trigger_fact_id=?", UUID.class, ruleId, versionId, factId)
             .stream().findFirst();
+    }
+
+    /**
+     * The persisted decision of this rule version for this legacy DomainEvent, if one exists. A redelivered event reuses it instead of
+     * persisting a duplicate match (which could never be planned), and the reused match still joins the batch so a missing plan is created once.
+     */
+    public java.util.Optional<UUID> existingLegacyMatch(UUID ruleId, UUID versionId, UUID eventId) {
+        if (ownership == null || eventId == null) return java.util.Optional.empty();
+        return ownership.queryForList("SELECT match_id FROM rule_matches WHERE rule_id=? AND rule_version_id=? AND event_id=? AND trigger_fact_id IS NULL ORDER BY matched_at,match_id LIMIT 1",
+            UUID.class, ruleId, versionId, eventId).stream().findFirst();
     }
 
     /** Evidence for a chain trigger that reached a rule already present in its causation chain. */
@@ -189,6 +225,17 @@ public class RuleMatchPersister {
             map.put("bindingId", conditionEvidence.bindingId());
             map.put("valueType", conditionEvidence.valueType());
             map.put("unit", conditionEvidence.unit());
+        }
+        if (conditionEvidence.hysteresis() != null) {
+            var band = conditionEvidence.hysteresis();
+            Map<String, Object> hysteresis = new LinkedHashMap<>();
+            hysteresis.put("conditionId", band.conditionId());
+            hysteresis.put("enter", band.enter());
+            hysteresis.put("exit", band.exit());
+            hysteresis.put("latchedBefore", band.latchedBefore());
+            hysteresis.put("latchedAfter", band.latchedAfter());
+            hysteresis.put("decision", band.decision());
+            map.put("hysteresis", hysteresis);
         }
         if (conditionEvidence.stateQuality() != null) {
             map.put("quality", conditionEvidence.stateQuality());

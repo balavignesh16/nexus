@@ -47,6 +47,9 @@ public class RuleMatcher implements EventListener {
     private com.nexus.rule.persistence.RuleRepeatStateStore repeatState;
     @org.springframework.beans.factory.annotation.Autowired
     void setRepeatState(com.nexus.rule.persistence.RuleRepeatStateStore repeatState){this.repeatState=repeatState;}
+    private com.nexus.rule.persistence.RuleHysteresisStore hysteresisStore;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setHysteresisStore(com.nexus.rule.persistence.RuleHysteresisStore store){this.hysteresisStore=store;}
     private RuleEvaluationSnapshotService snapshots;
     @org.springframework.beans.factory.annotation.Autowired
     void setSnapshots(RuleEvaluationSnapshotService snapshots){this.snapshots=snapshots;}
@@ -67,7 +70,10 @@ public class RuleMatcher implements EventListener {
     // of truth) - never written to before a match's persist() call has
     // already succeeded, so a persistence failure can never poison cooldown
     // state (see the per-rule lock in onEvent below).
-    private final ConcurrentHashMap<UUID, Instant> lastMatchedAt = new ConcurrentHashMap<>();
+    // A cache only: the authority is rule_cooldown_state, locked and re-checked inside the match transaction (cross-instance safe).
+    // Keyed by logical rule + cooldown scope key; a miss or a stale entry can only lead to the authoritative database check.
+    private final ConcurrentHashMap<String, Instant> lastMatchedAt = new ConcurrentHashMap<>();
+    private static String cooldownKey(UUID ruleId, String scopeKey) { return ruleId + "|" + scopeKey; }
     // One intrinsic lock object per rule - serializes concurrent events for
     // the SAME rule around its own check-evaluate-persist-commit sequence,
     // without blocking evaluation of any other rule.
@@ -104,7 +110,7 @@ public class RuleMatcher implements EventListener {
         for (Object[] row : ruleMatchRepository.findLastMatchedAtByRule()) {
             UUID ruleId = (UUID) row[0];
             Instant matchedAt = (Instant) row[1];
-            lastMatchedAt.put(ruleId, matchedAt);
+            lastMatchedAt.put(cooldownKey(ruleId, ""), matchedAt);
         }
     }
 
@@ -125,7 +131,7 @@ public class RuleMatcher implements EventListener {
 
     /**
      * Entry for a committed typed source fact, loaded by RuleTriggerRouter after the source transaction committed.
-     * Typed matches never reach the legacy ActionPlanner: their actions are authorized by RuleActionPlanner.
+     * Every match - typed or legacy - has its actions decided and authorized by RuleActionPlanner.
      */
     public java.util.Optional<String> processFact(TriggerObservation observation) { return processFact(observation, rule -> true); }
 
@@ -165,6 +171,7 @@ public class RuleMatcher implements EventListener {
         }
         final RuleEvaluationSnapshot frozenSnapshot = snapshot;
         var typedMatches = new java.util.ArrayList<RuleMatchedEvent>();
+        var legacyMatches = new java.util.ArrayList<RuleMatchedEvent>();
         for (Rule rule : activeRules) {
             if (!admitted.test(rule)) continue;
             // A logical rule may not repeat in its own causation chain, regardless of version changes (C17).
@@ -187,7 +194,22 @@ public class RuleMatcher implements EventListener {
                             continue;
                         }
                     }
-                    if (isInCooldown(rule)) {
+                    String scopeKey = com.nexus.rule.persistence.RuleCooldownStore.scopeKey(rule, frozen == null ? null : frozen.scopeDeviceId());
+                    if (!trigger.typed() && frozen != null && rule.executionIdentity() != null) {
+                        // A redelivered legacy event reuses the match already persisted for this rule version (no duplicate history, no second cooldown claim).
+                        var existingLegacy = ruleMatchPersister.existingLegacyMatch(rule.ruleId(), rule.executionIdentity().ruleVersionId(), trigger.sourceId());
+                        if (existingLegacy != null && existingLegacy.isPresent()) {
+                            legacyMatches.add(new RuleMatchedEvent(existingLegacy.get(), clock.instant(), new RuleEvaluationResult(true, rule, trigger.legacyEvent(), "Recovered persisted match", List.of(),
+                                new RuleEvaluationContext(UUID.randomUUID(), frozenSnapshot, frozen, trigger)), trigger.correlationId()));
+                            continue;
+                        }
+                    }
+                    // A plain rule skips evaluation inside its cooldown window (unchanged). A rule that keeps latch state (EDGE_TRUE, hysteresis)
+                    // is still evaluated so its latches follow the truth, and only the MATCH is suppressed below.
+                    boolean stateful = rule.repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE
+                        || (rule.conditions() != null && rule.conditions().stream().anyMatch(c -> c != null && c.hysteresis() != null));
+                    boolean cooling = isInCooldown(rule, scopeKey);
+                    if (cooling && !stateful) {
                         continue;
                     }
                     if (frozen != null) {
@@ -209,6 +231,16 @@ public class RuleMatcher implements EventListener {
                     RuleEvaluationResult result = frozen != null
                             ? ruleEvaluator.evaluate(rule, event, new RuleEvaluationContext(UUID.randomUUID(), frozenSnapshot, frozen, trigger))
                             : ruleEvaluator.evaluate(rule, event);
+                    // Hysteresis latches follow DEFINITE ENTER/EXIT transitions only, stamped with the observation time (an older observation
+                    // from another instance never overwrites a newer one). Short-circuited conditions have no evidence, so they change nothing.
+                    if (hysteresisStore != null && frozen != null && frozen.scopeDeviceId() != null && rule.executionIdentity() != null) {
+                        for (var conditionEvidence : result.evidence()) {
+                            var band = conditionEvidence.hysteresis();
+                            if (band != null && band.transition() && band.conditionId() != null)
+                                hysteresisStore.apply(rule.ruleId(), band.conditionId(), frozen.scopeDeviceId(), rule.executionIdentity().executionEpoch(),
+                                    band.latchedAfter(), trigger.recordedAt());
+                        }
+                    }
                     if (rule.repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE && repeatState != null && frozen != null
                             && frozen.scopeDeviceId() != null && rule.executionIdentity() != null) {
                         long generation = rule.executionIdentity().executionEpoch();
@@ -217,7 +249,12 @@ public class RuleMatcher implements EventListener {
                             continue;
                         }
                         // Only definite false evidence rearms the edge; UNKNOWN, stale or invalid evidence never manufactures one.
-                        if (!result.matched() && definitelyFalse(result)) repeatState.set(rule.ruleId(), frozen.scopeDeviceId(), generation, false);
+                        // The rearm carries its observation time, so a slower instance cannot undo a newer consumed edge.
+                        if (!result.matched() && definitelyFalse(result)) repeatState.rearm(rule.ruleId(), frozen.scopeDeviceId(), generation, trigger.recordedAt());
+                    }
+                    if (result.matched() && cooling) {
+                        log.info("RULE_MATCH_SUPPRESSED rule={} trigger={} reason=COOLDOWN", rule.ruleId(), trigger.sourceId());
+                        continue;
                     }
                     if (result.matched()) {
                         log.info("Rule matched! Rule: '{}', Trigger: {}", rule.name(), trigger.type());
@@ -234,18 +271,25 @@ public class RuleMatcher implements EventListener {
                         // update, is unreachable if persist() throws, so a
                         // persistence failure can never create a cooldown
                         // window for a match that was never actually recorded.
-                        boolean cooldownEligible=ruleMatchPersister.persist(matchedEvent);
+                        boolean cooldownEligible;
+                        try { cooldownEligible=ruleMatchPersister.persist(matchedEvent); }
+                        catch (com.nexus.rule.persistence.RuleMatchSuppressedException suppressed) {
+                            // The durable gate (another instance, or an earlier match) refused: nothing was written.
+                            if (suppressed.lastMatchedAt() != null) lastMatchedAt.merge(cooldownKey(rule.ruleId(), scopeKey), suppressed.lastMatchedAt(), (a, b) -> a.isAfter(b) ? a : b);
+                            log.info("RULE_MATCH_SUPPRESSED rule={} trigger={} reason={}", rule.ruleId(), trigger.sourceId(), suppressed.reason());
+                            continue;
+                        }
 
                         // Preserve eligibility decided inside the committed match transaction.
                         // A later owner change cannot erase a legitimate logical-rule cooldown.
                         if (rule.cooldownSeconds() != null && (authorization==null || cooldownEligible)) {
-                            lastMatchedAt.put(rule.ruleId(), matchedEvent.timestamp());
+                            lastMatchedAt.put(cooldownKey(rule.ruleId(), scopeKey), matchedEvent.timestamp());
                         }
 
                         matchStore.add(matchedEvent);
                         realtimePublisher.publishRuleMatch(result, trigger.correlationId());
                         if (trigger.typed()) typedMatches.add(matchedEvent);
-                        else applicationEventPublisher.publishEvent(matchedEvent);
+                        else { applicationEventPublisher.publishEvent(matchedEvent); legacyMatches.add(matchedEvent); }
                     }
                 } catch (Exception e) {
                     log.error("Failed to evaluate rule {} against trigger {}", rule.ruleId(), trigger.sourceId(), e);
@@ -253,22 +297,26 @@ public class RuleMatcher implements EventListener {
             }
         }
         if (trigger.typed() && !typedMatches.isEmpty()) actionPlanner.planAndDispatch(trigger.factId(), typedMatches);
+        // Legacy DomainEvent matches take the SAME persisted-arbitration pathway (the C13 exception is retired): one plan per event.
+        if (!trigger.typed() && !legacyMatches.isEmpty() && actionPlanner != null)
+            actionPlanner.planAndDispatch(com.nexus.rule.plan.PlanSource.event(trigger.sourceId()), legacyMatches);
         return java.util.Optional.empty();
     }
 
     private static boolean definitelyFalse(RuleEvaluationResult result) {
         if (result.evidence().isEmpty()) return false;
-        var failing = result.evidence().getLast();
-        if (failing.conditionMet()) return false;
+        // The failing condition is the FIRST non-met entry (hysteresis tracking evidence may follow it).
+        var failing = result.evidence().stream().filter(e -> !e.conditionMet()).findFirst().orElse(null);
+        if (failing == null) return false;
         if (failing.eligible() != null) return failing.eligible();
         return !"MISSING".equals(String.valueOf(failing.actualValue()));
     }
 
-    private boolean isInCooldown(Rule rule) {
+    private boolean isInCooldown(Rule rule, String scopeKey) {
         if (rule.cooldownSeconds() == null) {
             return false;
         }
-        Instant last = lastMatchedAt.get(rule.ruleId());
+        Instant last = lastMatchedAt.get(cooldownKey(rule.ruleId(), scopeKey));
         if (last == null) {
             return false;
         }

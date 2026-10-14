@@ -86,7 +86,25 @@ class RuleCommandAuthorizationIntegrationTest {
         matches.persist(new RuleMatchedEvent(match,Instant.now(),new RuleEvaluationResult(true,pinned,event,"Matched"),"p31-guard"));
         return new Fixture(device,cap,pinned,event,match);
     }
-    private ActionExecutionRequest request(Fixture f){return new ActionExecutionRequest(UUID.randomUUID(),f.match(),ActionType.SEND_COMMAND,f.rule().actions().getFirst().parameters());}
+    @Autowired com.nexus.rule.plan.RuleActionPlanStore planStore;
+    /**
+     * A command request is only authorizable when the unified arbitration pathway persisted an approved plan that SELECTED it (C13 is
+     * retired: there is no source-and-match-only exception). The fixture persists that plan for the legacy event through the real store.
+     */
+    private ActionExecutionRequest request(Fixture f){
+        UUID requestId=UUID.randomUUID();var action=f.rule().actions().getFirst();
+        var candidate=new com.nexus.rule.plan.ActionCandidate(UUID.randomUUID(),f.match(),f.rule(),0,action,requestId,
+            com.nexus.rule.plan.ActionArbiter.targetKey(action),com.nexus.rule.plan.ActionArbiter.equivalenceKey(action),f.rule().priority(),"p31-guard");
+        if(planStore.persist(com.nexus.rule.plan.PlanSource.event(f.event().eventId()),List.of(candidate)).isEmpty()){
+            // The fixture already has its plan: add one more SELECTED candidate to it.
+            UUID plan=sql.queryForObject("SELECT plan_id FROM rule_action_plans WHERE event_id=?",UUID.class,f.event().eventId());
+            int ordinal=sql.queryForObject("SELECT count(*) FROM rule_action_candidates WHERE plan_id=?",Integer.class,plan);
+            sql.update("INSERT INTO rule_action_candidates(candidate_id,plan_id,match_id,rule_id,rule_version_id,rule_revision,action_ordinal,action_type,target_key,priority,request_id,disposition,reason,parameters) VALUES(?,?,?,?,?,?,?,'SEND_COMMAND',?,?,?,'SELECTED','FIXTURE_SECOND_REQUEST',?::jsonb)",
+                UUID.randomUUID(),plan,f.match(),f.rule().ruleId(),f.rule().executionIdentity().ruleVersionId(),f.rule().executionIdentity().ruleRevision(),ordinal+1,candidate.targetKey(),candidate.priority(),requestId,
+                new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(action.parameters()).toString());
+        }
+        return new ActionExecutionRequest(requestId,f.match(),ActionType.SEND_COMMAND,action.parameters());
+    }
     private void empty(Fixture f,ActionExecutionRequest request){
         assertEquals(0,sql.queryForObject("SELECT count(*) FROM action_history WHERE request_id=?",Integer.class,request.requestId()));
         assertEquals(0,sql.queryForObject("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?",Integer.class,f.device()));
@@ -591,6 +609,9 @@ class RuleCommandAuthorizationIntegrationTest {
     @Test void committedEligibleMatchRetainsCooldownWhenOwnerChangesBeforeTimestampHandoff() throws Exception {
         Instant time=Instant.parse("2026-10-13T12:00:00Z");org.mockito.Mockito.when(clock.instant()).thenReturn(time);
         var f=fixture();var r=f.rule();lifecycle.legacySave(new Rule(r.ruleId(),"Cooldown handoff",true,1,r.conditions(),r.actions(),Map.of(),60),null);
+        // The fixture's own committed match is OLDER than the cooldown window of this scenario (its wall-clock stamp is unrelated to the injected clock).
+        sql.update("UPDATE rule_matches SET matched_at=? WHERE rule_id=?",java.sql.Timestamp.from(time.minusSeconds(3600)),r.ruleId());
+        sql.update("UPDATE rule_cooldown_state SET last_matched_at=? WHERE rule_id=?",java.sql.Timestamp.from(time.minusSeconds(3600)),r.ruleId());
         var committed=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);var once=new java.util.concurrent.atomic.AtomicBoolean();
         org.mockito.Mockito.doAnswer(inv->{var match=(RuleMatchedEvent)inv.getArgument(0);if(match.result().rule().ruleId().equals(r.ruleId())&&once.compareAndSet(false,true)){
             assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
@@ -603,6 +624,7 @@ class RuleCommandAuthorizationIntegrationTest {
             lifecycle.transition(r.ruleId(),"pause",null);lifecycle.transition(r.ruleId(),"resume",null);release.countDown();task.get(15,java.util.concurrent.TimeUnit.SECONDS);noEffects(f.device());
             matcher.onEvent(new DomainEvent(UUID.randomUUID(),EventType.TWIN_UPDATED,f.device(),time,"after-resume",Map.of(),"INFO","after-resume"));
             assertEquals(2,sql.queryForObject("SELECT count(*) FROM rule_matches WHERE rule_id=?",Integer.class,r.ruleId()),"A legitimately committed match must preserve the logical cooldown despite an intervening epoch change");noEffects(f.device());
+            assertEquals(time,sql.queryForObject("SELECT last_matched_at FROM rule_cooldown_state WHERE rule_id=? AND scope_key=''",java.sql.Timestamp.class,r.ruleId()).toInstant(),"the durable authority holds the committed match");
         }finally{release.countDown();pool.shutdownNow();}
     }
     @Test void manualAcceptanceRequiresNoInventedRuleIdentity(){

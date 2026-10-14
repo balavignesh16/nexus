@@ -1,5 +1,5 @@
 import type {
-  RepeatPolicy, Rule, RuleCondition, ScheduleSpec, TemporalOperator, TemporalSpec, TriggerSubscription, TriggerType,
+  CooldownScope, RepeatPolicy, Rule, RuleCondition, ScheduleSpec, TemporalOperator, TemporalSpec, TriggerSubscription, TriggerType,
 } from '../../../api/ruleApi';
 
 /**
@@ -32,6 +32,7 @@ export const TEMPORAL_OPERATORS: { operator: TemporalOperator; label: string }[]
 export interface TriggerConfig {
   selected: Partial<Record<TriggerType, string>>;   // value = the single optional filter value, '' when unfiltered
   repeatPolicy: RepeatPolicy;
+  cooldownScope: CooldownScope;
   schedule: { kind: 'ONE_SHOT' | 'FIXED_INTERVAL'; at: string; intervalSeconds: string; startsAt: string };
   temporal: {
     enabled: boolean; operator: TemporalOperator; durationSeconds: string; windowSeconds: string; count: string;
@@ -43,6 +44,7 @@ export function emptyTriggerConfig(): TriggerConfig {
   return {
     selected: {},
     repeatPolicy: 'EVERY_TRIGGER_WHILE_TRUE',
+    cooldownScope: 'GLOBAL',
     schedule: { kind: 'ONE_SHOT', at: '', intervalSeconds: '', startsAt: '' },
     temporal: { enabled: false, operator: 'FOR_DURATION', durationSeconds: '', windowSeconds: '', count: '', direction: 'RISING', minChange: '', countMode: 'SAMPLES' },
   };
@@ -60,6 +62,7 @@ export function triggerConfigFromRule(rule: Rule): TriggerConfig {
     config.selected[sub.type] = key ? (sub.filters?.[key] ?? '') : '';
   }
   if (rule.repeatPolicy) config.repeatPolicy = rule.repeatPolicy;
+  if (rule.cooldownScope) config.cooldownScope = rule.cooldownScope;
   if (rule.schedule) {
     config.schedule = {
       kind: rule.schedule.kind,
@@ -119,11 +122,12 @@ function buildSchedule(config: TriggerConfig): ScheduleSpec | undefined {
 }
 
 /** Body fields to merge into the rule payload; empty when nothing beyond the legacy adapter was configured. */
-export function buildTriggerFields(config: TriggerConfig): Pick<Rule, 'triggers' | 'repeatPolicy' | 'schedule'> {
+export function buildTriggerFields(config: TriggerConfig): Pick<Rule, 'triggers' | 'repeatPolicy' | 'schedule' | 'cooldownScope'> {
   const triggers = buildTriggers(config);
-  const fields: Pick<Rule, 'triggers' | 'repeatPolicy' | 'schedule'> = {};
+  const fields: Pick<Rule, 'triggers' | 'repeatPolicy' | 'schedule' | 'cooldownScope'> = {};
   if (triggers.length > 0) fields.triggers = triggers;
   if (config.repeatPolicy !== 'EVERY_TRIGGER_WHILE_TRUE') fields.repeatPolicy = config.repeatPolicy;
+  if (config.cooldownScope !== 'GLOBAL') fields.cooldownScope = config.cooldownScope;   // only an explicit opt-in is ever sent
   const schedule = buildSchedule(config);
   if (schedule) fields.schedule = schedule;
   return fields;

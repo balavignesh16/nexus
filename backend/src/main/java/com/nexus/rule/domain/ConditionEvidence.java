@@ -34,13 +34,20 @@ public record ConditionEvidence(
     Instant receivedAt,
     Integer freshnessThresholdSeconds,
     String connectivity,
-    Boolean eligible
+    Boolean eligible,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) HysteresisEvidence hysteresis
 ) {
+    public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue, Object actualValue, boolean conditionMet,
+            Instant stateTimestamp, String capabilityKey, java.util.UUID definitionId, java.util.UUID bindingId, String valueType, String unit,
+            String stateQuality, String qualityReason, Instant qualityEvaluatedAt, Instant receivedAt, Integer freshnessThresholdSeconds, String connectivity, Boolean eligible) {
+        this(field, operator, expectedValue, actualValue, conditionMet, stateTimestamp, capabilityKey, definitionId, bindingId, valueType, unit,
+            stateQuality, qualityReason, qualityEvaluatedAt, receivedAt, freshnessThresholdSeconds, connectivity, eligible, null);
+    }
     public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue, Object actualValue, boolean conditionMet,
             Instant stateTimestamp, String capabilityKey, java.util.UUID definitionId, java.util.UUID bindingId, String valueType, String unit,
             String stateQuality, String qualityReason, Instant qualityEvaluatedAt, Instant receivedAt, Integer freshnessThresholdSeconds, String connectivity) {
         this(field, operator, expectedValue, actualValue, conditionMet, stateTimestamp, capabilityKey, definitionId, bindingId, valueType, unit,
-            stateQuality, qualityReason, qualityEvaluatedAt, receivedAt, freshnessThresholdSeconds, connectivity, null);
+            stateQuality, qualityReason, qualityEvaluatedAt, receivedAt, freshnessThresholdSeconds, connectivity, null, null);
     }
     public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue,
                               Object actualValue, boolean conditionMet) {
@@ -49,10 +56,14 @@ public record ConditionEvidence(
     public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null,null,null,null,null,null,null,null);}
     public ConditionEvidence withEligibility(boolean eligible){
         return new ConditionEvidence(field,operator,expectedValue,actualValue,conditionMet,stateTimestamp,capabilityKey,
-                definitionId,bindingId,valueType,unit,stateQuality,qualityReason,qualityEvaluatedAt,receivedAt,freshnessThresholdSeconds,connectivity,eligible);
+                definitionId,bindingId,valueType,unit,stateQuality,qualityReason,qualityEvaluatedAt,receivedAt,freshnessThresholdSeconds,connectivity,eligible,hysteresis);
+    }
+    public ConditionEvidence withHysteresis(boolean met,HysteresisEvidence hysteresis){
+        return new ConditionEvidence(field,operator,expectedValue,actualValue,met,stateTimestamp,capabilityKey,
+                definitionId,bindingId,valueType,unit,stateQuality,qualityReason,qualityEvaluatedAt,receivedAt,freshnessThresholdSeconds,connectivity,eligible,hysteresis);
     }
     public ConditionEvidence withQuality(String quality,String reason,Instant evaluatedAt,Instant receivedAt,Integer threshold,String connectivity){
         return new ConditionEvidence(field,operator,expectedValue,actualValue,conditionMet,stateTimestamp,capabilityKey,
-                definitionId,bindingId,valueType,unit,quality,reason,evaluatedAt,receivedAt,threshold,connectivity,eligible);
+                definitionId,bindingId,valueType,unit,quality,reason,evaluatedAt,receivedAt,threshold,connectivity,eligible,hysteresis);
     }
 }

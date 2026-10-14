@@ -253,6 +253,12 @@ export function RuleDetailModal({ rule, isOpen, onClose, onEdit }: RuleDetailMod
                 {runtime.candidates.slice(0, 8).map((c) => (
                   <div key={c.candidate_id} data-testid="candidate" style={c.disposition.startsWith('SUPPRESSED') ? { color: 'var(--warning, #a8630a)' } : undefined}>
                     {c.action_type} · {c.disposition} · {c.reason}
+                    {c.outcome === 'ACCEPTED' && ' · command durably accepted (publication, ACK and convergence are separate facts)'}
+                    {c.outcome === 'EXECUTED' && ' · executor reported success (not proof of any external effect)'}
+                    {c.outcome === 'EXECUTION_FAILED' && ` · execution failed${c.outcome_reason ? `: ${c.outcome_reason}` : ''}`}
+                    {c.outcome === 'UNSUPPORTED' && ` · no executor supports this action${c.outcome_reason ? `: ${c.outcome_reason}` : ''}`}
+                    {c.outcome === 'IGNORED' && ` · ignored by the executor${c.outcome_reason ? `: ${c.outcome_reason}` : ''}`}
+                    {c.outcome === 'DENIED' && ` · denied at acceptance${c.outcome_reason ? `: ${c.outcome_reason}` : ''}`}
                   </div>
                 ))}
                 {runtime.temporalState.length + runtime.temporalEvidence.length + runtime.candidates.length + runtime.timers.length === 0 && (

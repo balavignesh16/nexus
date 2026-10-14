@@ -23,6 +23,18 @@ public class RuleRepeatStateStore {
         return !rows.isEmpty() && ((Number) rows.getFirst().get("generation")).longValue() == generation && Boolean.TRUE.equals(rows.getFirst().get("latched"));
     }
 
+    /**
+     * Rearms the edge on DEFINITE false evidence observed at {@code observedAt}. A newer true observation that already consumed the edge
+     * (latched_at later than this observation, same generation) wins: stale evidence from a slower instance cannot rearm it.
+     */
+    public void rearm(UUID rule, UUID scope, long generation, java.time.Instant observedAt) {
+        jdbc.update("""
+            INSERT INTO rule_repeat_state(rule_id,scope_device_id,generation,latched,updated_at,latched_at) VALUES(?,?,?,false,?,?)
+            ON CONFLICT (rule_id,scope_device_id) DO UPDATE SET generation=EXCLUDED.generation,latched=false,updated_at=EXCLUDED.updated_at,latched_at=EXCLUDED.latched_at
+            WHERE rule_repeat_state.generation<>EXCLUDED.generation OR rule_repeat_state.latched_at IS NULL OR rule_repeat_state.latched_at<=EXCLUDED.latched_at""",
+            rule, scope, generation, Timestamp.from(clock.instant()), Timestamp.from(observedAt));
+    }
+
     public void set(UUID rule, UUID scope, long generation, boolean latched) {
         jdbc.update("""
             INSERT INTO rule_repeat_state(rule_id,scope_device_id,generation,latched,updated_at) VALUES(?,?,?,?,?)

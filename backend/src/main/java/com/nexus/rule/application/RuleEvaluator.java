@@ -79,6 +79,8 @@ public class RuleEvaluator {
         TwinStateQualityEvidence quality(DigitalTwin twin);
         /** Evidence for a temporal condition; the live adapter has no durable runtime and never satisfies one. */
         ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope);
+        /** Current-generation hysteresis latch of a condition; live fixtures have no durable state and read as unlatched. */
+        boolean hysteresisLatch(Rule rule, RuleCondition condition, UUID scope);
     }
 
     private final class LiveSource implements Source {
@@ -93,6 +95,7 @@ public class RuleEvaluator {
         public ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope) {
             return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), "TEMPORAL_RUNTIME_UNAVAILABLE", false);
         }
+        public boolean hysteresisLatch(Rule rule, RuleCondition condition, UUID scope) { return false; }
     }
 
     private final class FrozenSource implements Source {
@@ -116,6 +119,10 @@ public class RuleEvaluator {
             var inputs = ctx.snapshot().qualityInputs().get(RuleEvaluationSnapshot.twinKey(twin));
             if (inputs == null) throw new IllegalStateException("Twin was not captured with quality inputs");
             return qualityEvaluator.evaluate(twin, ctx.evaluationTime(), inputs);
+        }
+        public boolean hysteresisLatch(Rule rule, RuleCondition condition, UUID scope) {
+            return scope != null && condition.conditionId() != null
+                && ctx.snapshot().hysteresis().getOrDefault(RuleEvaluationSnapshot.hysteresisKey(rule.ruleId(), condition.conditionId(), scope), false);
         }
         public ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope) {
             var identity = rule.executionIdentity();
@@ -147,10 +154,18 @@ public class RuleEvaluator {
         UUID resolvedDeviceId = resolveDeviceId(rule, triggerDeviceId);
 
         List<ConditionEvidence> evidence = new ArrayList<>();
-        for (RuleCondition condition : rule.conditions()) {
+        for (int index = 0; index < rule.conditions().size(); index++) {
+            RuleCondition condition = rule.conditions().get(index);
             ConditionEvidence conditionEvidence = evaluateCondition(rule, condition, event, triggerDeviceId, resolvedDeviceId, src);
             evidence.add(conditionEvidence);
             if (!conditionEvidence.conditionMet()) {
+                // The rule is FALSE, but a hysteresis latch must keep following its own qualified evidence: skipping it here would let a
+                // stale latch survive an unobserved exit and later match inside the band without ever re-entering. Only the latch
+                // evidence is gathered; no other later condition is evaluated and the result stays FALSE. The failing condition stays
+                // the first non-met entry.
+                for (RuleCondition later : rule.conditions().subList(index + 1, rule.conditions().size()))
+                    if (later != null && later.hysteresis() != null && later.temporal() == null)
+                        evidence.add(evaluateCondition(rule, later, event, triggerDeviceId, resolvedDeviceId, src));
                 return new RuleEvaluationResult(false, rule, event, "Condition not met: " + condition.field(), evidence);
             }
         }
@@ -181,7 +196,7 @@ public class RuleEvaluator {
 
     private ConditionEvidence evaluateCondition(Rule rule, RuleCondition condition, DomainEvent event, UUID triggerDeviceId, UUID resolvedDeviceId, Source src) {
         if (condition.temporal() != null) return src.temporal(rule, condition, resolvedDeviceId);
-        return evaluateUnderlying(condition, event, triggerDeviceId, resolvedDeviceId, src);
+        return evaluateUnderlying(rule, condition, event, triggerDeviceId, resolvedDeviceId, src);
     }
 
     /**
@@ -189,7 +204,7 @@ public class RuleEvaluator {
      * The evidence carries value, receipt time, quality, unit and the eligibility that already includes R1/U1 unit safety.
      */
     public ConditionEvidence observe(RuleCondition condition, UUID scope, RuleEvaluationContext context) {
-        return evaluateUnderlying(condition, null, context.trigger().deviceId(), scope, new FrozenSource(context));
+        return evaluateUnderlying(null, condition, null, context.trigger().deviceId(), scope, new FrozenSource(context));
     }
 
     /**
@@ -211,27 +226,28 @@ public class RuleEvaluator {
                 return qualityEvaluator == null ? null : qualityEvaluator.evaluate(twin, twin.receivedAt(), inputs);   // quality AT RECEIPT
             }
             public ConditionEvidence temporal(Rule rule, RuleCondition c, UUID s) { return frozen.temporal(rule, c, s); }
+            public boolean hysteresisLatch(Rule rule, RuleCondition c, UUID s) { return false; }
         };
-        return evaluateUnderlying(condition, null, context.trigger().deviceId(), scope, source);
+        return evaluateUnderlying(null, condition, null, context.trigger().deviceId(), scope, source);
     }
 
-    private ConditionEvidence evaluateUnderlying(RuleCondition condition, DomainEvent event, UUID triggerDeviceId, UUID resolvedDeviceId, Source src) {
+    private ConditionEvidence evaluateUnderlying(Rule rule, RuleCondition condition, DomainEvent event, UUID triggerDeviceId, UUID resolvedDeviceId, Source src) {
         // DEVICE_ID always compares the canonical source scope, never a capability value.
         if(condition.field()==RuleField.DEVICE_ID){
             Object actual=extractActualValue(condition,event);boolean met=false;
             if(triggerDeviceId!=null)try{boolean same=triggerDeviceId.equals(UUID.fromString(condition.expectedValue()));met=condition.operator()==com.nexus.rule.domain.RuleOperator.EQ?same:condition.operator()==com.nexus.rule.domain.RuleOperator.NE&&!same;}catch(IllegalArgumentException invalid){/* Invalid scope fails closed. */}
             return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met);
         }
-        if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(condition,resolvedDeviceId,src);
+        if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(rule,condition,resolvedDeviceId,src);
         if (condition.capabilityType() != null) {
-            return evaluateCapabilityCondition(condition, resolvedDeviceId, src);
+            return evaluateCapabilityCondition(rule, condition, resolvedDeviceId, src);
         }
         Object actualValue = extractActualValue(condition, event);
         boolean conditionMet = evaluateConditionMet(condition, actualValue);
         return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), actualValue, conditionMet);
     }
 
-    private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId,Source src){
+    private ConditionEvidence evaluateGenericCapabilityCondition(Rule rule,RuleCondition condition,UUID deviceId,Source src){
         if(deviceId==null)return evidence(condition,MISSING,false,null,null);
         CapturedCapability resolved=null;
         if(src.hasAuthority()){
@@ -247,7 +263,13 @@ public class RuleEvaluator {
         DigitalTwin twin=found.get(); TwinStateQualityEvidence quality=src.quality(twin);
         boolean compatible=hasCompatibleUnits(condition,twin,resolved);
         boolean eligibleGeneric=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD);
-        Object actual=FrozenValues.freeze(twin.typedValue()); boolean met=eligibleGeneric
+        Object actual=FrozenValues.freeze(twin.typedValue());
+        if(condition.hysteresis()!=null&&twin.valueType()==com.nexus.device.capability.definition.CapabilityValueType.NUMBER){
+            java.math.BigDecimal numeric=null;try{numeric=new java.math.BigDecimal(actual.toString());}catch(NumberFormatException ignored){}
+            var band=hysteresis(rule,condition,deviceId,src,numeric,eligibleGeneric);
+            return evidence(condition,actual,band.met(),twin,quality).withEligibility(eligibleGeneric).withHysteresis(band.met(),band.evidence());
+        }
+        boolean met=eligibleGeneric
                 &&evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
         return evidence(condition,actual,met,twin,quality).withEligibility(eligibleGeneric);
     }
@@ -261,7 +283,7 @@ public class RuleEvaluator {
     }
 
     /** Legacy syntax retains its comparisons, not historical wire-name ownership or inferred units. */
-    private ConditionEvidence evaluateCapabilityCondition(RuleCondition condition, UUID resolvedDeviceId, Source src) {
+    private ConditionEvidence evaluateCapabilityCondition(Rule rule, RuleCondition condition, UUID resolvedDeviceId, Source src) {
         if (resolvedDeviceId == null) {
             return evidence(condition,MISSING,false,null,null);
         }
@@ -297,6 +319,10 @@ public class RuleEvaluator {
         if(actual instanceof Number number){
             double raw=number.doubleValue();
             actual=kind==CapabilityValueKind.BOOLEAN?(raw!=0.0):raw;
+            if(condition.hysteresis()!=null&&kind!=CapabilityValueKind.BOOLEAN){
+                var band=hysteresis(rule,condition,resolvedDeviceId,src,Double.isFinite(raw)?java.math.BigDecimal.valueOf(raw):null,eligible);
+                return evidence(condition,actual,band.met(),currentTwin,quality).withEligibility(eligible).withHysteresis(band.met(),band.evidence());
+            }
             met=eligible&&Double.isFinite(raw)&&evaluateTypedConditionMet(condition,raw,kind);
         }else if(kind==CapabilityValueKind.BOOLEAN && actual instanceof Boolean bool){
             Boolean expected=parseBooleanOrNull(condition.expectedValue());
@@ -305,6 +331,31 @@ public class RuleEvaluator {
             };
         }
         return evidence(condition,actual,met,currentTwin,quality).withEligibility(eligible);
+    }
+
+    private record Band(boolean met,com.nexus.rule.domain.HysteresisEvidence evidence){}
+
+    /**
+     * Explicit enter/exit hysteresis on an eligible numeric observation: unlatched, the condition is true when the value passes the ENTER
+     * threshold; latched, it stays true while the value is still beyond the EXIT threshold. Ineligible evidence (stale, non-GOOD, unit
+     * not established) is false for this evaluation and leaves the latch exactly as it was, so UNKNOWN never sets or clears it.
+     */
+    private Band hysteresis(Rule rule,RuleCondition c,UUID device,Source src,java.math.BigDecimal value,boolean eligible){
+        boolean before=rule!=null&&device!=null&&src.hysteresisLatch(rule,c,device);
+        String enterText=c.expectedValue(),exitText=c.hysteresis().exit();
+        try{
+            var enter=new java.math.BigDecimal(enterText.trim());var exit=new java.math.BigDecimal(exitText.trim());
+            if(!eligible||value==null)return new Band(false,new com.nexus.rule.domain.HysteresisEvidence(c.conditionId(),enterText,exitText,before,before,"UNKNOWN_UNCHANGED"));
+            boolean inside=before?passes(value,exit,c.operator()):passes(value,enter,c.operator());
+            String decision=before?(inside?"HOLD_LATCHED":"EXIT"):(inside?"ENTER":"OUTSIDE_BAND");
+            return new Band(inside,new com.nexus.rule.domain.HysteresisEvidence(c.conditionId(),enterText,exitText,before,inside,decision));
+        }catch(NumberFormatException|NullPointerException malformed){
+            return new Band(false,new com.nexus.rule.domain.HysteresisEvidence(c.conditionId(),enterText,exitText,before,before,"UNKNOWN_UNCHANGED"));
+        }
+    }
+    private static boolean passes(java.math.BigDecimal value,java.math.BigDecimal threshold,com.nexus.rule.domain.RuleOperator op){
+        int c=value.compareTo(threshold);
+        return switch(op){case GT->c>0;case GTE->c>=0;case LT->c<0;case LTE->c<=0;default->false;};
     }
 
     private boolean hasCompatibleUnits(RuleCondition condition,DigitalTwin twin,CapturedCapability resolved){

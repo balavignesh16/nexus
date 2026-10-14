@@ -63,6 +63,37 @@ describe('RuleDetailModal - triggers, temporal configuration and persisted runti
     expect(screen.getByTestId('candidate')).toHaveTextContent('SUPPRESSED_CONFLICT · EQUAL_PRIORITY_CONFLICT');
   });
 
+  it('states exactly what each executor outcome proves and never calls a failure accepted', async () => {
+    const base = { action_type: 'SEND_COMMAND', priority: 1, disposition: 'SELECTED', reason: 'IDENTICAL_COMMAND_COALESCED' };
+    vi.mocked(ruleApi.getRuntime).mockResolvedValue({
+      ...emptyRuntime,
+      candidates: [
+        { ...base, candidate_id: 'k1', outcome: 'ACCEPTED' },
+        { ...base, candidate_id: 'k2', outcome: 'DENIED', outcome_reason: 'RULE_NOT_ACTIVE' },
+        { ...base, candidate_id: 'k3', action_type: 'WEBHOOK', outcome: 'EXECUTION_FAILED', outcome_reason: 'webhook endpoint refused' },
+        { ...base, candidate_id: 'k4', action_type: 'WEBHOOK', outcome: 'EXECUTED' },
+        { ...base, candidate_id: 'k5', action_type: 'WEBHOOK', outcome: 'UNSUPPORTED', outcome_reason: 'No executor found' },
+        { ...base, candidate_id: 'k6', action_type: 'WEBHOOK', outcome: 'IGNORED' },
+        { ...base, candidate_id: 'k7', disposition: 'SUPPRESSED_EXCLUSION', reason: 'EXCLUSION_LOWER_RANK' },
+        { ...base, candidate_id: 'k8' },
+      ],
+    });
+    render(<RuleDetailModal rule={rule()} isOpen={true} onClose={vi.fn()} onEdit={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByTestId('candidate')).toHaveLength(8));
+    const rows = screen.getAllByTestId('candidate');
+    expect(rows[0]).toHaveTextContent('command durably accepted (publication, ACK and convergence are separate facts)');
+    expect(rows[1]).toHaveTextContent('denied at acceptance: RULE_NOT_ACTIVE');
+    expect(rows[2]).toHaveTextContent('execution failed: webhook endpoint refused');
+    expect(rows[2]).not.toHaveTextContent('accepted');
+    expect(rows[3]).toHaveTextContent('executor reported success (not proof of any external effect)');
+    expect(rows[3]).not.toHaveTextContent('accepted');
+    expect(rows[4]).toHaveTextContent('no executor supports this action: No executor found');
+    expect(rows[5]).toHaveTextContent('ignored by the executor');
+    expect(rows[6]).toHaveTextContent('SUPPRESSED_EXCLUSION · EXCLUSION_LOWER_RANK');
+    expect(rows[6]).not.toHaveTextContent('accepted');
+    expect(rows[7]).not.toHaveTextContent(/accepted|executed|failed|denied|ignored|supports/);   // no outcome recorded: nothing is claimed
+  });
+
   it('degrades honestly when the runtime evidence cannot be loaded', async () => {
     vi.mocked(ruleApi.getRuntime).mockRejectedValue(new Error('boom'));
     render(<RuleDetailModal rule={rule()} isOpen={true} onClose={vi.fn()} onEdit={vi.fn()} />);

@@ -16,6 +16,7 @@ import { EmptyState } from '../components/foundation/EmptyState';
 import { LoadingBlock } from '../components/foundation/LoadingState';
 import { CreateRuleModal } from '../components/explorer/device/CreateRuleModal';
 import { RuleDetailModal } from '../components/explorer/device/RuleDetailModal';
+import { ExclusionGroupsPanel } from '../components/explorer/device/ExclusionGroupsPanel';
 
 export function RulesPage() {
   const { rules } = useRepositories();
@@ -280,6 +281,8 @@ export function RulesPage() {
             )}
           </div>
         </GlassPanel>
+
+        <ExclusionGroupsPanel rules={globalRules} />
       </div>
 
       <RuleDetailModal

@@ -115,6 +115,8 @@ public class RuleCapabilityValidator {
   }
   inspectRuntime(rule,errors);
   inspectTemporal(rule,errors);
+  inspectPolicy(rule,errors);
+  inspectHysteresis(rule,errors);
   return errors;
  }
  private void temporalReference(UUID scope,RuleCondition c){
@@ -172,6 +174,66 @@ public class RuleCapabilityValidator {
    if(rule.conditions().stream().noneMatch(c->c!=null&&c.field()==RuleField.DEVICE_ID))errors.add(error("EXPLICIT_SCOPE_REQUIRED","Temporal conditions need an explicit DEVICE_ID scope","conditions"));
   } else if(rule.runtime()!=null&&rule.runtime().triggers().stream().anyMatch(s->s.type()==TriggerType.TEMPORAL_DUE))
    errors.add(error("TEMPORAL_DUE_WITHOUT_CONDITION","A TEMPORAL_DUE subscription requires a temporal condition","runtime.triggers"));
+ }
+ /**
+  * Explicit numeric hysteresis (C14). The condition's expected value is the enter threshold and hysteresis.exit the exit threshold,
+  * both in the capability's ESTABLISHED effective unit: the contract is resolved on the explicit DEVICE_ID scope, GOOD quality can
+  * never stand in for unit provenance, and nothing is inferred or converted.
+  */
+ private void inspectHysteresis(Rule rule,List<Map<String,Object>> errors){
+  if(rule.conditions()==null)return;
+  UUID scope=null;
+  for(var c:rule.conditions())if(c!=null&&c.field()==RuleField.DEVICE_ID&&c.operator()==RuleOperator.EQ&&c.expectedValue()!=null){try{scope=UUID.fromString(c.expectedValue());}catch(IllegalArgumentException ignored){}}
+  for(int n=0;n<rule.conditions().size();n++){
+   var c=rule.conditions().get(n);
+   if(c==null||c.hysteresis()==null)continue;
+   String path="conditions["+n+"].hysteresis";
+   try{
+    if(c.conditionId()==null||c.conditionId().isBlank())throw new IllegalArgumentException("A hysteresis condition needs a stable conditionId");
+    if(c.field()!=RuleField.VALUE||(c.capabilityKey()==null&&c.capabilityType()==null))throw new IllegalArgumentException("Hysteresis applies only to a numeric capability VALUE condition");
+    if(c.temporal()!=null)throw new IllegalArgumentException("Hysteresis cannot be combined with a temporal condition");
+    var op=c.operator();
+    if(op!=RuleOperator.GT&&op!=RuleOperator.GTE&&op!=RuleOperator.LT&&op!=RuleOperator.LTE)throw new IllegalArgumentException("Hysteresis supports only GT, GTE, LT and LTE");
+    if(c.hysteresis().exit()==null||c.hysteresis().exit().isBlank())throw new IllegalArgumentException("Hysteresis needs an explicit exit threshold");
+    java.math.BigDecimal enter,exit;
+    try{enter=new java.math.BigDecimal(c.expectedValue().trim());exit=new java.math.BigDecimal(c.hysteresis().exit().trim());}
+    catch(NumberFormatException malformed){throw new IllegalArgumentException("Hysteresis thresholds must be plain finite numbers");}
+    boolean upper=op==RuleOperator.GT||op==RuleOperator.GTE;
+    if(upper?exit.compareTo(enter)>=0:exit.compareTo(enter)<=0)
+     throw new IllegalArgumentException(upper?"The exit threshold must be strictly below the enter threshold for "+op:"The exit threshold must be strictly above the enter threshold for "+op);
+    if(scope==null)throw new IllegalArgumentException("Hysteresis needs an explicit DEVICE_ID scope so its unit contract can be verified");
+    String identifier=c.capabilityKey()!=null?c.capabilityKey():LegacyCapabilityDefinitionMapping.keyFor(c.capabilityType());
+    var resolved=resolveInstalled(scope,identifier,CapabilityDirection.READ);
+    if(resolved.definition().getValueType()!=CapabilityValueType.NUMBER)throw new IllegalArgumentException("Hysteresis requires a numeric capability");
+    if(c.unit()!=null&&!Objects.equals(c.unit(),resolved.effectiveUnit()))throw new UnitMismatch("Condition unit "+c.unit()+" differs from installed effective unit "+resolved.effectiveUnit()+"; no implicit conversion");
+    if(resolved.effectiveUnit()==null&&!resolved.definition().getAllowedUnits().isEmpty())throw new UnitMismatch("Hysteresis requires an established effective unit; GOOD quality does not prove unit provenance");
+    var enterCheck=values.validate(resolved.definition(),enter,c.unit()!=null?c.unit():resolved.effectiveUnit(),CapabilityOperation.TELEMETRY,null);
+    var exitCheck=values.validate(resolved.definition(),exit,c.unit()!=null?c.unit():resolved.effectiveUnit(),CapabilityOperation.TELEMETRY,null);
+    if(!enterCheck.isValid()||!exitCheck.isValid())throw new IllegalArgumentException("Both hysteresis thresholds must be valid values of the capability and its unit");
+   }catch(RuntimeException e){infrastructure(e);errors.add(error(e instanceof UnitMismatch?"UNIT_MISMATCH":"INVALID_HYSTERESIS",e.getMessage(),path));}
+  }
+ }
+ private static final Set<String> SAFETY_KEYS=Set.of("safetyoverride","safetypolicy","override","safety_override");
+ private static final Set<String> APPROVAL_KEYS=Set.of("approval","approvalrequired","requiresapproval","manualapproval","approvalpolicy","approval_required","requires_approval");
+ /**
+  * P3.5 policy configuration. Cooldown scope is an explicit opt-in that needs a cooldown; the scope is the device a trigger resolves to (an unresolved scope falls back to the stricter global key). Safety overrides
+  * and manual approval are NOT supported in this increment: configuring them is rejected, never accepted and silently executed, so
+  * no candidate can hold, bypass or await an authority that does not exist.
+  */
+ private void inspectPolicy(Rule rule,List<Map<String,Object>> errors){
+  if(rule.runtime()!=null&&rule.runtime().cooldownScope()==CooldownScope.PER_SCOPE){
+   if(rule.cooldownSeconds()==null)errors.add(error("COOLDOWN_SCOPE_REQUIRES_COOLDOWN","A per-scope cooldown needs cooldownSeconds","runtime.cooldownScope"));
+  }
+  if(rule.metadata()!=null)for(String key:rule.metadata().keySet())unsupportedPolicyKey(key,"metadata."+key,errors);
+  if(rule.actions()!=null)for(int n=0;n<rule.actions().size();n++){
+   var action=rule.actions().get(n);
+   if(action!=null&&action.parameters()!=null)for(String key:action.parameters().keySet())unsupportedPolicyKey(key,"actions["+n+"].parameters."+key,errors);
+  }
+ }
+ private void unsupportedPolicyKey(String key,String path,List<Map<String,Object>> errors){
+  String normal=key==null?"":key.trim().toLowerCase(Locale.ROOT);
+  if(SAFETY_KEYS.contains(normal))errors.add(error("UNSUPPORTED_SAFETY_OVERRIDE","Safety overrides are not supported; priority never bypasses a safety restriction",path));
+  else if(APPROVAL_KEYS.contains(normal))errors.add(error("UNSUPPORTED_APPROVAL","Manual approval is not supported; an approval-required rule would never be able to execute",path));
  }
  /** Trigger subscriptions, repeat policy and schedule: validated here so activation, resume and execution share one authority. */
  private void inspectRuntime(Rule rule,List<Map<String,Object>> errors){
