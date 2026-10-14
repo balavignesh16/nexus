@@ -92,15 +92,19 @@ class AiExplanationContextMapperTest {
     @Test
     void aiExplanationContext_hasNoFieldForMatchIdRuleIdEventIdDeviceIdOrCorrelationId() {
         // Structural proof, not just a runtime check: AiExplanationContext's
-        // own record components are exactly these five - matchId, ruleId,
-        // eventId, deviceId, correlationId are not among them, so no code
-        // path through this record can ever carry them to an AI provider.
+        // own record components are exactly these seven (ruleSnapshot, evaluationEvidence, matchedAt, message, actions and the persisted
+        // version/candidates added for P3.6) - matchId, ruleId, eventId, deviceId, correlationId are not among them, so no code
+        // path through this record can ever carry them to an AI provider. The nested AI records are checked the same way.
         var components = AiExplanationContext.class.getRecordComponents();
-        assertEquals(5, components.length);
-        for (var component : components) {
-            String name = component.getName();
-            assertFalse(name.equals("matchId") || name.equals("ruleId") || name.equals("eventId")
-                    || name.equals("deviceId") || name.equals("correlationId"));
+        assertEquals(7, components.length);
+        assertEquals(java.util.List.of("ruleSnapshot", "evaluationEvidence", "matchedAt", "message", "actions", "version", "candidates"),
+                java.util.Arrays.stream(components).map(c -> c.getName()).toList());
+        for (Class<?> type : java.util.List.of(AiExplanationContext.class, AiCandidateSummary.class, AiVersionAttribution.class, AiActionSummary.class)) {
+            for (var component : type.getRecordComponents()) {
+                String name = component.getName().toLowerCase();
+                assertFalse(name.endsWith("id") || name.equals("targetkey") || name.equals("deviceid") || name.contains("correlation") || name.contains("request"),
+                        type.getSimpleName() + "." + component.getName() + " would leak an identifier");
+            }
         }
     }
 }

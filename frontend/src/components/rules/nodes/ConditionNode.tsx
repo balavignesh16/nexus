@@ -12,7 +12,7 @@ export function ConditionNode({ data, selected }: NodeProps) {
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Condition</div>
           <div className="text-sm font-bold text-foreground mt-0.5">
-            {data.field ? `${data.field} ${data.operator} ${data.expectedValue}` : 'If...'}
+            {data.field ? `${data.field} ${data.operator} ${data.expectedValue === '' ? '"" (empty text)' : String(data.expectedValue)}` : 'If...'}
           </div>
         </div>
       </div>

@@ -43,3 +43,15 @@ describe('ruleApi - device-scoped rule filtering', () => {
     expect(apiClient.post).toHaveBeenCalledWith('/rules', rule);
   });
 });
+
+describe('ruleApi - backend dry-run', () => {
+  it('POSTs the typed request to /rules/dry-run and returns the backend answer untouched', async () => {
+    const answer = { schemaVersion: 1, hypothetical: true };
+    vi.mocked(apiClient.post).mockResolvedValueOnce(answer);
+    const request = { mode: 'SUPPLIED_STATE' as const, versions: [{ ruleId: 'r1' }], trigger: { type: 'ACCEPTED_TELEMETRY' as const }, simulationTime: '2026-10-14T10:00:00.000Z',
+      supplied: { twins: [{ capabilityKey: 'motion', valueType: 'BOOLEAN' as const, value: false, unit: null, observedAt: '2026-10-14T10:00:00.000Z' }] } };
+    await expect(ruleApi.dryRun(request)).resolves.toBe(answer);
+    expect(apiClient.post).toHaveBeenCalledWith('/rules/dry-run', request);
+    expect((vi.mocked(apiClient.post).mock.calls.at(-1)![1] as typeof request).supplied.twins[0].value).toBe(false);
+  });
+});

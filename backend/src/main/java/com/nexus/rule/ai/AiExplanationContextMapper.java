@@ -23,6 +23,11 @@ public class AiExplanationContextMapper {
                 context.message(),
                 context.actions().stream()
                         .map(a -> new AiActionSummary(a.actionType(), a.status()))
+                        .toList(),
+                context.version() == null ? null : new AiVersionAttribution(context.version().revision(), context.version().executionEpoch()),
+                context.candidates().stream()
+                        .map(c -> new AiCandidateSummary(c.ordinal(), c.actionType(), c.priority(), c.disposition(), c.reason(), c.winnerActionType(), c.outcome(), c.outcomeReason(),
+                                c.historyStatus(), c.publishedAt() != null, c.ackStatus(), c.verificationStatus(), c.readbackEvidence() != null))
                         .toList()
         );
     }

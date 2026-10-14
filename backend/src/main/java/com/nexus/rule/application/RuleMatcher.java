@@ -204,57 +204,52 @@ public class RuleMatcher implements EventListener {
                             continue;
                         }
                     }
-                    // A plain rule skips evaluation inside its cooldown window (unchanged). A rule that keeps latch state (EDGE_TRUE, hysteresis)
-                    // is still evaluated so its latches follow the truth, and only the MATCH is suppressed below.
-                    boolean stateful = rule.repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE
-                        || (rule.conditions() != null && rule.conditions().stream().anyMatch(c -> c != null && c.hysteresis() != null));
+                    // The decision (cooldown skip, scope/contract gates, evaluation, hysteresis transitions, EDGE_TRUE and cooldown gates) is the pure
+                    // RuleDecisionLogic shared with the dry-run engine; only its effects are applied here.
                     boolean cooling = isInCooldown(rule, scopeKey);
-                    if (cooling && !stateful) {
-                        continue;
-                    }
+                    RuleEvaluationResult result;
                     if (frozen != null) {
-                        if (frozen.scopeMissing()) { log.warn("RULE_SCOPE_SUPPRESSED {}", rule.ruleId()); continue; }
-                        if (!frozen.diagnostics().isEmpty()) { log.warn("RULE_RUNTIME_CONTRACT_SUPPRESSED {} {}", rule.ruleId(), frozen.diagnostics()); continue; }
-                    } else if(runtimeValidator!=null) {
-                        Rule validationRule=rule;
-                        boolean explicit=rule.conditions().stream().anyMatch(c->c.field()==com.nexus.rule.domain.RuleField.DEVICE_ID);
-                        if(!explicit) {
-                            if(event.deviceId()==null){log.warn("RULE_SCOPE_SUPPRESSED {}",rule.ruleId());continue;}
-                            var conditions=new java.util.ArrayList<>(rule.conditions());
-                            conditions.add(new com.nexus.rule.domain.RuleCondition(com.nexus.rule.domain.RuleField.DEVICE_ID,com.nexus.rule.domain.RuleOperator.EQ,event.deviceId().toString()));
-                            validationRule=new Rule(rule.ruleId(),rule.name(),rule.enabled(),rule.priority(),conditions,rule.actions(),rule.metadata(),rule.cooldownSeconds(),rule.executionIdentity(),rule.runtime());
-                        }
-                        var diagnostics=runtimeValidator.inspect(validationRule);
-                        if(!diagnostics.isEmpty()){log.warn("RULE_RUNTIME_CONTRACT_SUPPRESSED {} {}",rule.ruleId(),diagnostics);continue;}
-                    }
-
-                    RuleEvaluationResult result = frozen != null
-                            ? ruleEvaluator.evaluate(rule, event, new RuleEvaluationContext(UUID.randomUUID(), frozenSnapshot, frozen, trigger))
-                            : ruleEvaluator.evaluate(rule, event);
-                    // Hysteresis latches follow DEFINITE ENTER/EXIT transitions only, stamped with the observation time (an older observation
-                    // from another instance never overwrites a newer one). Short-circuited conditions have no evidence, so they change nothing.
-                    if (hysteresisStore != null && frozen != null && frozen.scopeDeviceId() != null && rule.executionIdentity() != null) {
-                        for (var conditionEvidence : result.evidence()) {
-                            var band = conditionEvidence.hysteresis();
-                            if (band != null && band.transition() && band.conditionId() != null)
-                                hysteresisStore.apply(rule.ruleId(), band.conditionId(), frozen.scopeDeviceId(), rule.executionIdentity().executionEpoch(),
-                                    band.latchedAfter(), trigger.recordedAt());
-                        }
-                    }
-                    if (rule.repeat() == com.nexus.rule.domain.RepeatPolicy.EDGE_TRUE && repeatState != null && frozen != null
-                            && frozen.scopeDeviceId() != null && rule.executionIdentity() != null) {
-                        long generation = rule.executionIdentity().executionEpoch();
-                        if (result.matched() && repeatState.latched(rule.ruleId(), frozen.scopeDeviceId(), generation)) {
+                        var decisionContext = new RuleEvaluationContext(UUID.randomUUID(), frozenSnapshot, frozen, trigger);
+                        var decision = RuleDecisionLogic.decide(ruleEvaluator, rule, decisionContext, cooling,
+                            () -> repeatState != null && repeatState.latched(rule.ruleId(), frozen.scopeDeviceId(), rule.executionIdentity().executionEpoch()));
+                        if (decision.outcome() == RuleDecisionLogic.Outcome.SKIPPED_IN_COOLDOWN) continue;
+                        if (decision.outcome() == RuleDecisionLogic.Outcome.SCOPE_MISSING) { log.warn("RULE_SCOPE_SUPPRESSED {}", rule.ruleId()); continue; }
+                        if (decision.outcome() == RuleDecisionLogic.Outcome.CONTRACT_DIAGNOSTICS) { log.warn("RULE_RUNTIME_CONTRACT_SUPPRESSED {} {}", rule.ruleId(), decision.diagnostics()); continue; }
+                        result = decision.result();
+                        // Latches are stamped with the observation time (an older observation from another instance never overwrites a newer one).
+                        if (hysteresisStore != null)
+                            for (var effect : decision.hysteresis())
+                                hysteresisStore.apply(rule.ruleId(), effect.conditionId(), effect.scopeDeviceId(), rule.executionIdentity().executionEpoch(),
+                                    effect.latchedAfter(), trigger.recordedAt());
+                        // The rearm carries its observation time, so a slower instance cannot undo a newer consumed edge.
+                        if (decision.edgeRearm() && repeatState != null) repeatState.rearm(rule.ruleId(), frozen.scopeDeviceId(), rule.executionIdentity().executionEpoch(), trigger.recordedAt());
+                        if (decision.outcome() == RuleDecisionLogic.Outcome.EDGE_SUPPRESSED) {
                             log.info("RULE_EDGE_SUPPRESSED rule={} trigger={} (still true since the last edge)", rule.ruleId(), trigger.sourceId());
                             continue;
                         }
-                        // Only definite false evidence rearms the edge; UNKNOWN, stale or invalid evidence never manufactures one.
-                        // The rearm carries its observation time, so a slower instance cannot undo a newer consumed edge.
-                        if (!result.matched() && definitelyFalse(result)) repeatState.rearm(rule.ruleId(), frozen.scopeDeviceId(), generation, trigger.recordedAt());
-                    }
-                    if (result.matched() && cooling) {
-                        log.info("RULE_MATCH_SUPPRESSED rule={} trigger={} reason=COOLDOWN", rule.ruleId(), trigger.sourceId());
-                        continue;
+                        if (decision.outcome() == RuleDecisionLogic.Outcome.COOLDOWN_SUPPRESSED) {
+                            log.info("RULE_MATCH_SUPPRESSED rule={} trigger={} reason=COOLDOWN", rule.ruleId(), trigger.sourceId());
+                            continue;
+                        }
+                    } else {
+                        if (cooling && !RuleDecisionLogic.stateful(rule)) continue;
+                        if (runtimeValidator != null) {
+                            Rule validationRule = rule;
+                            boolean explicit = rule.conditions().stream().anyMatch(c -> c.field() == com.nexus.rule.domain.RuleField.DEVICE_ID);
+                            if (!explicit) {
+                                if (event.deviceId() == null) { log.warn("RULE_SCOPE_SUPPRESSED {}", rule.ruleId()); continue; }
+                                var conditions = new java.util.ArrayList<>(rule.conditions());
+                                conditions.add(new com.nexus.rule.domain.RuleCondition(com.nexus.rule.domain.RuleField.DEVICE_ID, com.nexus.rule.domain.RuleOperator.EQ, event.deviceId().toString()));
+                                validationRule = new Rule(rule.ruleId(), rule.name(), rule.enabled(), rule.priority(), conditions, rule.actions(), rule.metadata(), rule.cooldownSeconds(), rule.executionIdentity(), rule.runtime());
+                            }
+                            var diagnostics = runtimeValidator.inspect(validationRule);
+                            if (!diagnostics.isEmpty()) { log.warn("RULE_RUNTIME_CONTRACT_SUPPRESSED {} {}", rule.ruleId(), diagnostics); continue; }
+                        }
+                        result = ruleEvaluator.evaluate(rule, event);
+                        if (result.matched() && cooling) {
+                            log.info("RULE_MATCH_SUPPRESSED rule={} trigger={} reason=COOLDOWN", rule.ruleId(), trigger.sourceId());
+                            continue;
+                        }
                     }
                     if (result.matched()) {
                         log.info("Rule matched! Rule: '{}', Trigger: {}", rule.name(), trigger.type());
@@ -301,15 +296,6 @@ public class RuleMatcher implements EventListener {
         if (!trigger.typed() && !legacyMatches.isEmpty() && actionPlanner != null)
             actionPlanner.planAndDispatch(com.nexus.rule.plan.PlanSource.event(trigger.sourceId()), legacyMatches);
         return java.util.Optional.empty();
-    }
-
-    private static boolean definitelyFalse(RuleEvaluationResult result) {
-        if (result.evidence().isEmpty()) return false;
-        // The failing condition is the FIRST non-met entry (hysteresis tracking evidence may follow it).
-        var failing = result.evidence().stream().filter(e -> !e.conditionMet()).findFirst().orElse(null);
-        if (failing == null) return false;
-        if (failing.eligible() != null) return failing.eligible();
-        return !"MISSING".equals(String.valueOf(failing.actualValue()));
     }
 
     private boolean isInCooldown(Rule rule, String scopeKey) {

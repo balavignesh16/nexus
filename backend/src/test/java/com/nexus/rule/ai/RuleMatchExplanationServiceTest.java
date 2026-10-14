@@ -174,7 +174,7 @@ class RuleMatchExplanationServiceTest {
 
         RuleMatchExplanation result = service.explain(matchId);
 
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(java.util.List.of("CREATE_ALERT")), result.actionNote());
     }
 
     // ---------- 9: mandatory UNKNOWN claims remain present ----------

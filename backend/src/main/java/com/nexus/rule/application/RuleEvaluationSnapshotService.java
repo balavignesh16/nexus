@@ -82,12 +82,57 @@ public class RuleEvaluationSnapshotService {
         return build(active,observed,evaluationTime,isolation,false);   // temporal observation applies late evidence by design: no currentness verdict
     }
 
+    /**
+     * Dry-run, CURRENT_STATE: the same coherent backend view the production path uses, over EXPLICIT immutable versions (which need not be
+     * active). It deliberately opens NO transaction of its own: the dry-run service runs the whole request as ONE REPEATABLE READ read-only
+     * transaction on ONE connection, and this method joins it, so the snapshot, the version lookup and the runtime-state reads all see the same
+     * committed state and no second connection is ever requested. It fails closed outside such a transaction.
+     */
+    public RuleEvaluationSnapshot captureForDryRun(List<Rule> versions,TriggerObservation trigger,Instant evaluationTime){
+        String isolation=requireDryRunTransaction();
+        phase("VERSIONS");
+        return build(versions,trigger,evaluationTime,isolation,false);
+    }
+
+    /** Both guards must hold or nothing is read: an ambient read-write or lower-isolation transaction would silently break the guarantees. */
+    private String requireDryRunTransaction(){
+        if(!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+            ||!org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+            throw new IllegalStateException("A dry-run snapshot requires the caller's read-only transaction");
+        String isolation=isolation();
+        if(!"repeatable read".equalsIgnoreCase(isolation))
+            throw new IllegalStateException("A dry-run snapshot requires REPEATABLE READ, but the transaction is "+isolation);
+        return isolation;
+    }
+
+    /** The reported state a SUPPLIED_STATE dry-run substitutes for the persisted rows; built after the installed contracts are known. */
+    public record Supplied(Map<UUID,List<DigitalTwin>> twins,Map<UUID,CapturedConnectivity> connectivity,
+            Map<String,TwinStateQualityEvaluator.Inputs> qualityInputs,Map<String,TemporalRuntimeEvidence> temporal,Map<String,Boolean> hysteresis){}
+
+    /**
+     * Dry-run, SUPPLIED_STATE: rule versions, scope and INSTALLED CONTRACTS are still resolved from the backend (read-only, in the caller's single
+     * REPEATABLE READ transaction, see {@link #captureForDryRun}), while the Twin rows, connectivity, temporal evidence and hysteresis latches come
+     * from the caller. The resulting snapshot is evaluated by the very same evaluator as a production snapshot.
+     */
+    public RuleEvaluationSnapshot captureSupplied(List<Rule> versions,TriggerObservation trigger,Instant evaluationTime,
+            java.util.function.Function<Map<String,CapturedCapability>,Supplied> supplied){
+        String isolation=requireDryRunTransaction();
+        var cap=capture(versions,trigger,false);
+        var state=supplied.apply(cap.capabilities());
+        return new RuleEvaluationSnapshot(UUID.randomUUID(),clock.instant(),evaluationTime,isolation,cap.captured(),state.twins(),state.connectivity(),
+            cap.capabilities(),cap.unresolved(),state.qualityInputs(),state.temporal(),Optional.empty(),state.hysteresis());
+    }
+
     private String isolation(){
         // The first statement fixes the PostgreSQL snapshot; the proof is read from the same transaction.
         return jdbc.queryForObject("SELECT current_setting('transaction_isolation')",String.class);
     }
 
-    private RuleEvaluationSnapshot build(List<Rule> active,TriggerObservation event,Instant evaluationTime,String isolation,boolean judgeSource){
+    /** Rules, scope devices, installed contracts and (optionally) temporal runtime rows captured from one coherent read. */
+    private record Capture(List<CapturedRule> captured,Set<UUID> devices,Map<String,CapturedCapability> capabilities,Set<String> unresolved,
+            Map<String,TemporalRuntimeEvidence> temporal){}
+
+    private Capture capture(List<Rule> active,TriggerObservation event,boolean readTemporal){
         var captured=new ArrayList<CapturedRule>();
         var devices=new LinkedHashSet<UUID>();
         if(event.deviceId()!=null)devices.add(event.deviceId());
@@ -111,13 +156,19 @@ public class RuleEvaluationSnapshotService {
             if(scope!=null&&!missing){
                 devices.add(scope);
                 for(RuleCondition c:rule.conditions())captureCapability(scope,c,capabilities,unresolved);
-                if(rule.executionIdentity()!=null&&rule.conditions().stream().anyMatch(c->c.temporal()!=null))
+                if(readTemporal&&rule.executionIdentity()!=null&&rule.conditions().stream().anyMatch(c->c.temporal()!=null))
                     for(var state:temporalStore.forVersion(rule.executionIdentity().ruleVersionId(),rule.executionIdentity().executionEpoch()))
                         temporal.put(RuleEvaluationSnapshot.temporalKey(state.ruleVersionId(),state.conditionId(),state.scopeDeviceId()),state);
             }
             captured.add(new CapturedRule(rule,scope,missing,diagnostics));
         }
         phase("CONTRACTS");
+        return new Capture(captured,devices,capabilities,unresolved,temporal);
+    }
+
+    private RuleEvaluationSnapshot build(List<Rule> active,TriggerObservation event,Instant evaluationTime,String isolation,boolean judgeSource){
+        var cap=capture(active,event,true);
+        var captured=cap.captured();var devices=cap.devices();var capabilities=cap.capabilities();var unresolved=cap.unresolved();var temporal=cap.temporal();
         var twinRows=new LinkedHashMap<UUID,List<DigitalTwin>>();
         for(UUID device:devices)twinRows.put(device,List.copyOf(twins.findByDeviceId(device)));
         phase("TWINS");

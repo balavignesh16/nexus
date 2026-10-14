@@ -63,6 +63,23 @@ public class RuleVersionStore {
             catch(Exception failure){throw new IllegalStateException("Unreadable version history",failure);}
         },id);
     }
+    /** One immutable stored version with its revision and the rule's CURRENT execution epoch (what activating it now would pin). Read-only. */
+    public record VersionRef(UUID ruleId, UUID versionId, long revision, long executionEpoch, String lifecycle, boolean active, String reconciliation, Rule definition) {}
+
+    /** @param versionId a specific version, or null for the active version (falling back to the working version). */
+    public Optional<VersionRef> resolve(UUID ruleId, UUID versionId) {
+        return jdbc.query("""
+            SELECT r.execution_epoch, r.lifecycle, r.reconciliation, r.active_version_id, v.version_id, v.revision, v.definition::text AS definition
+            FROM rules r JOIN rule_versions v ON v.rule_id=r.rule_id AND v.version_id = COALESCE(?::uuid, r.active_version_id, r.working_version_id)
+            WHERE r.rule_id=?""", (rs,n) -> {
+                try {
+                    Rule definition = mapper.readValue(rs.getString("definition"), Rule.class);
+                    UUID version = rs.getObject("version_id", UUID.class);
+                    return new VersionRef(ruleId, version, rs.getLong("revision"), rs.getLong("execution_epoch"), rs.getString("lifecycle"),
+                        version.equals(rs.getObject("active_version_id", UUID.class)), rs.getString("reconciliation"), definition);
+                } catch (Exception e) { throw new IllegalStateException("Unreadable persisted definition", e); }
+            }, versionId, ruleId).stream().findFirst();
+    }
     public Rule version(UUID ruleId,UUID versionId) {
         String json=jdbc.queryForObject("SELECT definition::text FROM rule_versions WHERE rule_id=? AND version_id=?",String.class,ruleId,versionId);
         try { return mapper.readValue(json,Rule.class); }

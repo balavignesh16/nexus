@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -21,11 +21,12 @@ import { ConditionNode } from './nodes/ConditionNode';
 import { ActionNode } from './nodes/ActionNode';
 import { RuleInspector } from './RuleInspector';
 import { RulePalette } from './RulePalette';
-import { Save, Play, AlertTriangle, CheckCircle, Undo2, Redo2, Maximize, Network } from 'lucide-react';
-import { validateGraph, compileGraphToRule } from '../../utils/workflowCompiler';
+import { Save, Play, AlertTriangle, CheckCircle, Undo2, Redo2, Maximize, Network, Loader2 } from 'lucide-react';
+import { validateGraph, compileGraphToRule, ruleToGraph } from '../../utils/workflowCompiler';
 import { getLayoutedElements } from '../../utils/layoutEngine';
 import { RuleSimulator } from './RuleSimulator';
 import type { Rule } from '../../api/ruleApi';
+import { describeSaveFailure, persistDefinition } from '../../utils/ruleSave';
 
 const nodeTypes = {
   trigger: TriggerNode,
@@ -35,33 +36,38 @@ const nodeTypes = {
 
 interface RuleCanvasProps {
   initialRule?: Rule | null;
+  /** Called with the rule exactly as the backend returned it after a CONFIRMED save. */
+  onSaved?: (rule: Rule) => void;
 }
 
-export function RuleCanvas({ initialRule }: RuleCanvasProps) {
+export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [validationErrors, setValidationErrors] = useState<{ nodeId?: string; message: string }[]>([]);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<Rule | null>(null);
+  const [saving, setSaving] = useState(false);
+  /** The rule as the backend last returned it: the base of the next save (its revision guards against concurrent edits). */
+  const [persisted, setPersisted] = useState<Rule | null>(initialRule ?? null);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const { setViewport, fitView } = useReactFlow();
 
   useEffect(() => {
-    if (initialRule && initialRule.metadata?.reactFlowNodes && initialRule.metadata?.reactFlowEdges) {
+    setPersisted(initialRule ?? null);
+    setSaveSuccess(null);
+    if (initialRule) {
+      // The graph is rebuilt from the PERSISTED conditions and actions (the authority); stored layout only positions the nodes.
+      const graph = ruleToGraph(initialRule);
+      setNodes(graph.nodes);
+      setEdges(graph.edges);
       try {
-        const parsedNodes = JSON.parse(initialRule.metadata.reactFlowNodes);
-        const parsedEdges = JSON.parse(initialRule.metadata.reactFlowEdges);
-        setNodes(parsedNodes);
-        setEdges(parsedEdges);
-        if (initialRule.metadata.reactFlowViewport) {
+        if (initialRule.metadata?.reactFlowViewport) {
           const vp = JSON.parse(initialRule.metadata.reactFlowViewport);
-          setTimeout(() => setViewport(vp), 50); // delay to let nodes render
+          setTimeout(() => setViewport(vp), 50);
         }
-      } catch (e) {
-        console.error('Failed to parse graph layout', e);
-      }
+      } catch { /* a malformed viewport only loses the zoom */ }
     } else {
       setNodes([]);
       setEdges([]);
@@ -84,7 +90,7 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
   const onConnect = useCallback((params: Connection | Edge) => {
     setEdges((eds) => addEdge(params, eds));
     setValidationErrors([]);
-    setSaveSuccess(false);
+    setSaveSuccess(null);
   }, [setEdges]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -117,7 +123,7 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
 
       setNodes((nds) => nds.concat(newNode));
       setValidationErrors([]);
-      setSaveSuccess(false);
+      setSaveSuccess(null);
     },
     [reactFlowInstance, setNodes]
   );
@@ -143,7 +149,7 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
       setSelectedNode({ ...selectedNode, data });
     }
     setValidationErrors([]);
-    setSaveSuccess(false);
+    setSaveSuccess(null);
   };
 
   const handleValidate = () => {
@@ -161,22 +167,33 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const validation = handleValidate();
-    if (!validation.isValid) {
-      setSaveSuccess(false);
-      return;
-    }
-
+    if (!validation.isValid) { setSaveSuccess(null); return; }
+    setSaving(true);
+    setSaveSuccess(null);
     try {
       const viewport = reactFlowInstance ? reactFlowInstance.getViewport() : { x: 0, y: 0, zoom: 1 };
-      const rule = compileGraphToRule(nodes, edges, viewport, initialRule?.ruleId);
-      void rule;
-      setSaveSuccess(false);
-      setValidationErrors([{ message: 'Canvas persistence is not implemented. Save a supported definition through the Rule form; no graph has been saved.' }]);
-    } catch (e: any) {
-      setValidationErrors([{ message: e.message || 'Failed to save rule' }]);
+      const definition = compileGraphToRule(nodes, edges, viewport, persisted);
+      // Success is claimed ONLY from the backend's own response; a rejection (validation, stale revision, outage) leaves no success banner.
+      const saved = await persistDefinition(persisted, definition);
+      setPersisted(saved);
+      setSaveSuccess(saved);
+      setValidationErrors([]);
+      onSaved?.(saved);
+    } catch (e) {
+      setSaveSuccess(null);
+      setValidationErrors(describeSaveFailure(e).map((message) => ({ message })));
+    } finally {
+      setSaving(false);
     }
   };
+
+  /** What the simulator evaluates: the graph as drawn (unsaved), compiled by the same compiler the save uses; null while the graph is invalid. */
+  const inlineDefinition = useMemo(() => {
+    if (!isSimulatorOpen) return null;
+    try { return compileGraphToRule(nodes, edges, { x: 0, y: 0, zoom: 1 }, persisted); } catch { return null; }
+  }, [isSimulatorOpen, nodes, edges, persisted]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
@@ -186,7 +203,7 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
         <div className="flex items-center gap-4">
           <h1 className="font-semibold text-foreground text-lg">Visual Rules Studio</h1>
           <div className="px-2 py-0.5 rounded text-xs font-mono bg-muted/50 border border-border text-muted-foreground">
-            DRAFT
+            {persisted ? (persisted.lifecycle ?? (persisted.enabled ? 'ACTIVE' : 'SAVED')) : 'UNSAVED'}
           </div>
           
           {validationErrors.length > 0 && (
@@ -195,8 +212,8 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
             </div>
           )}
           {saveSuccess && (
-            <div className="flex items-center gap-1.5 text-xs text-success bg-success/10 px-2 py-1 rounded">
-              <CheckCircle size={12} /> Rule saved successfully
+            <div className="flex items-center gap-1.5 text-xs text-success bg-success/10 px-2 py-1 rounded" role="status">
+              <CheckCircle size={12} /> Saved by the backend{saveSuccess.rowRevision !== undefined ? ` (revision ${saveSuccess.rowRevision})` : ''}
             </div>
           )}
         </div>
@@ -235,11 +252,11 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
           </button>
           <button 
             onClick={handleSave}
-            disabled
-            title="Canvas persistence is not implemented; use the Rule form. No graph is saved."
+            disabled={saving}
+            title="Saves the flat definition (all conditions, then all actions) through the backend. Branching graphs are not executable."
             className="flex items-center gap-2 px-3 py-1.5 rounded bg-primary hover:bg-primary/90 text-sm font-medium transition-colors text-primary-foreground"
           >
-            <Save size={14} /> Save unavailable
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
           </button>
         </div>
       </div>
@@ -295,8 +312,10 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
           
           {/* Simulator Console */}
           {isSimulatorOpen && (
-            <div className="h-64 border-t border-border bg-card shrink-0">
-              <RuleSimulator nodes={nodes} edges={edges} />
+            <div className="h-80 border-t border-border bg-card shrink-0">
+              {inlineDefinition
+                ? <RuleSimulator inlineDefinition={inlineDefinition} />
+                : <div className="p-4 text-xs text-muted-foreground" role="note">Complete and validate the graph to run a backend dry-run. The dry-run evaluates the definition exactly as it would be saved.</div>}
             </div>
           )}
         </div>
@@ -308,10 +327,10 @@ export function RuleCanvas({ initialRule }: RuleCanvasProps) {
   );
 }
 
-export function RuleStudio({ initialRule }: RuleCanvasProps) {
+export function RuleStudio({ initialRule, onSaved }: RuleCanvasProps) {
   return (
     <ReactFlowProvider>
-      <RuleCanvas initialRule={initialRule} />
+      <RuleCanvas initialRule={initialRule} onSaved={onSaved} />
     </ReactFlowProvider>
   );
 }

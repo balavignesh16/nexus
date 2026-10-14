@@ -27,7 +27,7 @@ public class RuleCooldownStore {
     public RuleCooldownStore(JdbcTemplate jdbc, Clock clock) { this.jdbc = jdbc; this.clock = clock; }
 
     public static String scopeKey(Rule rule, UUID scopeDevice) {
-        return rule.cooldownScope() == CooldownScope.PER_SCOPE && scopeDevice != null ? scopeDevice.toString() : "";
+        return rule.cooldownScopeKey(scopeDevice);
     }
 
     /** Non-locking read for the cheap pre-check; never an authority on its own. */

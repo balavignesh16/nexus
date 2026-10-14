@@ -1,5 +1,6 @@
 import type { Node } from 'reactflow';
 import { Settings, Info, AlertCircle, FileJson, BookOpen, AlertTriangle } from 'lucide-react';
+import { ACTION_TYPES } from '../../utils/workflowCompiler';
 
 interface RuleInspectorProps {
   selectedNode: Node | null;
@@ -8,7 +9,7 @@ interface RuleInspectorProps {
 
 const FIELDS = ['EVENT_TYPE', 'DEVICE_ID', 'SENSOR_TYPE', 'VALUE', 'SEVERITY'];
 const OPERATORS = ['EQ', 'NE', 'GT', 'LT', 'GTE', 'LTE'];
-const ACTIONS = ['SEND_ALERT', 'TRIGGER_COMMAND', 'WEBHOOK'];
+const ACTIONS: string[] = [...ACTION_TYPES];
 
 export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps) {
   if (!selectedNode) {
@@ -91,14 +92,14 @@ export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps
               <label className="text-xs font-medium text-muted-foreground">Expected Value</label>
               <input 
                 type="text" 
-                value={data.expectedValue || ''} 
+                value={data.expectedValue ?? ''}
                 onChange={(e) => updateData('expectedValue', e.target.value)}
                 className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-primary"
-                placeholder="e.g., 50 or CRITICAL"
+                placeholder="e.g., 50 or CRITICAL (empty text is a valid value)"
               />
             </div>
             
-            {(!data.field || !data.operator || !data.expectedValue) && (
+            {(data.field === undefined || data.field === '' || data.operator === undefined || data.operator === '' || data.expectedValue === undefined || data.expectedValue === null) && (
               <div className="flex items-start gap-2 p-2 bg-destructive/10 text-destructive text-xs rounded border border-destructive/20 mt-2">
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <p>Missing required fields. This condition will fail validation.</p>
@@ -126,7 +127,7 @@ export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Parameters (JSON)</label>
               <textarea 
-                value={data.parameters || '{}'}
+                value={data.parameters ?? '{}'}
                 onChange={(e) => updateData('parameters', e.target.value)}
                 rows={4}
                 className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm font-mono text-foreground focus:outline-none focus:border-primary resize-none"
@@ -134,7 +135,7 @@ export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps
               />
             </div>
             
-            {!data.actionType && (
+            {(data.actionType === undefined || data.actionType === '') && (
               <div className="flex items-start gap-2 p-2 bg-destructive/10 text-destructive text-xs rounded border border-destructive/20 mt-2">
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <p>Missing action type. This action will fail validation.</p>

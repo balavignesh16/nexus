@@ -20,7 +20,9 @@ import java.util.UUID;
  * re-evaluated. deviceId/domainEvent are the only fields allowed to be
  * null (the linked domain event may have expired under retention);
  * correlationId may also be null (nullable in rule_matches); actions is
- * never null, only possibly empty.
+ * never null, only possibly empty. version is null for a historical match without
+ * attribution; candidates are the PERSISTED arbitration records of this match (empty when
+ * none exist - an explanation then says so instead of inventing a selection).
  */
 public record RuleMatchExplanationContext(
     UUID matchId,
@@ -33,7 +35,9 @@ public record RuleMatchExplanationContext(
     String message,
     UUID deviceId,
     DomainEventSummary domainEvent,
-    List<ActionSummary> actions
+    List<ActionSummary> actions,
+    VersionAttribution version,
+    List<CandidateSummary> candidates
 ) {
     public RuleMatchExplanationContext {
         ruleSnapshot = ruleSnapshot == null
@@ -45,5 +49,14 @@ public record RuleMatchExplanationContext(
         actions = actions == null
                 ? List.of()
                 : Collections.unmodifiableList(new ArrayList<>(actions));
+        candidates = candidates == null
+                ? List.of()
+                : Collections.unmodifiableList(new ArrayList<>(candidates));
+    }
+
+    /** A match with no persisted version attribution and no persisted arbitration (a historical or minimal context). */
+    public RuleMatchExplanationContext(UUID matchId, UUID ruleId, Map<String, Object> ruleSnapshot, UUID eventId, String correlationId,
+            Map<String, Object> evaluationEvidence, Instant matchedAt, String message, UUID deviceId, DomainEventSummary domainEvent, List<ActionSummary> actions) {
+        this(matchId, ruleId, ruleSnapshot, eventId, correlationId, evaluationEvidence, matchedAt, message, deviceId, domainEvent, actions, null, List.of());
     }
 }

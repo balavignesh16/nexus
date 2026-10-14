@@ -74,7 +74,7 @@ class AiReasoningBoundaryEndToEndTest {
         assertTrue(result.validated().claims().stream().anyMatch(c -> c.text().contains("34.7")));
         assertTrue(result.validated().claims().stream().anyMatch(c ->
                 c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)));
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.validated().actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), result.validated().actionNote());
         assertEquals("AI", result.validated().generatedBy());
     }
 

@@ -26,13 +26,22 @@ public class RuleMatchExplanationContextBuilder {
     private final RuleMatchRepository ruleMatchRepository;
     private final DomainEventRepository domainEventRepository;
     private final ActionHistoryRepository actionHistoryRepository;
+    private final PersistedArbitrationReader arbitration;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public RuleMatchExplanationContextBuilder(RuleMatchRepository ruleMatchRepository,
                                                DomainEventRepository domainEventRepository,
-                                               ActionHistoryRepository actionHistoryRepository) {
+                                               ActionHistoryRepository actionHistoryRepository,
+                                               PersistedArbitrationReader arbitration) {
         this.ruleMatchRepository = ruleMatchRepository;
         this.domainEventRepository = domainEventRepository;
         this.actionHistoryRepository = actionHistoryRepository;
+        this.arbitration = arbitration;
+    }
+
+    /** Without arbitration retrieval: the context then carries no candidates (an explanation will say none are recorded). */
+    public RuleMatchExplanationContextBuilder(RuleMatchRepository ruleMatchRepository, DomainEventRepository domainEventRepository, ActionHistoryRepository actionHistoryRepository) {
+        this(ruleMatchRepository, domainEventRepository, actionHistoryRepository, null);
     }
 
     public RuleMatchExplanationContext build(UUID matchId) {
@@ -68,7 +77,9 @@ public class RuleMatchExplanationContextBuilder {
                 match.getMessage(),
                 deviceId,
                 domainEventSummary,
-                actions
+                actions,
+                match.getRuleVersionId() == null ? null : new VersionAttribution(match.getRuleVersionId(), match.getRuleRevision(), match.getExecutionEpoch()),
+                arbitration == null ? List.of() : arbitration.forMatch(matchId)
         );
     }
 

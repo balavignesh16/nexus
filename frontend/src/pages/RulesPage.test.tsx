@@ -39,6 +39,15 @@ vi.mock('../api/aiApi', () => ({
   aiApi: { getRuleMatchHistory: (...args: any[]) => mockGetRuleMatchHistory(...args) },
 }));
 
+vi.mock('../components/rules/RuleCanvas', () => ({
+  RuleStudio: (props: { initialRule?: { ruleId: string } | null; onSaved?: (r: unknown) => void }) => (
+    <div data-testid="studio">studio:{props.initialRule ? props.initialRule.ruleId : 'new'}<button onClick={() => props.onSaved?.({ ruleId: 'saved' })}>fake-saved</button></div>
+  ),
+}));
+vi.mock('../components/rules/RuleSimulator', () => ({
+  RuleSimulator: (props: { rule?: { ruleId: string } | null; onClose?: () => void }) => <div data-testid="simulator">simulate:{props.rule?.ruleId}</div>,
+}));
+
 import { RulesPage } from './RulesPage';
 
 function rule(overrides: Record<string, any> = {}) {
@@ -343,5 +352,30 @@ describe('RulesPage - real rules, real matches, no fabrication', () => {
     fireEvent.click(screen.getByText('High Temp Alert'));
 
     expect(screen.getByRole('button', { name: /edit rule/i })).toBeDisabled();
+  });
+
+  it('opens the backend dry-run console for exactly the stored rule, without opening the detail popup or evaluating anything in the page', () => {
+    mockPolling({ data: [rule()], isLoading: false });
+    renderPage();
+    fireEvent.click(screen.getByLabelText('Simulate rule'));
+    expect(screen.getByRole('dialog', { name: 'Rule dry-run' })).toBeInTheDocument();
+    expect(screen.getByTestId('simulator')).toHaveTextContent('simulate:r1');
+    expect(screen.queryByText('Conditions')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Close dry-run'));
+    expect(screen.queryByTestId('simulator')).not.toBeInTheDocument();
+  });
+
+  it('opens the visual studio for a new rule or for an existing one, and refreshes the list after a confirmed save', () => {
+    const refetch = vi.fn();
+    mockUsePolling.mockImplementation((key: any) => (Array.isArray(key) && key[0] === 'rule-matches' ? emptyMatchesPolling : { data: [rule()], isLoading: false, refetch }));
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Visual Studio/ }));
+    expect(screen.getByTestId('studio')).toHaveTextContent('studio:new');
+    fireEvent.click(screen.getByText('fake-saved'));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByLabelText('Close visual studio'));
+    expect(screen.queryByTestId('studio')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Open in visual studio'));
+    expect(screen.getByTestId('studio')).toHaveTextContent('studio:r1');
   });
 });

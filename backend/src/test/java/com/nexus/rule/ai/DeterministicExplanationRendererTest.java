@@ -112,7 +112,7 @@ class DeterministicExplanationRendererTest {
 
         RuleMatchExplanation explanation = renderer.render(context);
 
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, explanation.actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), explanation.actionNote());
     }
 
     @Test

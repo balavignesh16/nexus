@@ -35,19 +35,10 @@ public class RuleActionPlanner {
      * @return true when THIS call created the plan (and dispatched its SELECTED candidates); false when the batch already had one
      */
     public boolean planAndDispatch(PlanSource source,List<RuleMatchedEvent> persistedMatches){
-        var candidates=new ArrayList<ActionCandidate>();
+        var candidates=ActionCandidates.build(persistedMatches);
         var events=new HashMap<UUID,DomainEvent>();
-        for(RuleMatchedEvent match:persistedMatches){
-            Rule rule=match.result().rule();
-            if(rule.actions()==null||rule.executionIdentity()==null)continue;   // an unpinned rule can never be authorized
-            if(match.result().event()!=null)events.put(match.matchId(),match.result().event());
-            for(int i=0;i<rule.actions().size();i++){
-                RuleAction action=rule.actions().get(i);
-                boolean command="SEND_COMMAND".equals(action.actionType());
-                candidates.add(new ActionCandidate(UUID.randomUUID(),match.matchId(),rule,i,action,UUID.randomUUID(),
-                    command?ActionArbiter.targetKey(action):null,ActionArbiter.equivalenceKey(action),rule.priority(),match.correlationId()));
-            }
-        }
+        for(RuleMatchedEvent match:persistedMatches)
+            if(match.result().rule().executionIdentity()!=null&&match.result().event()!=null)events.put(match.matchId(),match.result().event());
         Optional<RuleActionPlanStore.Plan> plan;
         try{plan=store.persist(source,candidates);}
         catch(RuntimeException failure){

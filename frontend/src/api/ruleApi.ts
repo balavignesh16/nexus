@@ -130,6 +130,68 @@ export type CandidateOutcome = 'ACCEPTED' | 'EXECUTED' | 'EXECUTION_FAILED' | 'U
 
 export interface ManualExecutionResult { requestId: string; factId: string; ruleVersionId: string; note: string }
 
+// ---------------------------------------------------------------------------------------------------------------- dry-run (C19)
+
+export type DryRunMode = 'SUPPLIED_STATE' | 'CURRENT_STATE' | 'HISTORICAL_REPLAY';
+export type DryRunValueType = 'NUMBER' | 'BOOLEAN' | 'STRING' | 'ENUM';
+/** A typed JSON value: false, 0 and "" are values; null is an explicit null; a missing property is none of these. */
+export type DryRunJsonValue = boolean | number | string | null;
+
+export interface DryRunTwinValue {
+  deviceId?: string; capabilityKey: string; valueType: DryRunValueType; value: DryRunJsonValue; unit: string | null;
+  observedAt: string; receivedAt?: string | null; freshnessThresholdSeconds?: number | null;
+}
+export interface DryRunSupplied {
+  twins?: DryRunTwinValue[];
+  connectivity?: { deviceId: string; status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN' }[];
+  cooldowns?: { ruleId: string; lastMatchedAt: string }[];
+  edgeLatches?: { ruleId: string; latched: boolean }[];
+  hysteresisLatches?: { ruleId: string; conditionId: string; latched: boolean }[];
+  temporal?: { ruleId: string; versionId?: string | null; conditionId: string; operator: string; phase: string; sequence: number; generation: number; armedAt?: string | null; dueAt?: string | null }[];
+}
+/** An inline, never-saved definition uses the same shape as a rule create request. */
+export interface DryRunInlineDefinition {
+  name: string; enabled: boolean; priority: number; conditions: RuleCondition[]; actions: RuleAction[]; metadata?: Record<string, string>;
+  cooldownSeconds?: number | null; triggers?: TriggerSubscription[]; repeatPolicy?: RepeatPolicy; schedule?: ScheduleSpec; cooldownScope?: CooldownScope;
+}
+export interface DryRunRequest {
+  mode: DryRunMode;
+  scope?: { deviceId: string };
+  versions: { ruleId?: string; versionId?: string; definition?: DryRunInlineDefinition; label?: string }[];
+  trigger: { type: TriggerType; deviceId?: string; attributes?: Record<string, unknown>; event?: { eventType: string; severity?: string; payload?: Record<string, unknown> }; correlationId?: string };
+  simulationTime?: string;
+  supplied?: DryRunSupplied;
+}
+export interface DryRunConditionEvidence {
+  field: string; operator: string; expectedValue: string | null; actualValue: unknown; conditionMet: boolean;
+  capabilityKey?: string | null; valueType?: string | null; unit?: string | null; stateQuality?: string | null; qualityReason?: string | null;
+  receivedAt?: string | null; freshnessThresholdSeconds?: number | null; connectivity?: string | null; eligible?: boolean | null;
+  hysteresis?: { decision?: string; latchedBefore?: boolean; latchedAfter?: boolean } | null;
+}
+export interface DryRunVersionResult {
+  simulatedVersionId: string; ruleId: string | null; versionId: string | null; revision: number; executionEpoch: number; name: string; priority: number;
+  source: 'STORED_ACTIVE' | 'STORED_VERSION' | 'INLINE'; triggerEligible: boolean; outcome: string; matched: boolean; message: string; lane: number;
+  conditions: DryRunConditionEvidence[]; contractDiagnostics: { code: string; message: string; path: string }[];
+  cooldown: { windowSeconds: number | null; scope: string; lastMatchedAt: string | null; cooling: boolean } | null;
+  repeat: { policy: string; edgeLatched: boolean } | null;
+  /** Stored ownership read (NOT the production authorization check). Null for an unsaved inline definition. */
+  ownership: { lifecycle: string; activeVersion: boolean; reconciliation: string | null; executableInProduction: boolean } | null;
+}
+export interface DryRunCandidate {
+  simulatedId: string; lane: number; ruleId: string | null; versionId: string | null; ordinal: number; actionType: string; targetKey: string | null; priority: number;
+  disposition: string; reason: string; winnerId: string | null; wouldBeSelected: boolean; exclusionGroups: { groupId: string; rank: number }[]; parameters: Record<string, unknown>;
+  /** Always NOT_EVALUATED: SELECTED is an arbitration outcome, not a prediction that guarded acceptance would succeed. */
+  acceptanceAuthorization: 'NOT_EVALUATED';
+}
+export interface DryRunResponse {
+  schemaVersion: number; mode: DryRunMode; hypothetical: true; simulatedAt: string; timeSource: 'SUPPLIED' | 'BACKEND_CLOCK'; scopeDeviceId: string | null;
+  versions: DryRunVersionResult[]; candidates: DryRunCandidate[];
+  hypotheticalEffects: { kind: string; ruleId: string | null; detail: string; from: unknown; to: unknown }[];
+  diagnostics: { code: string; severity: string; message: string; path: string }[]; notice: string;
+}
+/** A typed rejection: the backend `code` is stable (HISTORICAL_REPLAY_UNSUPPORTED, TOO_MANY_VERSIONS, MULTIPLE_SCOPES, ...). */
+export interface DryRunRejection { status: number; code: string; message: string }
+
 export const ruleApi = {
   getRules: (deviceId?: string) =>
     apiClient.get<Rule[]>(deviceId ? `/rules?deviceId=${encodeURIComponent(deviceId)}` : '/rules'),
@@ -152,6 +214,8 @@ export const ruleApi = {
   setExclusionMember: (groupId: string, ruleId: string, rank: number) => apiClient.put<ExclusionGroup>(`/rule-exclusion-groups/${groupId}/members/${ruleId}`, { rank }),
   removeExclusionMember: (groupId: string, ruleId: string) => apiClient.delete(`/rule-exclusion-groups/${groupId}/members/${ruleId}`),
   deleteExclusionGroup: (groupId: string) => apiClient.delete(`/rule-exclusion-groups/${groupId}`),
+  /** Hypothetical evaluation on the backend (production engine). Never persists, dispatches or publishes. */
+  dryRun: (request: DryRunRequest) => apiClient.post<DryRunResponse>('/rules/dry-run', request),
   /** Persists a server-issued MANUAL request addressed to the active version; evaluation is a separate persisted fact. */
   executeManually: (id: string, expectedVersionId?: string | null) =>
     apiClient.post<ManualExecutionResult>(`/rules/${id}/manual-executions`, expectedVersionId ? { expectedVersionId } : {}),

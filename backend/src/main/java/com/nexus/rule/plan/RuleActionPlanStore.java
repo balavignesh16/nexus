@@ -23,7 +23,8 @@ public class RuleActionPlanStore {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final Clock clock;
-    public RuleActionPlanStore(JdbcTemplate jdbc,ObjectMapper mapper,Clock clock){this.jdbc=jdbc;this.mapper=mapper;this.clock=clock;}
+    private final ExclusionMembershipReader memberships;
+    public RuleActionPlanStore(JdbcTemplate jdbc,ObjectMapper mapper,Clock clock,ExclusionMembershipReader memberships){this.jdbc=jdbc;this.mapper=mapper;this.clock=clock;this.memberships=memberships;}
 
     /** The persisted plan with the exact decisions that were stored. */
     public record Plan(UUID planId,List<ActionDecision> decisions){}
@@ -81,9 +82,7 @@ public class RuleActionPlanStore {
         jdbc.queryForList("""
             SELECT g.group_id FROM rule_exclusion_groups g
             WHERE g.group_id IN (SELECT m.group_id FROM rule_exclusion_members m WHERE m.rule_id IN (%s)) ORDER BY g.group_id FOR SHARE""".formatted(marks),rules.toArray());
-        return jdbc.query("""
-            SELECT m.group_id,m.rule_id,m.rank FROM rule_exclusion_members m WHERE m.rule_id IN (%s) ORDER BY m.group_id,m.rule_id""".formatted(marks),
-            (rs,n)->new ExclusionMembership(rs.getObject("group_id",UUID.class),rs.getObject("rule_id",UUID.class),rs.getInt("rank")),rules.toArray());
+        return this.memberships.read(rules);
     }
 
     /**

@@ -54,6 +54,11 @@ public class TwinStateQualityEvaluator {
         boolean valid=twin.typedValue()==null||twin.receivedAt()==null||isPersistedValueValid(twin);
         return new Inputs(connectivityName,threshold(twin.bindingId()),valid);
     }
+    /** Inputs for a dry-run row: the same contract reads as {@link #liveInputs}, but the caller may supply the connectivity and freshness threshold. */
+    public Inputs suppliedInputs(DigitalTwin twin,String connectivityName,Integer thresholdSecondsOverride){
+        boolean valid=twin.typedValue()==null||twin.receivedAt()==null||isPersistedValueValid(twin);
+        return new Inputs(connectivityName,thresholdSecondsOverride!=null?thresholdSecondsOverride:threshold(twin.bindingId()),valid);
+    }
     /** Pure decision over captured inputs: one evaluation time, no further reads. */
     public TwinStateQualityEvidence evaluate(DigitalTwin twin,Instant evaluatedAt,Inputs inputs){
         int threshold=inputs.thresholdSeconds();String connectivityName=inputs.connectivity();

@@ -101,7 +101,7 @@ public class GroundingChecker {
     }
 
     private String enforcedActionNote(RuleMatchExplanationContext context) {
-        return context.actions().isEmpty() ? null : DeterministicExplanationRenderer.ACTION_DISCLAIMER;
+        return ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context));
     }
 
     private String validateClaim(Claim claim, Map<String, Object> tree) {

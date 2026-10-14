@@ -352,11 +352,11 @@ class GroundingCheckerTest {
     void correctActionNote_actionsExist_validatedOutputHasExactDisclaimer() {
         RuleMatchExplanation candidate = new RuleMatchExplanation(
                 context.matchId(), "summary", List.of(groundedFact()),
-                DeterministicExplanationRenderer.ACTION_DISCLAIMER, "AI");
+                ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), "AI");
 
         GroundingResult result = checker.check(context, candidate);
 
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.validated().actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), result.validated().actionNote());
     }
 
     @Test
@@ -366,7 +366,7 @@ class GroundingCheckerTest {
 
         GroundingResult result = checker.check(context, candidate);
 
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.validated().actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), result.validated().actionNote());
     }
 
     @Test
@@ -377,7 +377,7 @@ class GroundingCheckerTest {
 
         GroundingResult result = checker.check(context, candidate);
 
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.validated().actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), result.validated().actionNote());
         assertTrue(result.validated().actionNote() != null
                 && !result.validated().actionNote().contains("physically actuated"));
     }

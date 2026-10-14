@@ -5,7 +5,7 @@ import { usePolling } from '../hooks/usePolling';
 import { useActiveDevices } from '../hooks/queries';
 import { aiApi } from '../api/aiApi';
 import { ruleApi } from '../api/ruleApi';
-import { FileJson, Search, Plus, Zap, CheckCircle2, XCircle, Circle, ArrowRight, Sparkles, Clock, Trash2, Power } from 'lucide-react';
+import { FileJson, Search, Plus, Zap, CheckCircle2, XCircle, Circle, ArrowRight, Sparkles, Clock, Trash2, Power, FlaskConical, Workflow, X } from 'lucide-react';
 import { GlassPanel } from '../components/foundation/GlassPanel';
 import { Card } from '../components/foundation/Card';
 import { MetricCard } from '../components/foundation/MetricCard';
@@ -17,6 +17,8 @@ import { LoadingBlock } from '../components/foundation/LoadingState';
 import { CreateRuleModal } from '../components/explorer/device/CreateRuleModal';
 import { RuleDetailModal } from '../components/explorer/device/RuleDetailModal';
 import { ExclusionGroupsPanel } from '../components/explorer/device/ExclusionGroupsPanel';
+import { RuleStudio } from '../components/rules/RuleCanvas';
+import { RuleSimulator } from '../components/rules/RuleSimulator';
 
 export function RulesPage() {
   const { rules } = useRepositories();
@@ -33,6 +35,9 @@ export function RulesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [detailRule, setDetailRule] = useState<any | null>(null);
   const [editingRule, setEditingRule] = useState<any | null>(null);
+  /** The visual studio (null = closed; {rule: null} = a new rule) and the backend dry-run console for one stored rule. */
+  const [studio, setStudio] = useState<{ rule: any | null } | null>(null);
+  const [simulatorRule, setSimulatorRule] = useState<any | null>(null);
 
   // Real, established API (already used by AiInsightsPage and the
   // device-scoped RulesTab) - the global recent-matches view, not scoped
@@ -122,6 +127,9 @@ export function RulesPage() {
               <option value="">All devices</option>
               {devices.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </Select>
+            <Button variant="secondary" size="sm" onClick={() => setStudio({ rule: null })}>
+              <Workflow size={14} /> Visual Studio
+            </Button>
             <Button variant="secondary" size="sm" onClick={() => setModalOpen(true)}>
               <Plus size={14} /> Create Rule
             </Button>
@@ -216,6 +224,23 @@ export function RulesPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      onClick={(e) => { e.stopPropagation(); setSimulatorRule(rule); }}
+                      aria-label="Simulate rule"
+                      title="Dry-run this rule on the backend (hypothetical; nothing is executed)"
+                      className="text-foundation-muted-fg hover:text-foundation-fg"
+                    >
+                      <FlaskConical size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setStudio({ rule }); }}
+                      aria-label="Open in visual studio"
+                      className="text-foundation-muted-fg hover:text-foundation-fg"
+                    >
+                      <Workflow size={13} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); toggleEnabled(rule); }}
                       disabled={busyRuleId === (rule.ruleId ?? rule.id)}
                       aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
@@ -295,6 +320,28 @@ export function RulesPage() {
           setModalOpen(true);
         }}
       />
+
+      {simulatorRule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-label="Rule dry-run">
+          <div className="flex h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-2">
+              <span className="text-sm font-semibold text-foreground">Dry-run: {simulatorRule.name}</span>
+              <button type="button" aria-label="Close dry-run" onClick={() => setSimulatorRule(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+            <div className="min-h-0 flex-1"><RuleSimulator rule={simulatorRule} onClose={() => setSimulatorRule(null)} /></div>
+          </div>
+        </div>
+      )}
+
+      {studio && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-label="Visual rule studio">
+          <div className="flex items-center justify-between border-b border-border px-4 py-1.5">
+            <span className="text-xs text-muted-foreground">Visual Studio saves the flat definition (all conditions, then all actions) through the backend; branching is not executable.</span>
+            <button type="button" aria-label="Close visual studio" onClick={() => { setStudio(null); refetch(); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+          </div>
+          <div className="min-h-0 flex-1"><RuleStudio initialRule={studio.rule} onSaved={() => refetch()} /></div>
+        </div>
+      )}
 
       <CreateRuleModal
         editingRule={editingRule}

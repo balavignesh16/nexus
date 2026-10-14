@@ -30,7 +30,9 @@ public record AiExplanationContext(
     Map<String, Object> evaluationEvidence,
     Instant matchedAt,
     String message,
-    List<AiActionSummary> actions
+    List<AiActionSummary> actions,
+    AiVersionAttribution version,
+    List<AiCandidateSummary> candidates
 ) {
     public AiExplanationContext {
         ruleSnapshot = ruleSnapshot == null
@@ -42,5 +44,12 @@ public record AiExplanationContext(
         actions = actions == null
                 ? List.of()
                 : Collections.unmodifiableList(new ArrayList<>(actions));
+        candidates = candidates == null
+                ? List.of()
+                : Collections.unmodifiableList(new ArrayList<>(candidates));
+    }
+
+    public AiExplanationContext(Map<String, Object> ruleSnapshot, Map<String, Object> evaluationEvidence, Instant matchedAt, String message, List<AiActionSummary> actions) {
+        this(ruleSnapshot, evaluationEvidence, matchedAt, message, actions, null, List.of());
     }
 }

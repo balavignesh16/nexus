@@ -163,7 +163,7 @@ class RuleMatchExplanationIntegrationTest {
         assertTrue(result.validated().claims().stream().anyMatch(c -> c.text().contains("34.7")));
 
         // fixed action disclaimer is present.
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, result.validated().actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(ExecutionTruthfulness.typesOf(context)), result.validated().actionNote());
 
         // no physical action claim is produced.
         for (Claim claim : result.validated().claims()) {
@@ -252,7 +252,7 @@ class RuleMatchExplanationIntegrationTest {
         assertEquals("DETERMINISTIC_FALLBACK", explanation.generatedBy(),
                 "the real, persisted actualValue is 34.7 - a 40.2 assertion must be rejected, forcing fallback");
         assertTrue(explanation.claims().stream().anyMatch(c -> c.text().equals(DeterministicExplanationRenderer.CAUSAL_UNCERTAINTY)));
-        assertEquals(DeterministicExplanationRenderer.ACTION_DISCLAIMER, explanation.actionNote());
+        assertEquals(ExecutionTruthfulness.noteFor(java.util.List.of("CREATE_ALERT")), explanation.actionNote());
     }
 
     @Test

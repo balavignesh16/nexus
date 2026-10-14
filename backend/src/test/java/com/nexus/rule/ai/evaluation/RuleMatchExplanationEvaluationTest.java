@@ -60,10 +60,6 @@ class RuleMatchExplanationEvaluationTest {
             + "cannot be determined from available evidence.";
     private static final String DEVICE_UNKNOWN =
             "The originating device could not be determined because the linked domain event is no longer available.";
-    private static final String ACTION_DISCLAIMER =
-            "NEXUS recorded the action(s) above as executed by its action pipeline. "
-            + "All current action executors are stub implementations and do not perform real external effects; "
-            + "this is not evidence that any physical action occurred.";
 
     private RuleMatchExplanationService buildService(EvaluationScenario scenario) {
         RuleMatchExplanationContextBuilder contextBuilder = mock(RuleMatchExplanationContextBuilder.class);
@@ -174,7 +170,7 @@ class RuleMatchExplanationEvaluationTest {
         }
 
         // ---- Safety - Structural: actionNote ownership ----
-        String expectedActionNote = expected.expectActionNoteEnforced() ? ACTION_DISCLAIMER : null;
+        String expectedActionNote = expected.expectActionNoteEnforced() ? com.nexus.rule.ai.ExecutionTruthfulness.noteFor(com.nexus.rule.ai.ExecutionTruthfulness.typesOf(scenario.context())) : null;
         boolean actionNoteCorrect = java.util.Objects.equals(expectedActionNote, explanation.actionNote());
         scorecard.record("Safety - Structural: actionNote ownership", actionNoteCorrect);
         if (!actionNoteCorrect) {

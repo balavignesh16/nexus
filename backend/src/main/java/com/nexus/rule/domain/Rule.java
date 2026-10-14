@@ -45,6 +45,8 @@ public record Rule(
     public boolean subscribesTo(TriggerType type){return subscriptions().stream().anyMatch(s->s.type()==type);}
     /** GLOBAL unless a version explicitly opts into PER_SCOPE; imported rules are always GLOBAL. */
     public CooldownScope cooldownScope(){return runtime==null||runtime.cooldownScope()==null?CooldownScope.GLOBAL:runtime.cooldownScope();}
+    /** Cooldown identity within the logical rule: '' (global) or the resolved device id for an explicit PER_SCOPE rule. A missing scope falls back to global (stricter). */
+    public String cooldownScopeKey(UUID scopeDevice){return cooldownScope()==CooldownScope.PER_SCOPE&&scopeDevice!=null?scopeDevice.toString():"";}
     public RepeatPolicy repeat(){return runtime==null||runtime.repeatPolicy()==null?RepeatPolicy.EVERY_TRIGGER_WHILE_TRUE:runtime.repeatPolicy();}
     /** Copy preserving every field, so reconstruction sites cannot silently drop Phase 3 configuration. */
     public Rule with(boolean enabled,List<RuleCondition> conditions,RuleExecutionIdentity identity){
