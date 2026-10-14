@@ -318,4 +318,168 @@ describe('CreateRuleModal - capability-aware rule creation, no fabrication', () 
 
     await waitFor(() => expect(screen.getByTestId('create-rule-error')).toHaveTextContent('Conflict: rule was modified'));
   });
+  describe('Phase 3 triggers and timing', () => {
+    const open = () => fireEvent.click(screen.getByTestId('trigger-config-toggle'));
+    const submit = () => fireEvent.click(screen.getAllByText('Create Rule').find((el) => el.tagName === 'BUTTON')!);
+
+    it('keeps the advanced section collapsed and out of the way by default', () => {
+      render(<CreateRuleModal deviceId="dev-1" isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+      expect(screen.queryByTestId('trigger-list')).not.toBeInTheDocument();
+      expect(screen.getByTestId('trigger-config-toggle')).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('sends explicit trigger subscriptions with their filters and the repeat policy', async () => {
+      vi.mocked(ruleApi.createRule).mockResolvedValue({ ruleId: 'r', name: 'T', enabled: true, priority: 1, conditions: [], actions: [], metadata: {} });
+      render(<CreateRuleModal deviceId="dev-1" isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+      fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'Triggered' } });
+      fireEvent.change(screen.getByTestId('condition-numeric-value-input'), { target: { value: '800' } });
+      open();
+      fireEvent.click(screen.getByTestId('trigger-CONNECTIVITY_CHANGED'));
+      fireEvent.change(screen.getByTestId('filter-CONNECTIVITY_CHANGED'), { target: { value: 'OFFLINE' } });
+      fireEvent.click(screen.getByTestId('trigger-MANUAL'));
+      fireEvent.change(screen.getByTestId('repeat-policy'), { target: { value: 'EDGE_TRUE' } });
+      submit();
+      await waitFor(() => expect(ruleApi.createRule).toHaveBeenCalledWith(expect.objectContaining({
+        triggers: [{ type: 'CONNECTIVITY_CHANGED', filters: { connectivity: 'OFFLINE' } }, { type: 'MANUAL' }],
+        repeatPolicy: 'EDGE_TRUE',
+      })));
+    });
+
+    it('a temporal condition attaches to the capability condition and subscribes to TEMPORAL_DUE only', async () => {
+      vi.mocked(ruleApi.createRule).mockResolvedValue({ ruleId: 'r', name: 'T', enabled: true, priority: 1, conditions: [], actions: [], metadata: {} });
+      render(<CreateRuleModal deviceId="dev-1" isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+      fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'Sustained gas' } });
+      fireEvent.change(screen.getByTestId('condition-numeric-value-input'), { target: { value: '800' } });
+      fireEvent.change(screen.getByTestId('condition-operator-select'), { target: { value: 'GT' } });
+      open();
+      fireEvent.click(screen.getByTestId('temporal-enabled'));
+      fireEvent.change(screen.getByTestId('temporal-duration'), { target: { value: '120' } });
+      submit();
+      await waitFor(() => expect(ruleApi.createRule).toHaveBeenCalledWith(expect.objectContaining({
+        triggers: [{ type: 'TEMPORAL_DUE' }],
+        conditions: [
+          { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+          { field: 'VALUE', operator: 'GT', expectedValue: '800', capabilityType: 'GAS', conditionId: 'c1', temporal: { operator: 'FOR_DURATION', durationSeconds: 120 } },
+        ],
+      })));
+    });
+
+    it('blocks an incomplete temporal configuration without calling the API', async () => {
+      render(<CreateRuleModal deviceId="dev-1" isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+      fireEvent.change(screen.getByPlaceholderText('e.g. High Temperature Alert'), { target: { value: 'Incomplete' } });
+      fireEvent.change(screen.getByTestId('condition-numeric-value-input'), { target: { value: '800' } });
+      open();
+      fireEvent.click(screen.getByTestId('temporal-enabled'));
+      submit();
+      await waitFor(() => expect(screen.getByTestId('create-rule-error')).toHaveTextContent('positive duration'));
+      expect(ruleApi.createRule).not.toHaveBeenCalled();
+    });
+
+    it('editing a rule with a temporal condition reloads it and the saved draft keeps it', async () => {
+      vi.mocked(ruleApi.saveDraft).mockResolvedValue({ ruleId: 'r1', name: 'Existing', enabled: true, priority: 1, conditions: [], actions: [], metadata: {} });
+      const existing: Rule = {
+        ruleId: 'r1', name: 'Existing', enabled: true, priority: 1, metadata: {}, rowRevision: 4,
+        triggers: [{ type: 'TEMPORAL_DUE' }],
+        conditions: [
+          { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+          { field: 'VALUE', operator: 'GT', expectedValue: '800', capabilityType: 'GAS', conditionId: 'c1', temporal: { operator: 'FOR_DURATION', durationSeconds: 90 } },
+        ],
+        actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'INFO' } }],
+      };
+      render(<CreateRuleModal deviceId="dev-1" editingRule={existing} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+      expect(screen.getByTestId('temporal-duration')).toHaveValue(90);
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalledWith('r1', expect.objectContaining({
+        triggers: [{ type: 'TEMPORAL_DUE' }],
+        conditions: expect.arrayContaining([expect.objectContaining({ conditionId: 'c1', temporal: { operator: 'FOR_DURATION', durationSeconds: 90 } })]),
+      }), 4));
+    });
+  });
+  describe('editing preserves every existing definition detail (no silent loss, no version churn)', () => {
+    const saved = () => vi.mocked(ruleApi.saveDraft).mockResolvedValue({ ruleId: 'r1', name: 'x', enabled: true, priority: 1, conditions: [], actions: [], metadata: {} });
+    const edit = (rule: Rule, props: { deviceId?: string } = { deviceId: 'dev-1' }) => render(<CreateRuleModal {...props} editingRule={rule} isOpen={true} onClose={vi.fn()} onCreated={vi.fn()} />);
+    const base = (conditions: Rule['conditions'], extra: Partial<Rule> = {}): Rule => ({
+      ruleId: 'r1', name: 'Existing', enabled: true, priority: 1, metadata: {}, rowRevision: 7, conditions,
+      actions: [{ actionType: 'CREATE_ALERT', parameters: { severity: 'INFO' } }], ...extra,
+    });
+    const body = () => vi.mocked(ruleApi.saveDraft).mock.calls[0][1];
+
+    it('a generic capabilityKey condition with an explicit unit, a stable id and a temporal spec round-trips unchanged and in order', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityKey: 'temperature', unit: 'CELSIUS', conditionId: 'c1', temporal: { operator: 'FOR_DURATION', durationSeconds: 90 } },
+        { field: 'SEVERITY', operator: 'EQ', expectedValue: 'INFO' },
+      ];
+      edit(base(conditions, { triggers: [{ type: 'TEMPORAL_DUE' }], repeatPolicy: 'EDGE_TRUE' }));
+      expect(screen.getByTestId('condition-capability-key')).toHaveTextContent('temperature (CELSIUS)');
+      expect(screen.getByTestId('preserved-conditions')).toHaveTextContent('1 existing condition');
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual(conditions);
+      expect(body().triggers).toEqual([{ type: 'TEMPORAL_DUE' }]);
+      expect(body().repeatPolicy).toBe('EDGE_TRUE');
+    });
+
+    it('a value edit changes only the value; the key, unit and position stay', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityKey: 'temperature', unit: 'CELSIUS' },
+      ];
+      edit(base(conditions));
+      fireEvent.change(screen.getByTestId('condition-text-value-input'), { target: { value: '35' } });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual([conditions[0], { ...conditions[1], expectedValue: '35' }]);
+    });
+
+    it('choosing a different capability drops the stale generic key and unit instead of mixing them', async () => {
+      saved();
+      edit(base([
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '30', capabilityType: 'GAS', capabilityKey: 'gas', unit: 'PPM' },
+      ]));
+      fireEvent.change(screen.getByTestId('condition-capability-select'), { target: { value: 'MOTION' } });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions[1]).toEqual({ field: 'VALUE', operator: 'EQ', expectedValue: 'true', capabilityType: 'MOTION' });
+    });
+
+    it('an OFFLINE_FOR rule with no capability row is saved without inventing a default condition', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'DEVICE_ID', operator: 'EQ', expectedValue: 'dev-1' },
+        { field: 'VALUE', operator: 'EQ', expectedValue: 'OFFLINE', conditionId: 'c1', temporal: { operator: 'OFFLINE_FOR', durationSeconds: 120 } },
+      ];
+      edit(base(conditions, { triggers: [{ type: 'TEMPORAL_DUE' }] }));
+      expect(screen.queryByTestId('condition-capability-select')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual(conditions);
+    });
+
+    it('a platform-wide rule with several or non-editable legacy conditions is kept exactly as stored', async () => {
+      saved();
+      const conditions: Rule['conditions'] = [
+        { field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' },
+        { field: 'SENSOR_TYPE', operator: 'EQ', expectedValue: 'TEMPERATURE' },
+        { field: 'VALUE', operator: 'GT', expectedValue: '40' },
+      ];
+      edit(base(conditions), {});
+      expect(screen.getByTestId('preserved-conditions')).toHaveTextContent('3 conditions');
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual(conditions);
+    });
+
+    it('a single editable legacy condition keeps its original behavior', async () => {
+      saved();
+      edit(base([{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }]), {});
+      expect(screen.queryByTestId('preserved-conditions')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(ruleApi.saveDraft).toHaveBeenCalled());
+      expect(body().conditions).toEqual([{ field: 'EVENT_TYPE', operator: 'EQ', expectedValue: 'TWIN_UPDATED' }]);
+    });
+  });
 });

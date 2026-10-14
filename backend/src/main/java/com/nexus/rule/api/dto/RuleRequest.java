@@ -17,12 +17,20 @@ public record RuleRequest(
     @NotEmpty List<RuleAction> actions,
     Map<String, String> metadata,
     @Positive Integer cooldownSeconds,
-    Long expectedRevision
+    Long expectedRevision,
+    List<com.nexus.rule.domain.TriggerSubscription> triggers,
+    com.nexus.rule.domain.RepeatPolicy repeatPolicy,
+    com.nexus.rule.domain.ScheduleSpec schedule
 ) {
     @com.fasterxml.jackson.annotation.JsonAnySetter
     public void rejectFutureConfiguration(String key,Object value) {
-        if(java.util.Set.of("triggers","trigger","scope","repeatPolicy","temporal","actionPolicy","approvalPolicy").contains(key))
-            throw new IllegalArgumentException("Unsupported foundation configuration: "+key);
+        if(java.util.Set.of("trigger","scope","temporal","actionPolicy","approvalPolicy").contains(key))
+            throw new IllegalArgumentException("Unsupported configuration: "+key);
+    }
+    public RuleRequest(String name,boolean enabled,int priority,List<RuleCondition> conditions,List<RuleAction> actions,Map<String,String> metadata,Integer cooldown,Long expectedRevision){this(name,enabled,priority,conditions,actions,metadata,cooldown,expectedRevision,null,null,null);}
+    /** Null for a request that configures nothing beyond the legacy adapter. */
+    public com.nexus.rule.domain.RuleRuntime runtime(){
+        return triggers==null&&repeatPolicy==null&&schedule==null?null:new com.nexus.rule.domain.RuleRuntime(triggers,repeatPolicy,schedule);
     }
     public RuleRequest(String name,boolean enabled,int priority,List<RuleCondition> conditions,List<RuleAction> actions,Map<String,String> metadata,Integer cooldown){this(name,enabled,priority,conditions,actions,metadata,cooldown,null);}
     public RuleRequest(String name, boolean enabled, int priority,

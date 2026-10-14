@@ -12,6 +12,41 @@ export type RuleOperator = 'EQ' | 'NE' | 'GT' | 'LT' | 'GTE' | 'LTE';
  * it's authoritative: the condition is evaluated against current
  * DigitalTwinRegistry state for (the rule's device, capabilityType).
  */
+/** Phase 3 trigger families (contract C12). Imported rules carry no explicit subscription and use the legacy DomainEvent adapter. */
+export type TriggerType =
+  | 'LEGACY_DOMAIN_EVENT' | 'ACCEPTED_TELEMETRY' | 'TWIN_STATE_CHANGED' | 'CONNECTIVITY_CHANGED'
+  | 'COMMAND_PUBLICATION_FAILED' | 'COMMAND_ACK_REJECTED' | 'COMMAND_ACK_TIMED_OUT'
+  | 'VERIFICATION_CHANGED' | 'VERIFICATION_TIMED_OUT' | 'MANUAL' | 'SCHEDULE' | 'TEMPORAL_DUE' | 'RULE_MATCHED';
+
+export interface TriggerSubscription {
+  type: TriggerType;
+  /** Supported keys: capabilityKey, connectivity (ONLINE|OFFLINE), status (CONVERGED|DIVERGED|TIMED_OUT), parentRuleId. */
+  filters?: Record<string, string>;
+}
+
+export type RepeatPolicy = 'EVERY_TRIGGER_WHILE_TRUE' | 'EDGE_TRUE';
+
+export interface ScheduleSpec {
+  kind: 'ONE_SHOT' | 'FIXED_INTERVAL';
+  /** UTC instant (ISO-8601) for ONE_SHOT. */
+  at?: string | null;
+  intervalSeconds?: number | null;
+  /** UTC instant (ISO-8601) anchoring FIXED_INTERVAL slots; defaults to activation time. */
+  startsAt?: string | null;
+}
+
+export type TemporalOperator = 'FOR_DURATION' | 'COUNT_WITHIN' | 'ABSENCE_FOR' | 'OFFLINE_FOR' | 'TREND';
+
+export interface TemporalSpec {
+  operator: TemporalOperator;
+  durationSeconds?: number | null;
+  windowSeconds?: number | null;
+  count?: number | null;
+  direction?: 'RISING' | 'FALLING' | null;
+  minChange?: number | null;
+  countMode?: 'SAMPLES' | 'EDGES' | null;
+}
+
 export interface RuleCondition {
   field: RuleField;
   operator: RuleOperator;
@@ -19,6 +54,9 @@ export interface RuleCondition {
   capabilityType?: CapabilityType;
   capabilityKey?: string;
   unit?: string;
+  /** Stable identity inside an immutable version; required for temporal conditions. */
+  conditionId?: string;
+  temporal?: TemporalSpec;
 }
 
 export interface RuleAction {
@@ -45,7 +83,22 @@ export interface Rule {
   reconciliation?: string;
   originalEnabled?: boolean | null;
   diagnostics?: { code: string; message: string; path: string }[];
+  /** Explicit trigger subscriptions; absent on imported rules (legacy DomainEvent adapter only). */
+  triggers?: TriggerSubscription[];
+  repeatPolicy?: RepeatPolicy;
+  schedule?: ScheduleSpec;
 }
+
+/** Persisted runtime facts for one rule: timers, temporal state/evidence, arbitration outcomes and matches. */
+export interface RuleRuntimeSnapshot {
+  timers: { timer_id: string; kind: string; due_at: string; status: string; invalidation_reason?: string | null; skipped_slots?: number; condition_id?: string | null }[];
+  temporalState: { condition_id: string; operator: string; phase: string; due_at?: string | null; member_count: number; sequence: number; reset_reason?: string | null; generation: number }[];
+  temporalEvidence: { seq: number; event: string; conditionId: string; occurredAt: string; details: Record<string, unknown> }[];
+  candidates: { candidate_id: string; action_type: string; target_key?: string | null; priority: number; disposition: string; reason: string }[];
+  matches: { match_id: string; trigger_type?: string | null; event_id?: string | null; matched_at: string }[];
+}
+
+export interface ManualExecutionResult { requestId: string; factId: string; ruleVersionId: string; note: string }
 
 export const ruleApi = {
   getRules: (deviceId?: string) =>
@@ -61,4 +114,8 @@ export const ruleApi = {
   createDraft: (definition: Omit<Rule, 'ruleId'>) => apiClient.post<Rule>('/rules/drafts', { definition, expectedRevision: 0 }),
   transition: (id: string, operation: 'validate' | 'activate' | 'pause' | 'resume' | 'archive', expectedRevision: number) =>
     apiClient.post<Rule | null>(`/rules/${id}/lifecycle/${operation}`, { expectedRevision }),
+  getRuntime: (id: string) => apiClient.get<RuleRuntimeSnapshot>(`/rules/${id}/runtime`),
+  /** Persists a server-issued MANUAL request addressed to the active version; evaluation is a separate persisted fact. */
+  executeManually: (id: string, expectedVersionId?: string | null) =>
+    apiClient.post<ManualExecutionResult>(`/rules/${id}/manual-executions`, expectedVersionId ? { expectedVersionId } : {}),
 };

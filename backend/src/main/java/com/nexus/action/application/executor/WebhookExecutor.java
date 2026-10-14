@@ -28,7 +28,7 @@ public class WebhookExecutor implements ActionExecutor {
         // Stub implementation
         Object url = request.parameters().get("url");
         log.info("Executing WEBHOOK to URL: {}. Event: {}", 
-                url, context.triggeringEvent().eventType());
+                url, context.triggeringEvent() == null ? "TYPED_TRIGGER" : context.triggeringEvent().eventType());
         
         return new ActionExecutionResult(
                 UUID.randomUUID(),

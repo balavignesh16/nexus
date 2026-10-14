@@ -34,14 +34,14 @@ public class RuleLifecycleController {
     public RuleResponse createDraft(@RequestBody Draft request,@RequestHeader(value="If-Match",required=false)String header) {
         long token=token(request.expectedRevision(),header,true);
         if(token!=0)throw new RuleMutationException(header==null?409:412,"New draft requires initial revision 0");
-        var d=request.definition();return RuleResponse.from(lifecycle.createDraft(new Rule(UUID.randomUUID(),d.name(),false,d.priority(),d.conditions(),d.actions(),d.metadata(),d.cooldownSeconds())));
+        var d=request.definition();return RuleResponse.from(lifecycle.createDraft(new Rule(UUID.randomUUID(),d.name(),false,d.priority(),d.conditions(),d.actions(),d.metadata(),d.cooldownSeconds(),null,d.runtime())));
     }
     @GetMapping("/{id}/versions")
     public List<Map<String,Object>> versions(@PathVariable UUID id) { return versions.history(id); }
     @PostMapping("/{id}/draft")
     public RuleResponse draft(@PathVariable UUID id,@RequestBody Draft request,@RequestHeader(value="If-Match",required=false)String header) {
         var d=request.definition();
-        try{return RuleResponse.from(lifecycle.draft(new Rule(id,d.name(),false,d.priority(),d.conditions(),d.actions(),d.metadata(),d.cooldownSeconds()),checked(id,request.expectedRevision(),header)));}
+        try{return RuleResponse.from(lifecycle.draft(new Rule(id,d.name(),false,d.priority(),d.conditions(),d.actions(),d.metadata(),d.cooldownSeconds(),null,d.runtime()),checked(id,request.expectedRevision(),header)));}
         catch(RuleMutationException conflict){if(header!=null&&conflict.getStatusCode().value()==409&&conflict.getReason().startsWith("Stale rule revision"))throw new RuleMutationException(412,"If-Match precondition failed");throw conflict;}
     }
     @PostMapping("/{id}/lifecycle/{operation}")

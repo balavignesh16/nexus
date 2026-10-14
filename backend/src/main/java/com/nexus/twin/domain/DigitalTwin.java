@@ -100,6 +100,25 @@ public class DigitalTwin {
       switch(valueType){case NUMBER->{numericValue=new BigDecimal(typedValue.toString());latestValue=numericValue.doubleValue();}case BOOLEAN->booleanValue=(Boolean)typedValue;case STRING,ENUM->stringValue=(String)typedValue;case OBJECT->objectValue=(Map<String,Object>)typedValue;}
     }
 
+    /**
+     * Detached copy for frozen evaluation: not managed by any persistence context, with nested
+     * metadata/object values replaced by the caller's deep-immutable copies so a later mutation of
+     * the source row or registry object cannot change a captured decision.
+     */
+    @SuppressWarnings("unchecked")
+    public DigitalTwin detachedCopy(java.util.function.UnaryOperator<Object> deepFreeze) {
+        DigitalTwin copy = new DigitalTwin();
+        copy.deviceId = deviceId; copy.latestTimestamp = latestTimestamp; copy.latestSensorType = latestSensorType;
+        copy.stateKey = stateKey; copy.legacyCapabilityType = legacyCapabilityType; copy.lastWireIdentifier = lastWireIdentifier;
+        copy.latestValue = latestValue; copy.latestUnit = latestUnit; copy.lastSeen = lastSeen; copy.receivedAt = receivedAt;
+        copy.metadata = metadata == null ? null : (Map<String, Object>) deepFreeze.apply(metadata);
+        copy.capabilityDefinitionId = capabilityDefinitionId; copy.bindingId = bindingId; copy.capabilityKey = capabilityKey;
+        copy.valueType = valueType; copy.numericValue = numericValue; copy.booleanValue = booleanValue; copy.stringValue = stringValue;
+        copy.objectValue = objectValue == null ? null : (Map<String, Object>) deepFreeze.apply(objectValue);
+        copy.resolutionSource = resolutionSource;
+        return copy;
+    }
+
     private static String canonicalLegacy(String sensorType) {
         String key=sensorType.toUpperCase(java.util.Locale.ROOT);
         return key.endsWith("_SENSOR")?key.substring(0,key.length()-7):key;

@@ -406,7 +406,7 @@ class RuleCommandAuthorizationIntegrationTest {
             }
             var pinned=versions.list(true).stream().filter(v->v.ruleId().equals(f.rule().ruleId())).findFirst().orElseThrow().definition();
             UUID source=UUID.randomUUID();
-            org.mockito.Mockito.doAnswer(invocation->{var result=invocation.callRealMethod();if(((Rule)invocation.getArgument(0)).ruleId().equals(pinned.ruleId())){captured.countDown();assertTrue(release.await(15,java.util.concurrent.TimeUnit.SECONDS));}return result;}).when(evaluator).evaluate(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+            org.mockito.Mockito.doAnswer(invocation->{var result=invocation.callRealMethod();if(((Rule)invocation.getArgument(0)).ruleId().equals(pinned.ruleId())){captured.countDown();assertTrue(release.await(15,java.util.concurrent.TimeUnit.SECONDS));}return result;}).when(evaluator).evaluate(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.<com.nexus.rule.snapshot.RuleEvaluationContext>any());
             var pool=java.util.concurrent.Executors.newSingleThreadExecutor();
             try{
                 var task=pool.submit(()->matcher.onEvent(new DomainEvent(source,EventType.TWIN_UPDATED,f.device(),Instant.now(),"race",Map.of("value",1),"INFO","pipeline-"+change)));

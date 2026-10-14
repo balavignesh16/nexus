@@ -39,9 +39,10 @@ public class RuleMatchExplanationContextBuilder {
         RuleMatchEntity match = ruleMatchRepository.findById(matchId)
                 .orElseThrow(() -> new ResourceNotFoundException("RuleMatch", matchId.toString()));
 
-        DomainEvent event = domainEventRepository.findById(match.getEventId()).orElse(null);
+        // Typed matches (manual, schedule, temporal, telemetry facts, chains) have no DomainEvent; never invent one.
+        DomainEvent event = match.getEventId() == null ? null : domainEventRepository.findById(match.getEventId()).orElse(null);
 
-        UUID deviceId = event != null ? event.deviceId() : null;
+        UUID deviceId = event != null ? event.deviceId() : triggerDevice(match.getEvaluationEvidence());
         DomainEventSummary domainEventSummary = event != null
                 ? new DomainEventSummary(
                         event.eventId(),
@@ -69,6 +70,19 @@ public class RuleMatchExplanationContextBuilder {
                 domainEventSummary,
                 actions
         );
+    }
+
+    /** The committed trigger device recorded in the frozen-context evidence, when the match has one. */
+    @SuppressWarnings("unchecked")
+    private static UUID triggerDevice(java.util.Map<String, Object> evidence) {
+        try {
+            var frozen = evidence == null ? null : (java.util.Map<String, Object>) evidence.get("frozenContext");
+            var trigger = frozen == null ? null : (java.util.Map<String, Object>) frozen.get("trigger");
+            Object device = trigger == null ? null : trigger.get("deviceId");
+            return device == null ? null : UUID.fromString(device.toString());
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
     }
 
     private ActionSummary toActionSummary(ActionHistoryRecord record) {

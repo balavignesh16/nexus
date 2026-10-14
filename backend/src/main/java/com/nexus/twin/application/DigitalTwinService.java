@@ -40,6 +40,13 @@ public class DigitalTwinService {
     private Duration maximumFutureSkew=Duration.ofMinutes(5);
     private final ConcurrentHashMap<UUID,Object> deviceLocks=new ConcurrentHashMap<>();
 
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    @Autowired
+    void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
+
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entities;
+
     public record Mutation(DigitalTwin previous, DigitalTwin current, String correlationId,
             long stageStart, boolean updated, boolean futureDated) {}
 
@@ -101,8 +108,14 @@ public class DigitalTwinService {
                     request.capabilityKey(),resolved.definition().getValueType(),resolved.resolutionSource());
         DigitalTwin previous=existing.orElse(null);
         if(repository!=null) {
+            // saveAndFlush merges `next` onto the managed row. Without detaching it first, `previous` would silently
+            // become the new state and every update after creation would look like "no semantic change".
+            if(previous!=null&&entities!=null)entities.detach(previous);
             repository.saveAndFlush(next);
-            if(meaningfullyChanged(previous,next)) transitions.save(TwinStateTransition.reported(previous,next,correlationId,now));
+            if(meaningfullyChanged(previous,next)) {
+                var transition=transitions.save(TwinStateTransition.reported(previous,next,correlationId,now));
+                if(ruleFacts!=null && transition!=null) ruleFacts.twinStateChanged(transition,next);
+            }
         } else registry.put(next);
         return new Mutation(previous,next,correlationId,stageStart,true,false);
         }

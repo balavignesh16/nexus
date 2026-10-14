@@ -17,10 +17,15 @@ public record RuleCondition(
     String expectedValue,
     CapabilityType capabilityType,
     String capabilityKey,
-    String unit
+    String unit,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String conditionId,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) TemporalSpec temporal
 ) {
-    public RuleCondition(RuleField field, RuleOperator operator, String expectedValue) {
-        this(field, operator, expectedValue, null, null, null);
+    public RuleCondition(RuleField field, RuleOperator operator, String expectedValue, CapabilityType capabilityType, String capabilityKey, String unit) {
+        this(field, operator, expectedValue, capabilityType, capabilityKey, unit, null, null);
     }
-    public RuleCondition(RuleField field,RuleOperator operator,String expectedValue,CapabilityType capabilityType){this(field,operator,expectedValue,capabilityType,null,null);}
+    public RuleCondition(RuleField field, RuleOperator operator, String expectedValue) {
+        this(field, operator, expectedValue, null, null, null, null, null);
+    }
+    public RuleCondition(RuleField field,RuleOperator operator,String expectedValue,CapabilityType capabilityType){this(field,operator,expectedValue,capabilityType,null,null,null,null);}
 }

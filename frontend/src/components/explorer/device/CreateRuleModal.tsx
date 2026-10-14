@@ -11,6 +11,11 @@ import {
   isBooleanCapability,
 } from '../../../api/deviceApi';
 import { useActiveDevices } from '../../../hooks/queries';
+import {
+  applyTemporal, buildTriggerFields, emptyTriggerConfig, triggerConfigFromRule, validateTriggerConfig,
+  type TriggerConfig,
+} from './ruleTriggerConfig';
+import { RuleTriggerConfigSection } from './RuleTriggerConfigSection';
 
 interface CreateRuleModalProps {
   /** Optional: when launched from a device's Rules tab, pre-selects and
@@ -38,7 +43,14 @@ interface ConditionRow {
   capabilityType: CapabilityType | '';
   operator: RuleOperator;
   value: string; // 'true'/'false' for boolean capabilities, numeric text otherwise
+  /** Carried from an existing rule so editing never drops it: generic capability reference, explicit unit, original position. */
+  capabilityKey?: string;
+  unit?: string;
+  origin?: number;
 }
+
+/** A condition of an existing rule the form cannot edit (payload, severity, ...). It is preserved verbatim and in place. */
+interface PreservedCondition { condition: RuleCondition; origin: number }
 
 function readCapabilitiesOf(device: Device | undefined): DeviceCapability[] {
   if (!device) return [];
@@ -77,9 +89,14 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
   const [priority, setPriority] = useState(1);
   const [enabled, setEnabled] = useState(true);
   const [cooldownSeconds, setCooldownSeconds] = useState('');
+  const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(emptyTriggerConfig());
 
   const [triggerDeviceId, setTriggerDeviceId] = useState(deviceId ?? '');
   const [conditions, setConditions] = useState<ConditionRow[]>([]);
+  const [preserved, setPreserved] = useState<PreservedCondition[]>([]);
+  const [deviceOrigin, setDeviceOrigin] = useState<number | undefined>();
+  // Platform-wide rules whose conditions the single legacy field cannot represent are kept exactly as stored.
+  const [legacyLocked, setLegacyLocked] = useState(false);
 
   // Legacy fallback (no trigger device selected): the original generic
   // single-condition builder, unchanged.
@@ -117,7 +134,7 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
 
   // Seed one condition row once the trigger device's capabilities are known.
   useEffect(() => {
-    if (triggerDeviceId && readCapabilities.length > 0 && conditions.length === 0) {
+    if (triggerDeviceId && readCapabilities.length > 0 && conditions.length === 0 && !editingRule) {
       setConditions([newConditionRow(readCapabilities[0].capabilityType)]);
     }
     if (!triggerDeviceId) {
@@ -163,27 +180,44 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
     setPriority(editingRule.priority);
     setEnabled(editingRule.enabled);
     setCooldownSeconds(editingRule.cooldownSeconds != null ? String(editingRule.cooldownSeconds) : '');
+    setTriggerConfig(triggerConfigFromRule(editingRule));
 
     const ruleConditions = editingRule.conditions ?? [];
-    const deviceCondition = ruleConditions.find((c) => c.field === 'DEVICE_ID');
-    const capabilityConditions = ruleConditions.filter((c) => c.capabilityType);
+    const deviceIndex = ruleConditions.findIndex((c) => c.field === 'DEVICE_ID');
+    const deviceCondition = deviceIndex >= 0 ? ruleConditions[deviceIndex] : undefined;
+    setPreserved([]);
+    setLegacyLocked(false);
+    setDeviceOrigin(deviceIndex >= 0 ? deviceIndex : undefined);
 
     if (deviceCondition) {
       setTriggerDeviceId(deviceCondition.expectedValue);
-      setConditions(capabilityConditions.map((c) => ({
-        id: Math.random().toString(36).slice(2),
-        capabilityType: c.capabilityType as CapabilityType,
-        operator: c.operator,
-        value: c.expectedValue,
-      })));
+      const rows: ConditionRow[] = [];
+      const kept: PreservedCondition[] = [];
+      ruleConditions.forEach((c, origin) => {
+        if (c === deviceCondition) return;
+        // A temporal condition is owned by the trigger section (it is re-attached from there); everything else the form cannot show is kept as is.
+        if (c.temporal && !c.capabilityType && !c.capabilityKey) return;
+        if (c.field === 'VALUE' && (c.capabilityType || c.capabilityKey)) {
+          rows.push({
+            id: Math.random().toString(36).slice(2), capabilityType: (c.capabilityType ?? '') as CapabilityType | '', operator: c.operator, value: c.expectedValue,
+            ...(c.capabilityKey ? { capabilityKey: c.capabilityKey } : {}), ...(c.unit ? { unit: c.unit } : {}), origin,
+          });
+        } else kept.push({ condition: c, origin });
+      });
+      setConditions(rows);
+      setPreserved(kept);
     } else {
       setTriggerDeviceId('');
       setConditions([]);
       const legacy = ruleConditions[0];
-      if (legacy) {
+      const representable = ruleConditions.length === 1 && legacy && (legacy.field === 'EVENT_TYPE' || legacy.field === 'SEVERITY') && !legacy.capabilityType && !legacy.capabilityKey;
+      if (representable) {
         setLegacyField(legacy.field === 'SEVERITY' ? 'SEVERITY' : 'EVENT_TYPE');
         setLegacyOperator(legacy.operator);
         setLegacyValue(legacy.expectedValue);
+      } else if (ruleConditions.length > 0) {
+        setLegacyLocked(true);
+        setPreserved(ruleConditions.map((condition, origin) => ({ condition, origin })));
       }
     }
 
@@ -217,8 +251,12 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
     setPriority(1);
     setEnabled(true);
     setCooldownSeconds('');
+    setTriggerConfig(emptyTriggerConfig());
     setTriggerDeviceId(deviceId ?? '');
     setConditions([]);
+    setPreserved([]);
+    setDeviceOrigin(undefined);
+    setLegacyLocked(false);
     setLegacyField('EVENT_TYPE');
     setLegacyOperator('EQ');
     setLegacyValue('');
@@ -258,25 +296,41 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
       if (patch.capabilityType && patch.capabilityType !== r.capabilityType) {
         next.operator = 'EQ';
         next.value = isBooleanCapability(patch.capabilityType) ? 'true' : '';
+        // A different capability invalidates the old generic reference and explicit unit.
+        delete next.capabilityKey;
+        delete next.unit;
       }
       return next;
     }));
   };
 
+  /** Merges form-built and preserved conditions back into their original positions (new ones last). */
+  const inOriginalOrder = (entries: { condition: RuleCondition; origin?: number }[]): RuleCondition[] =>
+    entries
+      .map((entry, index) => ({ ...entry, index }))
+      .sort((a, b) => (a.origin ?? Number.MAX_SAFE_INTEGER) - (b.origin ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)
+      .map((entry) => entry.condition);
+
   const buildConditions = (): RuleCondition[] => {
     if (!triggerDeviceId) {
+      if (legacyLocked) return inOriginalOrder(preserved);
       return [{ field: legacyField, operator: legacyOperator, expectedValue: legacyValue }];
     }
     const deviceCondition: RuleCondition = { field: 'DEVICE_ID', operator: 'EQ', expectedValue: triggerDeviceId };
-    const capabilityConditions: RuleCondition[] = conditions
-      .filter((c) => c.capabilityType)
+    const capabilityConditions = conditions
+      .filter((c) => c.capabilityType || c.capabilityKey)
       .map((c) => ({
-        field: 'VALUE',
-        operator: c.operator,
-        expectedValue: c.value,
-        capabilityType: c.capabilityType as CapabilityType,
+        origin: c.origin,
+        condition: {
+          field: 'VALUE',
+          operator: c.operator,
+          expectedValue: c.value,
+          ...(c.capabilityType ? { capabilityType: c.capabilityType as CapabilityType } : {}),
+          ...(c.capabilityKey ? { capabilityKey: c.capabilityKey } : {}),
+          ...(c.unit ? { unit: c.unit } : {}),
+        } as RuleCondition,
       }));
-    return [deviceCondition, ...capabilityConditions];
+    return inOriginalOrder([{ condition: deviceCondition, origin: deviceOrigin }, ...capabilityConditions, ...preserved]);
   };
 
   const buildActions = () => {
@@ -311,12 +365,19 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
       setError('Name is required.');
       return;
     }
-    if (triggerDeviceId && conditions.length === 0) {
+    const connectivityOnly = triggerConfig.temporal.enabled && triggerConfig.temporal.operator === 'OFFLINE_FOR';
+    if (triggerDeviceId && conditions.length === 0 && preserved.length === 0 && !connectivityOnly) {
       setError('Add at least one condition.');
       return;
     }
-    if (!triggerDeviceId && !legacyValue.trim()) {
+    if (!triggerDeviceId && !legacyLocked && !legacyValue.trim()) {
       setError('Condition value is required.');
+      return;
+    }
+
+    const triggerError = validateTriggerConfig(triggerConfig, Boolean(triggerDeviceId));
+    if (triggerError) {
+      setError(triggerError);
       return;
     }
 
@@ -332,10 +393,11 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
       name: name.trim(),
       enabled,
       priority,
-      conditions: buildConditions(),
+      conditions: applyTemporal(buildConditions(), triggerConfig),
       actions,
       metadata: {},
       cooldownSeconds: cooldownSeconds.trim() ? Number(cooldownSeconds) : null,
+      ...buildTriggerFields(triggerConfig),
     };
 
     setSubmitting(true);
@@ -439,10 +501,17 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
             </select>
           </div>
 
+          <RuleTriggerConfigSection config={triggerConfig} onChange={setTriggerConfig} hasDevice={Boolean(triggerDeviceId)} selectClass={selectClass} inputClass={inputClass} />
+
           {triggerDeviceId ? (
             <div>
               <span className="text-xs text-foundation-muted-fg mb-1 block">Conditions (all must match)</span>
-              {readCapabilities.length === 0 && (
+              {preserved.length > 0 && (
+                <p className="text-xs mb-2 text-foundation-muted-fg" data-testid="preserved-conditions">
+                  {preserved.length} existing condition{preserved.length === 1 ? '' : 's'} this form cannot edit will be kept unchanged.
+                </p>
+              )}
+              {readCapabilities.length === 0 && !editingRule && (
                 <p className="text-xs mb-2" style={{ color: 'var(--danger)' }}>
                   This device has no READ capabilities provisioned.
                 </p>
@@ -453,6 +522,9 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
                   const operators = boolKind ? BOOLEAN_OPERATORS : NUMERIC_OPERATORS;
                   return (
                     <div key={row.id} className="flex gap-2 items-center">
+                      {row.capabilityKey && !row.capabilityType ? (
+                        <span className={`${inputClass} flex items-center`} data-testid="condition-capability-key">{row.capabilityKey}{row.unit ? ` (${row.unit})` : ''}</span>
+                      ) : (
                       <select
                         value={row.capabilityType}
                         onChange={(e) => updateCondition(row.id, { capabilityType: e.target.value as CapabilityType })}
@@ -463,6 +535,7 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
                           <option key={c.id} value={c.capabilityType}>{c.capabilityType}</option>
                         ))}
                       </select>
+                      )}
                       <select
                         value={row.operator}
                         onChange={(e) => updateCondition(row.id, { operator: e.target.value as RuleOperator })}
@@ -471,7 +544,15 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
                       >
                         {operators.map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
-                      {boolKind ? (
+                      {row.capabilityKey && !row.capabilityType ? (
+                        <input
+                          type="text"
+                          value={row.value}
+                          onChange={(e) => updateCondition(row.id, { value: e.target.value })}
+                          className={`flex-1 ${inputClass}`}
+                          data-testid="condition-text-value-input"
+                        />
+                      ) : boolKind ? (
                         <select
                           value={row.value}
                           onChange={(e) => updateCondition(row.id, { value: e.target.value })}
@@ -514,6 +595,11 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
               </button>
             </div>
           ) : (
+            legacyLocked ? (
+              <p className="text-xs text-foundation-muted-fg" data-testid="preserved-conditions">
+                This rule's {preserved.length} condition{preserved.length === 1 ? '' : 's'} cannot be shown in this form and will be kept unchanged.
+              </p>
+            ) : (
             <div>
               <span className="text-xs text-foundation-muted-fg mb-1 block">Trigger Condition</span>
               <div className="flex gap-2">
@@ -540,6 +626,7 @@ export function CreateRuleModal({ deviceId, editingRule, isOpen, onClose, onCrea
                 />
               </div>
             </div>
+            )
           )}
 
           <div>

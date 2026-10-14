@@ -1,7 +1,9 @@
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Pencil } from 'lucide-react';
-import type { Rule, RuleAction, RuleCondition } from '../../../api/ruleApi';
+import { X, Pencil, Play } from 'lucide-react';
+import { ruleApi, type Rule, type RuleAction, type RuleCondition, type RuleRuntimeSnapshot } from '../../../api/ruleApi';
 import { useActiveDevices } from '../../../hooks/queries';
+import { describeTemporal } from './ruleTriggerConfig';
 
 interface RuleDetailModalProps {
   rule: (Rule & { description?: string }) | null;
@@ -23,6 +25,8 @@ function describeCondition(c: RuleCondition, deviceName: (id: string) => string)
   if (c.field === 'DEVICE_ID') {
     return `Device is ${deviceName(c.expectedValue)}`;
   }
+  const temporal = describeTemporal(c);
+  if (temporal) return `${c.temporal?.operator}: ${temporal}`;
   const operatorWord = OPERATOR_WORDS[c.operator] ?? c.operator;
   if (c.capabilityType) {
     return `${operatorWord} ${c.expectedValue}`;
@@ -76,8 +80,39 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
  */
 export function RuleDetailModal({ rule, isOpen, onClose, onEdit }: RuleDetailModalProps) {
   const { data: devices = [] } = useActiveDevices();
+  const [runtime, setRuntime] = useState<RuleRuntimeSnapshot | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [manualNote, setManualNote] = useState<string | null>(null);
+  const ruleId = rule?.ruleId;
+
+  const loadRuntime = useCallback(async () => {
+    if (!ruleId) return;
+    try {
+      setRuntime(await ruleApi.getRuntime(ruleId));
+      setRuntimeError(null);
+    } catch {
+      setRuntime(null);
+      setRuntimeError('Runtime evidence is unavailable.');
+    }
+  }, [ruleId]);
+
+  useEffect(() => {
+    if (isOpen && ruleId) void loadRuntime();
+  }, [isOpen, ruleId, loadRuntime]);
 
   if (!isOpen || !rule) return null;
+
+  const manualEnabled = rule.lifecycle === 'ACTIVE' && (rule.triggers ?? []).some((t) => t.type === 'MANUAL');
+  const executeManually = async () => {
+    setManualNote(null);
+    try {
+      const result = await ruleApi.executeManually(rule.ruleId, rule.activeVersionId);
+      setManualNote(`Request ${result.requestId} was persisted. Evaluation, match and any action authorization are separate recorded facts.`);
+      void loadRuntime();
+    } catch (err) {
+      setManualNote(err instanceof Error ? err.message : 'Manual execution was rejected.');
+    }
+  };
 
   const deviceName = (id: string): string => devices.find((d: any) => d.id === id)?.name ?? id;
 
@@ -125,6 +160,31 @@ export function RuleDetailModal({ rule, isOpen, onClose, onEdit }: RuleDetailMod
             <span>{rule.cooldownSeconds ? `Cooldown ${rule.cooldownSeconds}s` : 'No cooldown'}</span>
           </div>
 
+          <div data-testid="rule-triggers">
+            <span className="text-[10px] font-bold text-foundation-muted-fg uppercase tracking-wider mb-1.5 block">Triggers</span>
+            {(rule.triggers ?? []).length === 0 ? (
+              <p className="text-xs text-foundation-tertiary-fg">Device events (original behavior; no explicit subscription).</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(rule.triggers ?? []).map((t, idx) => (
+                  <span key={idx} className="rounded px-2 py-0.5 text-[11px]" style={{ backgroundColor: 'var(--foundation-bg)', border: '1px solid var(--foundation-border)' }}>
+                    {t.type}{t.filters && Object.keys(t.filters).length > 0 ? ` (${Object.entries(t.filters).map(([k, v]) => `${k}=${v}`).join(', ')})` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-foundation-muted-fg mt-1">
+              Repeat: {rule.repeatPolicy === 'EDGE_TRUE' ? 'only on the transition into true' : 'every qualifying trigger while true'}
+              {rule.schedule ? ` · Schedule: ${rule.schedule.kind === 'ONE_SHOT' ? `once at ${rule.schedule.at}` : `every ${rule.schedule.intervalSeconds}s`}` : ''}
+            </p>
+            {manualEnabled && (
+              <button onClick={executeManually} data-testid="manual-execute" className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-[var(--radius-pill)] border border-foundation-border">
+                <Play size={12} /> Run once now
+              </button>
+            )}
+            {manualNote && <p className="text-xs mt-1" data-testid="manual-note">{manualNote}</p>}
+          </div>
+
           <div>
             <span className="text-[10px] font-bold text-foundation-muted-fg uppercase tracking-wider mb-1.5 block">
               Conditions ({conditions.length}, all must match)
@@ -165,6 +225,39 @@ export function RuleDetailModal({ rule, isOpen, onClose, onEdit }: RuleDetailMod
                     {describeAction(a, deviceName)}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div data-testid="rule-runtime">
+            <span className="text-[10px] font-bold text-foundation-muted-fg uppercase tracking-wider mb-1.5 block">Runtime evidence</span>
+            {runtimeError && <p className="text-xs text-foundation-tertiary-fg">{runtimeError}</p>}
+            {runtime && (
+              <div className="flex flex-col gap-2 text-xs">
+                {runtime.temporalState.map((state, idx) => (
+                  <div key={`state-${idx}`} data-testid="temporal-state">
+                    {state.operator} · {state.phase}{state.due_at ? ` · due ${state.due_at}` : ''} · {state.member_count} member(s) · occurrence {state.sequence}
+                    {state.reset_reason ? ` · last reset: ${state.reset_reason}` : ''}
+                  </div>
+                ))}
+                {runtime.timers.filter((timer) => timer.status !== 'PENDING' && timer.status !== 'CONSUMED').map((timer) => (
+                  <div key={timer.timer_id} data-testid="stale-timer" style={{ color: 'var(--warning, #a8630a)' }}>
+                    Stale {timer.kind} occurrence due {timer.due_at}: {timer.status}{timer.invalidation_reason ? ` (${timer.invalidation_reason})` : ''} — no decision was made.
+                  </div>
+                ))}
+                {runtime.temporalEvidence.slice(0, 8).map((e) => (
+                  <div key={e.seq} data-testid="temporal-evidence" className="text-foundation-muted-fg">
+                    {e.occurredAt} · {e.event}{typeof e.details.reason === 'string' ? ` · ${e.details.reason}` : ''}
+                  </div>
+                ))}
+                {runtime.candidates.slice(0, 8).map((c) => (
+                  <div key={c.candidate_id} data-testid="candidate" style={c.disposition.startsWith('SUPPRESSED') ? { color: 'var(--warning, #a8630a)' } : undefined}>
+                    {c.action_type} · {c.disposition} · {c.reason}
+                  </div>
+                ))}
+                {runtime.temporalState.length + runtime.temporalEvidence.length + runtime.candidates.length + runtime.timers.length === 0 && (
+                  <p className="text-foundation-tertiary-fg">No timers, temporal state or typed-trigger decisions recorded yet.</p>
+                )}
               </div>
             )}
           </div>

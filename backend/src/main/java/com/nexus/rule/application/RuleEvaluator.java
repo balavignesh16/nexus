@@ -12,6 +12,7 @@ import com.nexus.twin.domain.DigitalTwinRegistry;
 import com.nexus.twin.application.TwinStateQualityEvaluator;
 import com.nexus.twin.domain.TwinStateQualityEvidence;
 import com.nexus.twin.domain.TwinStateQuality;
+import com.nexus.rule.snapshot.*;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -55,16 +56,99 @@ public class RuleEvaluator {
         this.qualityEvaluator=qualityEvaluator;
     }
 
+    /**
+     * Compatibility adapter: reads live registry/contract/cache state. Production routing uses the
+     * frozen-context overload; this exists for direct fixtures and must not be called by RuleMatcher.
+     */
     public RuleEvaluationResult evaluate(Rule rule, DomainEvent event) {
+        return evaluate(rule, event, event==null?null:event.deviceId(), new LiveSource());
+    }
+
+    /** Evaluates exclusively against inputs captured by one REPEATABLE READ snapshot. */
+    public RuleEvaluationResult evaluate(Rule rule, DomainEvent event, RuleEvaluationContext context) {
+        var result = evaluate(rule, event, context.trigger().deviceId(), new FrozenSource(context));
+        return new RuleEvaluationResult(result.matched(), result.rule(), result.event(), result.message(), result.evidence(), context);
+    }
+
+    private interface Source {
+        boolean hasAuthority();
+        CapturedCapability capability(UUID device, String identifier);
+        List<DigitalTwin> twins(UUID device);
+        Optional<DigitalTwin> byStateKey(UUID device, String stateKey);
+        Optional<DigitalTwin> byWire(UUID device, String sensorType);
+        TwinStateQualityEvidence quality(DigitalTwin twin);
+        /** Evidence for a temporal condition; the live adapter has no durable runtime and never satisfies one. */
+        ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope);
+    }
+
+    private final class LiveSource implements Source {
+        public boolean hasAuthority() { return references != null; }
+        public CapturedCapability capability(UUID device, String identifier) {
+            return CapturedCapability.of(references.resolveInstalled(device, identifier, com.nexus.device.capability.CapabilityDirection.READ));
+        }
+        public List<DigitalTwin> twins(UUID device) { return digitalTwinRegistry.getAllForDevice(device); }
+        public Optional<DigitalTwin> byStateKey(UUID device, String key) { return digitalTwinRegistry.getByStateKey(device, key); }
+        public Optional<DigitalTwin> byWire(UUID device, String type) { return digitalTwinRegistry.get(device, type); }
+        public TwinStateQualityEvidence quality(DigitalTwin twin) { return qualityEvaluator == null ? null : qualityEvaluator.evaluate(twin); }
+        public ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope) {
+            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), "TEMPORAL_RUNTIME_UNAVAILABLE", false);
+        }
+    }
+
+    private final class FrozenSource implements Source {
+        private final RuleEvaluationContext ctx;
+        FrozenSource(RuleEvaluationContext ctx) { this.ctx = ctx; }
+        public boolean hasAuthority() { return true; }
+        public CapturedCapability capability(UUID device, String identifier) {
+            String key = RuleEvaluationSnapshot.capabilityKey(device, identifier, com.nexus.device.capability.CapabilityDirection.READ.name());
+            CapturedCapability found = ctx.snapshot().capabilities().get(key);
+            if (found == null) throw new IllegalStateException("Capability was not resolvable in the frozen snapshot");
+            return found;
+        }
+        public List<DigitalTwin> twins(UUID device) { return ctx.snapshot().twins().getOrDefault(device, List.of()); }
+        public Optional<DigitalTwin> byStateKey(UUID device, String key) { return twins(device).stream().filter(t -> key.equals(t.stateKey())).findFirst(); }
+        public Optional<DigitalTwin> byWire(UUID device, String type) {
+            return twins(device).stream().filter(t -> type.equals(t.latestSensorType())
+                || type.equals(t.lastWireIdentifier()) || type.equals(t.capabilityKey())).findFirst();
+        }
+        public TwinStateQualityEvidence quality(DigitalTwin twin) {
+            if (qualityEvaluator == null) return null;
+            var inputs = ctx.snapshot().qualityInputs().get(RuleEvaluationSnapshot.twinKey(twin));
+            if (inputs == null) throw new IllegalStateException("Twin was not captured with quality inputs");
+            return qualityEvaluator.evaluate(twin, ctx.evaluationTime(), inputs);
+        }
+        public ConditionEvidence temporal(Rule rule, RuleCondition condition, UUID scope) {
+            var identity = rule.executionIdentity();
+            var state = identity == null || scope == null ? null
+                : ctx.snapshot().temporal().get(RuleEvaluationSnapshot.temporalKey(identity.ruleVersionId(), condition.conditionId(), scope));
+            var attributes = ctx.trigger().attributes();
+            boolean addressed = ctx.trigger().type() == com.nexus.rule.domain.TriggerType.TEMPORAL_DUE
+                && String.valueOf(condition.conditionId()).equals(String.valueOf(attributes.get("conditionId")))
+                && state != null && attributes.get("sequence") instanceof Number sequence && sequence.longValue() == state.sequence();
+            boolean met = addressed && "SATISFIED".equals(state.phase()) && state.generation() == identity.executionEpoch();
+            var actual = new java.util.LinkedHashMap<String, Object>();
+            actual.put("operator", condition.temporal().operator().name());
+            if (state == null) actual.put("runtime", "ABSENT");
+            else {
+                actual.put("phase", state.phase()); actual.put("sequence", state.sequence()); actual.put("generation", state.generation());
+                actual.put("armedAt", String.valueOf(state.armedAt())); actual.put("dueAt", String.valueOf(state.dueAt()));
+                actual.put("members", state.members().size()); actual.put("resetReason", state.resetReason());
+                if (!addressed) actual.put("stale", "TRIGGER_DOES_NOT_ADDRESS_CURRENT_OCCURRENCE");
+            }
+            return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), FrozenValues.freeze(actual), met);
+        }
+    }
+
+    private RuleEvaluationResult evaluate(Rule rule, DomainEvent event, UUID triggerDeviceId, Source src) {
         if (rule.conditions() == null || rule.conditions().isEmpty()) {
             return new RuleEvaluationResult(false, rule, event, "No conditions defined");
         }
 
-        UUID resolvedDeviceId = resolveDeviceId(rule, event);
+        UUID resolvedDeviceId = resolveDeviceId(rule, triggerDeviceId);
 
         List<ConditionEvidence> evidence = new ArrayList<>();
         for (RuleCondition condition : rule.conditions()) {
-            ConditionEvidence conditionEvidence = evaluateCondition(condition, event, resolvedDeviceId);
+            ConditionEvidence conditionEvidence = evaluateCondition(rule, condition, event, triggerDeviceId, resolvedDeviceId, src);
             evidence.add(conditionEvidence);
             if (!conditionEvidence.conditionMet()) {
                 return new RuleEvaluationResult(false, rule, event, "Condition not met: " + condition.field(), evidence);
@@ -82,7 +166,7 @@ public class RuleEvaluator {
      * device is used (a platform-wide rule still only ever evaluates one
      * device's state per evaluation instance, never two).
      */
-    private UUID resolveDeviceId(Rule rule, DomainEvent event) {
+    private UUID resolveDeviceId(Rule rule, UUID triggerDeviceId) {
         for (RuleCondition c : rule.conditions()) {
             if (c.field() == RuleField.DEVICE_ID && c.expectedValue() != null) {
                 try {
@@ -92,43 +176,80 @@ public class RuleEvaluator {
                 }
             }
         }
-        return event.deviceId();
+        return triggerDeviceId;
     }
 
-    private ConditionEvidence evaluateCondition(RuleCondition condition, DomainEvent event, UUID resolvedDeviceId) {
+    private ConditionEvidence evaluateCondition(Rule rule, RuleCondition condition, DomainEvent event, UUID triggerDeviceId, UUID resolvedDeviceId, Source src) {
+        if (condition.temporal() != null) return src.temporal(rule, condition, resolvedDeviceId);
+        return evaluateUnderlying(condition, event, triggerDeviceId, resolvedDeviceId, src);
+    }
+
+    /**
+     * One captured qualified observation for a temporal condition's capability, evaluated against the frozen context only.
+     * The evidence carries value, receipt time, quality, unit and the eligibility that already includes R1/U1 unit safety.
+     */
+    public ConditionEvidence observe(RuleCondition condition, UUID scope, RuleEvaluationContext context) {
+        return evaluateUnderlying(condition, null, context.trigger().deviceId(), scope, new FrozenSource(context));
+    }
+
+    /**
+     * Evaluates one condition against an observation exactly as it was recorded by its source transaction (its own typed value,
+     * unit, receipt time and quality inputs), never against the current Twin. Contracts still come from the frozen context.
+     */
+    public ConditionEvidence observeRecorded(RuleCondition condition, UUID scope, RuleEvaluationContext context,
+            DigitalTwin recorded, TwinStateQualityEvaluator.Inputs inputs) {
+        var frozen = new FrozenSource(context);
+        Source source = new Source() {
+            public boolean hasAuthority() { return true; }
+            public CapturedCapability capability(UUID device, String identifier) { return frozen.capability(device, identifier); }
+            public List<DigitalTwin> twins(UUID device) { return device.equals(recorded.deviceId()) ? List.of(recorded) : List.of(); }
+            public Optional<DigitalTwin> byStateKey(UUID device, String key) { return twins(device).stream().filter(t -> key.equals(t.stateKey())).findFirst(); }
+            public Optional<DigitalTwin> byWire(UUID device, String type) {
+                return twins(device).stream().filter(t -> type.equals(t.latestSensorType()) || type.equals(t.lastWireIdentifier()) || type.equals(t.capabilityKey())).findFirst();
+            }
+            public TwinStateQualityEvidence quality(DigitalTwin twin) {
+                return qualityEvaluator == null ? null : qualityEvaluator.evaluate(twin, twin.receivedAt(), inputs);   // quality AT RECEIPT
+            }
+            public ConditionEvidence temporal(Rule rule, RuleCondition c, UUID s) { return frozen.temporal(rule, c, s); }
+        };
+        return evaluateUnderlying(condition, null, context.trigger().deviceId(), scope, source);
+    }
+
+    private ConditionEvidence evaluateUnderlying(RuleCondition condition, DomainEvent event, UUID triggerDeviceId, UUID resolvedDeviceId, Source src) {
         // DEVICE_ID always compares the canonical source scope, never a capability value.
         if(condition.field()==RuleField.DEVICE_ID){
             Object actual=extractActualValue(condition,event);boolean met=false;
-            if(event.deviceId()!=null)try{boolean same=event.deviceId().equals(UUID.fromString(condition.expectedValue()));met=condition.operator()==com.nexus.rule.domain.RuleOperator.EQ?same:condition.operator()==com.nexus.rule.domain.RuleOperator.NE&&!same;}catch(IllegalArgumentException invalid){/* Invalid scope fails closed. */}
+            if(triggerDeviceId!=null)try{boolean same=triggerDeviceId.equals(UUID.fromString(condition.expectedValue()));met=condition.operator()==com.nexus.rule.domain.RuleOperator.EQ?same:condition.operator()==com.nexus.rule.domain.RuleOperator.NE&&!same;}catch(IllegalArgumentException invalid){/* Invalid scope fails closed. */}
             return new ConditionEvidence(condition.field(),condition.operator(),condition.expectedValue(),actual,met);
         }
-        if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(condition,resolvedDeviceId);
+        if (condition.capabilityKey() != null) return evaluateGenericCapabilityCondition(condition,resolvedDeviceId,src);
         if (condition.capabilityType() != null) {
-            return evaluateCapabilityCondition(condition, resolvedDeviceId);
+            return evaluateCapabilityCondition(condition, resolvedDeviceId, src);
         }
         Object actualValue = extractActualValue(condition, event);
         boolean conditionMet = evaluateConditionMet(condition, actualValue);
         return new ConditionEvidence(condition.field(), condition.operator(), condition.expectedValue(), actualValue, conditionMet);
     }
 
-    private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId){
+    private ConditionEvidence evaluateGenericCapabilityCondition(RuleCondition condition,UUID deviceId,Source src){
         if(deviceId==null)return evidence(condition,MISSING,false,null,null);
-        com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved=null;
-        if(references!=null){
-            try{resolved=references.resolveInstalled(deviceId,condition.capabilityKey(),com.nexus.device.capability.CapabilityDirection.READ);}
+        CapturedCapability resolved=null;
+        if(src.hasAuthority()){
+            try{resolved=src.capability(deviceId,condition.capabilityKey());}
             catch(RuntimeException invalid){return evidence(condition,MISSING,false,null,null);}
         }
         final var reference=resolved;
-        var candidates=digitalTwinRegistry.getAllForDevice(deviceId).stream().filter(t->reference==null?
+        var candidates=src.twins(deviceId).stream().filter(t->reference==null?
             condition.capabilityKey().equalsIgnoreCase(t.capabilityKey()==null?"":t.capabilityKey())||condition.capabilityKey().equalsIgnoreCase(t.latestSensorType()):
-            reference.binding()!=null?reference.binding().getId().equals(t.bindingId()):reference.definition().getKey().equals(t.capabilityKey())).toList();
+            reference.bindingId()!=null?reference.bindingId().equals(t.bindingId()):reference.definitionKey().equals(t.capabilityKey())).toList();
         Optional<DigitalTwin> found=candidates.size()==1?Optional.of(candidates.getFirst()):Optional.empty();
         if(found.isEmpty()||found.get().typedValue()==null)return evidence(condition,MISSING,false,found.orElse(null),null);
-        DigitalTwin twin=found.get(); TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(twin);
+        DigitalTwin twin=found.get(); TwinStateQualityEvidence quality=src.quality(twin);
         boolean compatible=hasCompatibleUnits(condition,twin,resolved);
-        Object actual=twin.typedValue(); boolean met=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD)
+        boolean eligibleGeneric=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD);
+        Object actual=FrozenValues.freeze(twin.typedValue()); boolean met=eligibleGeneric
                 &&evaluateGeneric(actual,condition.expectedValue(),condition.operator(),twin.valueType());
-        return evidence(condition,actual,met,twin,quality);
+        return evidence(condition,actual,met,twin,quality).withEligibility(eligibleGeneric);
     }
 
     private boolean evaluateGeneric(Object actual,String expected,com.nexus.rule.domain.RuleOperator op,com.nexus.device.capability.definition.CapabilityValueType type){
@@ -140,35 +261,34 @@ public class RuleEvaluator {
     }
 
     /** Legacy syntax retains its comparisons, not historical wire-name ownership or inferred units. */
-    private ConditionEvidence evaluateCapabilityCondition(RuleCondition condition, UUID resolvedDeviceId) {
+    private ConditionEvidence evaluateCapabilityCondition(RuleCondition condition, UUID resolvedDeviceId, Source src) {
         if (resolvedDeviceId == null) {
             return evidence(condition,MISSING,false,null,null);
         }
-        com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved=null;
+        CapturedCapability resolved=null;
         Optional<DigitalTwin> twin;
-        if(references!=null){
+        if(src.hasAuthority()){
             try{
-                resolved=references.resolveInstalled(resolvedDeviceId,
-                    com.nexus.device.capability.definition.LegacyCapabilityDefinitionMapping.keyFor(condition.capabilityType()),
-                    com.nexus.device.capability.CapabilityDirection.READ);
+                resolved=src.capability(resolvedDeviceId,
+                    com.nexus.device.capability.definition.LegacyCapabilityDefinitionMapping.keyFor(condition.capabilityType()));
                 var reference=resolved;
-                String stateKey=reference.binding()!=null?"binding:"+reference.binding().getId():"legacy:"+condition.capabilityType().name();
-                twin=digitalTwinRegistry.getByStateKey(resolvedDeviceId,stateKey).filter(t->
+                String stateKey=reference.bindingId()!=null?"binding:"+reference.bindingId():"legacy:"+condition.capabilityType().name();
+                twin=src.byStateKey(resolvedDeviceId,stateKey).filter(t->
                     resolvedDeviceId.equals(t.deviceId()) && stateKey.equals(t.stateKey())
-                    && (reference.binding()!=null?
-                        reference.binding().getId().equals(t.bindingId()) && reference.definition().getId().equals(t.capabilityDefinitionId()):
+                    && (reference.bindingId()!=null?
+                        reference.bindingId().equals(t.bindingId()) && reference.definitionId().equals(t.capabilityDefinitionId()):
                         t.bindingId()==null && condition.capabilityType().name().equals(t.legacyCapabilityType())
-                            && (t.capabilityDefinitionId()==null || reference.definition().getId().equals(t.capabilityDefinitionId())))
-                    && (t.capabilityKey()==null || reference.definition().getKey().equals(t.capabilityKey())));
+                            && (t.capabilityDefinitionId()==null || reference.definitionId().equals(t.capabilityDefinitionId())))
+                    && (t.capabilityKey()==null || reference.definitionKey().equals(t.capabilityKey())));
             }catch(RuntimeException invalid){return evidence(condition,MISSING,false,null,null);}
         }else{
             // Existing manually constructed legacy unit fixtures have no installed authority.
             // Spring's mandatory setReferences injection always selects the canonical branch above.
-            twin=digitalTwinRegistry.get(resolvedDeviceId,condition.capabilityType().name());
+            twin=src.byWire(resolvedDeviceId,condition.capabilityType().name());
         }
         if(twin.isEmpty() || twin.get().typedValue()==null)return evidence(condition,MISSING,false,twin.orElse(null),null);
         DigitalTwin currentTwin = twin.get();
-        TwinStateQualityEvidence quality=qualityEvaluator==null?null:qualityEvaluator.evaluate(currentTwin);
+        TwinStateQualityEvidence quality=src.quality(currentTwin);
         boolean compatible=hasCompatibleUnits(condition,currentTwin,resolved);
         boolean eligible=compatible&&(quality==null||quality.state()==TwinStateQuality.GOOD);
         CapabilityValueKind kind = CapabilityValueKind.of(condition.capabilityType());
@@ -184,15 +304,14 @@ public class RuleEvaluator {
                 case EQ->bool.equals(expected);case NE->!bool.equals(expected);default->false;
             };
         }
-        return evidence(condition,actual,met,currentTwin,quality);
+        return evidence(condition,actual,met,currentTwin,quality).withEligibility(eligible);
     }
 
-    private boolean hasCompatibleUnits(RuleCondition condition,DigitalTwin twin,
-            com.nexus.device.binding.runtime.ResolvedDeviceCapability resolved){
+    private boolean hasCompatibleUnits(RuleCondition condition,DigitalTwin twin,CapturedCapability resolved){
         String effectiveUnit=resolved==null?twin.latestUnit():resolved.effectiveUnit();
         // NULL equality is safe only for an explicitly unitless installed contract,
         // not an unresolved choice of dimensional units. Preserve manual fixtures without references.
-        boolean unitEstablished=resolved==null || effectiveUnit!=null || resolved.definition().getAllowedUnits().isEmpty();
+        boolean unitEstablished=resolved==null || effectiveUnit!=null || resolved.unitlessContract();
         return unitEstablished&&java.util.Objects.equals(twin.latestUnit(),effectiveUnit)
             && (condition.unit()==null || java.util.Objects.equals(condition.unit(),effectiveUnit));
     }
@@ -274,6 +393,8 @@ public class RuleEvaluator {
     }
 
     private Object extractActualValue(RuleCondition condition, DomainEvent event) {
+        // Typed triggers carry no DomainEvent: payload predicates have nothing to read and fail closed.
+        if (event == null) return null;
         return switch (condition.field()) {
             case EVENT_TYPE -> event.eventType().name();
             case DEVICE_ID -> event.deviceId()==null?null:event.deviceId().toString();

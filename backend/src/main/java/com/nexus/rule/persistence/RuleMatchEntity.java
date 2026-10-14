@@ -49,8 +49,14 @@ public class RuleMatchEntity {
     @Column(name = "rule_snapshot", nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> ruleSnapshot;
 
-    @Column(name = "event_id", nullable = false)
+    @Column(name = "event_id")
     private UUID eventId;
+    @Column(name = "trigger_type") private String triggerType;
+    @Column(name = "trigger_fact_id") private UUID triggerFactId;
+    /** Typed matches reference a committed source fact instead of a DomainEvent. */
+    public void triggeredBy(String type, UUID factId) { this.triggerType = type; this.triggerFactId = factId; }
+    public String getTriggerType() { return triggerType; }
+    public UUID getTriggerFactId() { return triggerFactId; }
 
     @Column(name = "correlation_id")
     private String correlationId;

@@ -122,14 +122,18 @@ public class RealtimePublisher {
 
     public void publishRuleMatch(RuleEvaluationResult result, String correlationId) {
         if (!result.matched()) return;
+        // Typed matches carry no DomainEvent; their device comes from the committed trigger observation.
+        java.util.UUID deviceId = result.event() != null ? result.event().deviceId()
+                : result.context() != null ? result.context().trigger().deviceId() : null;
+        if (deviceId == null) return;
         Map<String, Object> payload = Map.of(
                 "ruleId",   result.rule().ruleId().toString(),
                 "ruleName", result.rule().name(),
                 "reason",   result.message(),
-                "deviceId", result.event().deviceId().toString()
+                "deviceId", deviceId.toString()
         );
         broadcast(RealtimeTopics.RULES, "RuleMatched",
-                result.event().deviceId().toString(), correlationId, payload);
+                deviceId.toString(), correlationId, payload);
     }
 
     // ─── Action Results ───────────────────────────────────────────────────────

@@ -94,6 +94,9 @@ public class TelemetryService {
 
     @Autowired
     void setVerification(VerificationService verification){this.verification=verification;}
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    @Autowired
+    void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
 
     @Transactional
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
@@ -155,6 +158,9 @@ public class TelemetryService {
             }
             digitalTwinService.publishAfterProjection(mutation);
         });
+        // Same source transaction: the accepted-observation fact commits with the Twin mutation, then routes.
+        if(ruleFacts!=null && mutation.updated())
+            ruleFacts.acceptedTelemetry(record.getId(),mutation.current(),request.timestamp(),correlationId);
 
         if (onboarding != null && device.getStatus() != DeviceStatus.ACTIVE)
             onboarding.completeFirstTelemetry(device.getId());

@@ -42,7 +42,7 @@ public class RuleVersionStore {
                     long epoch=rs.getLong("execution_epoch");
                     Rule rule=new Rule(raw.ruleId(),raw.name(),"ACTIVE".equals(rs.getString("lifecycle")),
                         raw.priority(),raw.conditions(),raw.actions(),raw.metadata(),raw.cooldownSeconds(),
-                        activeOnly ? new RuleExecutionIdentity(active,rs.getLong("definition_revision"),epoch) : null);
+                        activeOnly ? new RuleExecutionIdentity(active,rs.getLong("definition_revision"),epoch) : null,raw.runtime());
                     @SuppressWarnings("unchecked")
                     List<Map<String,Object>> diagnostics=mapper.readValue(rs.getString("diagnostics"),List.class);
                     return new View(raw.ruleId(),rs.getString("lifecycle"),rs.getLong("row_revision"),epoch,
@@ -75,6 +75,7 @@ public class RuleVersionStore {
     public boolean sameDefinition(Rule a,Rule b) {
         return Objects.equals(a.name(),b.name()) && a.priority()==b.priority()
             && Objects.equals(a.conditions(),b.conditions()) && Objects.equals(a.actions(),b.actions())
-            && Objects.equals(a.metadata(),b.metadata()) && Objects.equals(a.cooldownSeconds(),b.cooldownSeconds());
+            && Objects.equals(a.metadata(),b.metadata()) && Objects.equals(a.cooldownSeconds(),b.cooldownSeconds())
+            && Objects.equals(a.runtime(),b.runtime());
     }
 }

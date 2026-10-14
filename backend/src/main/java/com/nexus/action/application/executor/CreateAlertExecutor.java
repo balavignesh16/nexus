@@ -27,7 +27,7 @@ public class CreateAlertExecutor implements ActionExecutor {
     public ActionExecutionResult execute(ActionExecutionRequest request, ActionContext context) {
         // Stub implementation
         log.info("Executing CREATE_ALERT for device: {}. Parameters: {}", 
-                context.triggeringEvent().deviceId(), request.parameters());
+                context.triggeringEvent() == null ? request.parameters().get("deviceId") : context.triggeringEvent().deviceId(), request.parameters());
         
         return new ActionExecutionResult(
                 UUID.randomUUID(),

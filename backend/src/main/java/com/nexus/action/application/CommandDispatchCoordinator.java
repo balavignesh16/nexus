@@ -23,6 +23,10 @@ public class CommandDispatchCoordinator {
 
     @Autowired
     void setVerification(VerificationService verification){this.verification=verification;}
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    private org.springframework.transaction.PlatformTransactionManager transactions;
+    @Autowired
+    void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts,org.springframework.transaction.PlatformTransactionManager transactions){this.ruleFacts=ruleFacts;this.transactions=transactions;}
 
     public CommandDispatchCoordinator(CommandAcceptanceService acceptance, CommandExecutor executor,
             ActionHistoryRepository actions) {
@@ -52,8 +56,18 @@ public class CommandDispatchCoordinator {
         // without being erased, and a superseded desired row is never touched here.
         Instant publishedAt = result.status() == ExecutionStatus.SUCCESS ? clock.instant() : null;
         Instant recordedAt = publishedAt == null ? result.timestamp() : publishedAt;
-        actions.updatePublishResultIfAccepted(request.requestId(), result.status(), recordedAt,
-                publishedAt == null ? null : publishedAt.plus(ackTimeout), result.message());
+        Instant deadline = publishedAt == null ? null : publishedAt.plus(ackTimeout);
+        int recorded = actions.updatePublishResultIfAccepted(request.requestId(), result.status(), recordedAt, deadline, result.message());
+        if (recorded == 1 && result.status() == ExecutionStatus.FAILURE && ruleFacts != null && transactions != null) {
+            // The P2.4 publication-failure row above is the authoritative lifecycle fact and is never coupled to Rule storage.
+            // The derived source fact is committed on its own; if that fails no Rule can fire (fail closed), nothing is retried or resent.
+            try {
+                new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(tx ->
+                    ruleFacts.publicationFailed(request.requestId(), prepared.deviceId(), recordedAt, result.message()));
+            } catch (RuntimeException failure) {
+                org.slf4j.LoggerFactory.getLogger(CommandDispatchCoordinator.class).error("RULE_SOURCE_FACT_FAILED publication-failure command={}", request.requestId(), failure);
+            }
+        }
         if (result.status() == ExecutionStatus.FAILURE && verification != null)
             verification.commandFailed(prepared.deviceId(),request.requestId(),"MQTT_PUBLICATION_FAILED");
         return new Outcome(result, true);

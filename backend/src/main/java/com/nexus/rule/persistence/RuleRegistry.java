@@ -108,7 +108,7 @@ public class RuleRegistry {
             return;
         }
         persistAndCache(new Rule(
-                current.ruleId(), current.name(), true, current.priority(), current.conditions(), current.actions(), current.metadata(), current.cooldownSeconds()
+                current.ruleId(), current.name(), true, current.priority(), current.conditions(), current.actions(), current.metadata(), current.cooldownSeconds(), null, current.runtime()
         ));
     }
 
@@ -119,7 +119,7 @@ public class RuleRegistry {
             return;
         }
         persistAndCache(new Rule(
-                current.ruleId(), current.name(), false, current.priority(), current.conditions(), current.actions(), current.metadata(), current.cooldownSeconds()
+                current.ruleId(), current.name(), false, current.priority(), current.conditions(), current.actions(), current.metadata(), current.cooldownSeconds(), null, current.runtime()
         ));
     }
 

@@ -62,7 +62,9 @@ public class RuleController {
                 request.conditions(),
                 request.actions(),
                 request.metadata(),
-                request.cooldownSeconds()
+                request.cooldownSeconds(),
+                null,
+                request.runtime()
         );
         ruleRegistry.register(rule);
         return ResponseEntity.status(HttpStatus.CREATED).body(response(rule));
@@ -122,7 +124,9 @@ public class RuleController {
                 request.conditions(),
                 request.actions(),
                 request.metadata(),
-                request.cooldownSeconds()
+                request.cooldownSeconds(),
+                null,
+                request.runtime()
         );
         if(lifecycle!=null)lifecycle.legacySave(rule,request.expectedRevision());else ruleRegistry.register(rule);
         return ResponseEntity.ok(response(rule));

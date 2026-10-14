@@ -57,6 +57,9 @@ public class DeviceCommandAckMessageHandler {
 
     @Autowired
     void setVerification(VerificationService verification){this.verification=verification;}
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    @Autowired
+    void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
 
     public DeviceCommandAckMessageHandler(ActionHistoryRepository actionHistoryRepository,
                                            RealtimePublisher realtimePublisher,
@@ -148,6 +151,9 @@ public class DeviceCommandAckMessageHandler {
             return;
         }
 
+        // Only the first authoritative ACK (guarded update above) reaches here, so duplicates cannot create a second fact.
+        if(status==AcknowledgementStatus.REJECTED && ruleFacts!=null)
+            ruleFacts.ackRejected(commandId,topicDeviceId,backendReceivedAt,reason);
         if(status==AcknowledgementStatus.REJECTED && verification!=null)
             verification.commandFailed(topicDeviceId,commandId,"DEVICE_COMMAND_REJECTED");
         Runnable publish=()->{try{realtimePublisher.publishActionAcknowledged(commandId, topicDeviceId, status, reason, ackReceivedAt);}

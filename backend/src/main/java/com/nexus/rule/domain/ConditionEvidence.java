@@ -33,15 +33,26 @@ public record ConditionEvidence(
     Instant qualityEvaluatedAt,
     Instant receivedAt,
     Integer freshnessThresholdSeconds,
-    String connectivity
+    String connectivity,
+    Boolean eligible
 ) {
+    public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue, Object actualValue, boolean conditionMet,
+            Instant stateTimestamp, String capabilityKey, java.util.UUID definitionId, java.util.UUID bindingId, String valueType, String unit,
+            String stateQuality, String qualityReason, Instant qualityEvaluatedAt, Instant receivedAt, Integer freshnessThresholdSeconds, String connectivity) {
+        this(field, operator, expectedValue, actualValue, conditionMet, stateTimestamp, capabilityKey, definitionId, bindingId, valueType, unit,
+            stateQuality, qualityReason, qualityEvaluatedAt, receivedAt, freshnessThresholdSeconds, connectivity, null);
+    }
     public ConditionEvidence(RuleField field, RuleOperator operator, String expectedValue,
                               Object actualValue, boolean conditionMet) {
-        this(field, operator, expectedValue, actualValue, conditionMet, null,null,null,null,null,null,null,null,null,null,null,null);
+        this(field, operator, expectedValue, actualValue, conditionMet, null,null,null,null,null,null,null,null,null,null,null,null,null);
     }
-    public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null,null,null,null,null,null,null);}
+    public ConditionEvidence(RuleField field,RuleOperator operator,String expectedValue,Object actualValue,boolean met,Instant timestamp){this(field,operator,expectedValue,actualValue,met,timestamp,null,null,null,null,null,null,null,null,null,null,null,null);}
+    public ConditionEvidence withEligibility(boolean eligible){
+        return new ConditionEvidence(field,operator,expectedValue,actualValue,conditionMet,stateTimestamp,capabilityKey,
+                definitionId,bindingId,valueType,unit,stateQuality,qualityReason,qualityEvaluatedAt,receivedAt,freshnessThresholdSeconds,connectivity,eligible);
+    }
     public ConditionEvidence withQuality(String quality,String reason,Instant evaluatedAt,Instant receivedAt,Integer threshold,String connectivity){
         return new ConditionEvidence(field,operator,expectedValue,actualValue,conditionMet,stateTimestamp,capabilityKey,
-                definitionId,bindingId,valueType,unit,quality,reason,evaluatedAt,receivedAt,threshold,connectivity);
+                definitionId,bindingId,valueType,unit,quality,reason,evaluatedAt,receivedAt,threshold,connectivity,eligible);
     }
 }

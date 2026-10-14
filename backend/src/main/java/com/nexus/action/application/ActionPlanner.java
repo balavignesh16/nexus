@@ -31,6 +31,12 @@ public class ActionPlanner {
             return;
         }
 
+        // The C13 compatibility exception serves persisted legacy DomainEvent matches only. Typed, scheduled,
+        // temporal and chained matches carry no DomainEvent and are authorized by RuleActionPlanner.
+        if (event.result().event() == null) {
+            return;
+        }
+
         ActionContext context = new ActionContext(
                 event.result().event(),
                 event.result().rule()

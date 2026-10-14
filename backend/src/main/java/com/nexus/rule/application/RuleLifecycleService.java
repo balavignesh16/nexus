@@ -21,7 +21,12 @@ public class RuleLifecycleService {
     private org.springframework.context.ApplicationEventPublisher events;
     @org.springframework.beans.factory.annotation.Autowired
     void setEvents(org.springframework.context.ApplicationEventPublisher events){this.events=events;}
+    private com.nexus.rule.timer.RuleTimerService timers;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTimers(@org.springframework.context.annotation.Lazy com.nexus.rule.timer.RuleTimerService timers){this.timers=timers;}
     private void changed(UUID id){
+        // Same transaction as the ownership change: stale generations are invalidated and the schedule is armed atomically.
+        if(timers!=null)timers.reconcile(id);
         if(events!=null)events.publishEvent(new RuleProjectionChanged(id,jdbc.queryForObject("SELECT row_revision FROM rules WHERE rule_id=?",Long.class,id)));
     }
     public RuleLifecycleService(JdbcTemplate jdbc,RuleVersionStore store,RuleCapabilityValidator validator,
@@ -60,7 +65,7 @@ public class RuleLifecycleService {
     private UUID insertVersion(Rule rule,String provenance) {
         long revision=jdbc.queryForObject("SELECT COALESCE(MAX(revision),0)+1 FROM rule_versions WHERE rule_id=?",Long.class,rule.ruleId());
         UUID id=UUID.randomUUID();
-        Rule executable=new Rule(rule.ruleId(),rule.name(),false,rule.priority(),rule.conditions(),rule.actions(),rule.metadata(),rule.cooldownSeconds());
+        Rule executable=new Rule(rule.ruleId(),rule.name(),false,rule.priority(),rule.conditions(),rule.actions(),rule.metadata(),rule.cooldownSeconds(),null,rule.runtime());
         jdbc.update("INSERT INTO rule_versions(version_id,rule_id,revision,definition,created_at,provenance) VALUES(?,?,?,?::jsonb,?,?)",
             id,rule.ruleId(),revision,store.json(executable),java.sql.Timestamp.from(clock.instant()),provenance);
         jdbc.update("INSERT INTO rule_version_workflow VALUES(?,'DRAFT')",id);

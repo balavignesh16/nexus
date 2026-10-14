@@ -42,12 +42,24 @@ public class TwinStateQualityEvaluator {
         return new TwinStateQualityEvidence(TwinStateQuality.UNKNOWN,"NO_REPORTED_OBSERVATION",evaluatedAt,
                 null,threshold,connectivityName);
     }
+    /** Inputs a quality decision depends on besides the twin row; captured together by a frozen snapshot. */
+    public record Inputs(String connectivity,int thresholdSeconds,boolean persistedValueValid){}
+
     public TwinStateQualityEvidence evaluate(DigitalTwin twin,Instant evaluatedAt){
-        int threshold=threshold(twin.bindingId());
         String connectivityName=connectivity.get(twin.deviceId()).map(c->c.status().name()).orElse("UNKNOWN");
+        return evaluate(twin,evaluatedAt,liveInputs(twin,connectivityName));
+    }
+    /** Reads contract inputs through the current transaction; connectivity is supplied by the caller. */
+    public Inputs liveInputs(DigitalTwin twin,String connectivityName){
+        boolean valid=twin.typedValue()==null||twin.receivedAt()==null||isPersistedValueValid(twin);
+        return new Inputs(connectivityName,threshold(twin.bindingId()),valid);
+    }
+    /** Pure decision over captured inputs: one evaluation time, no further reads. */
+    public TwinStateQualityEvidence evaluate(DigitalTwin twin,Instant evaluatedAt,Inputs inputs){
+        int threshold=inputs.thresholdSeconds();String connectivityName=inputs.connectivity();
         if(twin.typedValue()==null)return evidence(TwinStateQuality.UNKNOWN,"MISSING_OR_INVALID_VALUE",evaluatedAt,twin,threshold,connectivityName);
         if(twin.receivedAt()==null)return evidence(TwinStateQuality.UNKNOWN,"RECEIPT_TIME_UNAVAILABLE",evaluatedAt,twin,threshold,connectivityName);
-        if(!isPersistedValueValid(twin))return evidence(TwinStateQuality.UNKNOWN,"INVALID_PERSISTED_VALUE",evaluatedAt,twin,threshold,connectivityName);
+        if(!inputs.persistedValueValid())return evidence(TwinStateQuality.UNKNOWN,"INVALID_PERSISTED_VALUE",evaluatedAt,twin,threshold,connectivityName);
         if("UNKNOWN".equals(connectivityName))return evidence(TwinStateQuality.UNKNOWN,"CONNECTIVITY_UNOBSERVED",evaluatedAt,twin,threshold,connectivityName);
         if(DeviceConnectivityStatus.OFFLINE.name().equals(connectivityName))return evidence(TwinStateQuality.OFFLINE,"DEVICE_OFFLINE",evaluatedAt,twin,threshold,connectivityName);
         long age=Math.max(0,Duration.between(twin.receivedAt(),evaluatedAt).getSeconds());

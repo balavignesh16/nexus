@@ -43,8 +43,22 @@ public class InMemoryDeviceConnectivityRegistry implements DeviceConnectivityReg
         log.info("Loaded {} device connectivity row(s) into cache", rows.size());
     }
 
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private org.springframework.transaction.PlatformTransactionManager transactions;
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    private java.time.Clock clock = java.time.Clock.systemUTC();
+
+    /** Optional wiring: when present, transitions are decided by the database row, not the cache. */
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTransitionAuthority(org.springframework.jdbc.core.JdbcTemplate jdbc,
+            org.springframework.transaction.PlatformTransactionManager transactions,
+            java.time.Clock clock, @org.springframework.context.annotation.Lazy com.nexus.rule.trigger.RuleSourceFacts ruleFacts) {
+        this.jdbc = jdbc; this.transactions = transactions; this.clock = clock; this.ruleFacts = ruleFacts;
+    }
+
     @Override
     public boolean applyObservedStatus(UUID deviceId, DeviceConnectivityStatus status) {
+        if (jdbc != null && transactions != null) return applyPersistedTransition(deviceId, status);
         DeviceConnectivity current = cache.get(deviceId);
         if (current != null && current.status() == status) {
             // Duplicate observation of the already-current status: harmless,
@@ -56,6 +70,42 @@ public class InMemoryDeviceConnectivityRegistry implements DeviceConnectivityReg
         DeviceConnectivity updated = new DeviceConnectivity(deviceId, status, Instant.now());
         repository.save(updated);
         cache.put(deviceId, updated);
+        return true;
+    }
+
+    /**
+     * The committed row decides whether this is a transition (so a stale cache or a second instance cannot invent
+     * or hide one). Each real change increments a persisted generation, the CONNECTIVITY_CHANGED identity, and its
+     * source fact commits in the same transaction. The cache is updated only after that commit.
+     */
+    private boolean applyPersistedTransition(UUID deviceId, DeviceConnectivityStatus status) {
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        record Changed(Instant at) {}
+        Changed changed = tx.execute(state -> {
+            var rows = jdbc.queryForList("SELECT status,generation FROM device_connectivity WHERE device_id=? FOR UPDATE", deviceId);
+            Instant at = clock.instant();
+            String previous = rows.isEmpty() ? null : rows.getFirst().get("status").toString();
+            if (previous != null && previous.equals(status.name())) return null;
+            long generation;
+            if (previous == null) {
+                jdbc.update("INSERT INTO device_connectivity(device_id,status,last_changed_at,generation) VALUES(?,?,?,1)",
+                    deviceId, status.name(), java.sql.Timestamp.from(at));
+                generation = 1;
+            } else {
+                generation = ((Number) rows.getFirst().get("generation")).longValue() + 1;
+                jdbc.update("UPDATE device_connectivity SET status=?,last_changed_at=?,generation=? WHERE device_id=?",
+                    status.name(), java.sql.Timestamp.from(at), generation, deviceId);
+            }
+            if (ruleFacts != null) ruleFacts.connectivityChanged(deviceId, generation, previous, status.name(), at);
+            return new Changed(at);
+        });
+        if (changed == null) {
+            // Keep a lagging cache consistent with the authoritative row.
+            if (cache.get(deviceId) == null || cache.get(deviceId).status() != status)
+                repository.findById(deviceId).ifPresent(row -> cache.put(deviceId, row));
+            return false;
+        }
+        cache.put(deviceId, new DeviceConnectivity(deviceId, status, changed.at()));
         return true;
     }
 

@@ -23,6 +23,9 @@ public class VerificationService {
     private final TwinStateQualityEvaluator quality;
     private final ReadbackComparison comparison;
     private final Clock clock;
+    private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
     public VerificationService(CurrentTwinVerificationRepository current,DeviceReadbackMappingRepository mappings,
             DesiredTwinStateRepository desired,DeviceCapabilityBindingRepository bindings,DeviceRepository devices,
             TwinStateTransitionRepository transitions,TwinStateQualityEvaluator quality,ReadbackComparison comparison,Clock clock) {
@@ -46,7 +49,7 @@ public class VerificationService {
         if(old!=null)next.rearm(intent.getCommandId(),status,now,deadline,mappingId,reason);
         current.saveAndFlush(next);
         if(previousStatus!=next.getVerificationStatus())
-            transitions.save(TwinStateTransition.convergence(intent,previousStatus,next,now,correlationId));
+            saveConvergence(TwinStateTransition.convergence(intent,previousStatus,next,now,correlationId));
     }
 
     /** Called after accepted reported mutation, in that same telemetry transaction. */
@@ -78,7 +81,7 @@ public class VerificationService {
                 state.change(VerificationStatus.DIVERGED,clock.instant(),"QUALIFIED_READBACK_MISMATCH");
             current.saveAndFlush(state);
             if(before!=state.getVerificationStatus())
-                transitions.save(TwinStateTransition.convergence(intent,before,state,clock.instant(),correlationId));
+                saveConvergence(TwinStateTransition.convergence(intent,before,state,clock.instant(),correlationId));
         }
     }
 
@@ -150,7 +153,7 @@ public class VerificationService {
     private void change(DesiredTwinState intent,CurrentTwinVerificationState state,VerificationStatus status,String reason) {
         VerificationStatus previous=state.getVerificationStatus();
         state.change(status,clock.instant(),reason);current.saveAndFlush(state);
-        if(previous!=status)transitions.save(TwinStateTransition.convergence(intent,previous,state,clock.instant(),null));
+        if(previous!=status)saveConvergence(TwinStateTransition.convergence(intent,previous,state,clock.instant(),null));
     }
 
     private Optional<DeviceReadbackMapping> usable(DesiredTwinState intent) {
@@ -167,6 +170,11 @@ public class VerificationService {
                         intent.getSubtargetKey().isEmpty()?intent.getValueType():com.nexus.device.capability.definition.CapabilityValueType.BOOLEAN,
                         read.getDefinition().getValueType());
         });
+    }
+    /** A committed CONVERGENCE_CHANGED transition is the durable source of VERIFICATION_CHANGED facts. */
+    private void saveConvergence(TwinStateTransition transition) {
+        var saved=transitions.save(transition);
+        if(ruleFacts!=null && saved!=null) ruleFacts.verificationChanged(saved);
     }
     private static VerificationStateId id(DesiredTwinState intent){return new VerificationStateId(intent.getDeviceId(),intent.getTargetKey(),intent.getSubtargetKey());}
 }

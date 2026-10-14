@@ -20,7 +20,8 @@ public record Rule(
     List<RuleAction> actions,
     Map<String, String> metadata,
     Integer cooldownSeconds,
-    RuleExecutionIdentity executionIdentity
+    RuleExecutionIdentity executionIdentity,
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) RuleRuntime runtime
 ) {
     public Rule {
         if(conditions!=null)conditions=java.util.Collections.unmodifiableList(new java.util.ArrayList<>(conditions));
@@ -29,8 +30,23 @@ public record Rule(
     }
     public Rule(UUID ruleId, String name, boolean enabled, int priority,
                 List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata,
+                Integer cooldownSeconds, RuleExecutionIdentity executionIdentity) {
+        this(ruleId, name, enabled, priority, conditions, actions, metadata, cooldownSeconds, executionIdentity, null);
+    }
+    public Rule(UUID ruleId, String name, boolean enabled, int priority,
+                List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata,
                 Integer cooldownSeconds) {
-        this(ruleId, name, enabled, priority, conditions, actions, metadata, cooldownSeconds, null);
+        this(ruleId, name, enabled, priority, conditions, actions, metadata, cooldownSeconds, null, null);
+    }
+    /** Explicit subscriptions of this version; an absent runtime means the legacy DomainEvent adapter only. */
+    public List<TriggerSubscription> subscriptions(){
+        return runtime==null||runtime.triggers().isEmpty()?List.of(new TriggerSubscription(TriggerType.LEGACY_DOMAIN_EVENT)):runtime.triggers();
+    }
+    public boolean subscribesTo(TriggerType type){return subscriptions().stream().anyMatch(s->s.type()==type);}
+    public RepeatPolicy repeat(){return runtime==null||runtime.repeatPolicy()==null?RepeatPolicy.EVERY_TRIGGER_WHILE_TRUE:runtime.repeatPolicy();}
+    /** Copy preserving every field, so reconstruction sites cannot silently drop Phase 3 configuration. */
+    public Rule with(boolean enabled,List<RuleCondition> conditions,RuleExecutionIdentity identity){
+        return new Rule(ruleId,name,enabled,priority,conditions,actions,metadata,cooldownSeconds,identity,runtime);
     }
     public Rule(UUID ruleId, String name, boolean enabled, int priority,
                 List<RuleCondition> conditions, List<RuleAction> actions, Map<String, String> metadata) {
