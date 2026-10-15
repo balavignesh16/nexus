@@ -44,6 +44,21 @@ nexus:
     pipeline-days: 7
     events-days: 90
     actions-days: 90
+  command:
+    outbox:
+      # Phase 4 reliable command delivery. OFF by default (decision D7); P4.1 only reads and validates these values.
+      enabled: ${NEXUS_COMMAND_OUTBOX_ENABLED:false}
+      delivery-window: ${NEXUS_COMMAND_OUTBOX_DELIVERY_WINDOW:PT15S}   # whole seconds, 2s..20s (firmware freshness 30s minus 10s margin)
+      max-attempts: ${NEXUS_COMMAND_OUTBOX_MAX_ATTEMPTS:3}              # 1..5
+      attempt-timeout: ${NEXUS_COMMAND_OUTBOX_ATTEMPT_TIMEOUT:PT3S}
+      initial-backoff: ${NEXUS_COMMAND_OUTBOX_INITIAL_BACKOFF:PT0.5S}
+      backoff-multiplier: ${NEXUS_COMMAND_OUTBOX_BACKOFF_MULTIPLIER:2.0}
+      max-backoff: ${NEXUS_COMMAND_OUTBOX_MAX_BACKOFF:PT4S}
+      jitter-fraction: ${NEXUS_COMMAND_OUTBOX_JITTER_FRACTION:0.2}
+      lease-duration: ${NEXUS_COMMAND_OUTBOX_LEASE_DURATION:PT6S}       # at least attempt-timeout + 2s
+      claim-batch-size: ${NEXUS_COMMAND_OUTBOX_CLAIM_BATCH_SIZE:10}
+      poll-interval: ${NEXUS_COMMAND_OUTBOX_POLL_INTERVAL:PT0.25S}
+      expiry-scan-interval: ${NEXUS_COMMAND_OUTBOX_EXPIRY_SCAN_INTERVAL:PT1S}
   ai:
     enabled: ${AI_ENABLED:false}
     provider: ${AI_PROVIDER:openai}

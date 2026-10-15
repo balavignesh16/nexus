@@ -131,6 +131,18 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(com.nexus.device.domain.exception.DeviceDeletionBlockedException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleDeviceDeletionBlocked(com.nexus.device.domain.exception.DeviceDeletionBlockedException ex) {
+        // Same fields as ErrorResponse plus a stable machine code, so existing clients keep working.
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("error", HttpStatus.CONFLICT.getReasonPhrase());
+        body.put("code", ex.getCode());
+        body.put("message", ex.getMessage());
+        body.put("timestamp", Instant.now());
+        return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
         ErrorResponse error = new ErrorResponse(

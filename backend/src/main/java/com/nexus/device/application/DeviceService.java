@@ -9,6 +9,7 @@ import com.nexus.device.domain.Device;
 import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
 import com.nexus.device.domain.exception.DeviceNotFoundException;
+import com.nexus.device.domain.exception.DeviceDeletionBlockedException;
 import com.nexus.device.domain.exception.DeviceSerialNumberExistsException;
 import com.nexus.space.domain.Space;
 import com.nexus.space.persistence.SpaceRepository;
@@ -26,6 +27,10 @@ public class DeviceService {
     private com.nexus.rule.application.ActiveRuleReferenceGuard activeVersions;
     @org.springframework.beans.factory.annotation.Autowired
     void setActiveVersions(com.nexus.rule.application.ActiveRuleReferenceGuard guard){this.activeVersions=guard;}
+
+    private java.util.List<DeviceDeletionGuard> deletionGuards = java.util.List.of();
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setDeletionGuards(java.util.List<DeviceDeletionGuard> guards){this.deletionGuards=guards;}
 
     private final DeviceRepository deviceRepository;
     private final SpaceRepository spaceRepository;
@@ -116,7 +121,21 @@ public class DeviceService {
         if (!deviceRepository.existsById(id)) {
             throw new DeviceNotFoundException(id);
         }
-        deviceRepository.deleteById(id);
+        // Phase 4: a device with unresolved command delivery obligations (or unpurged delivery records) is never deleted.
+        // The database enforces the same rule; this is the typed rejection in front of it.
+        for (DeviceDeletionGuard guard : deletionGuards) guard.assertDeletable(id);
+        try {
+            deviceRepository.deleteById(id);
+            deviceRepository.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // A concurrent acceptance can win the race after the guard check; the database trigger then refuses with a stable message.
+            String text = String.valueOf(e.getMostSpecificCause().getMessage());
+            if (text.contains(DeviceDeletionBlockedException.UNRESOLVED_COMMANDS))
+                throw new DeviceDeletionBlockedException(DeviceDeletionBlockedException.UNRESOLVED_COMMANDS, id);
+            if (text.contains(DeviceDeletionBlockedException.DELIVERY_EVIDENCE))
+                throw new DeviceDeletionBlockedException(DeviceDeletionBlockedException.DELIVERY_EVIDENCE, id);
+            throw e;
+        }
     }
 
     /**

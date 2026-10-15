@@ -101,7 +101,8 @@ class RuleV26ToV29MigrationTest {
                 if (row[2] != null) sql.executeUpdate("INSERT INTO action_history(request_id,match_id,action_type,status,timestamp,message) VALUES('" + row[0] + "','" + plannedMatch + "','" + row[1] + "','" + row[2] + "',now(),'" + row[2] + " message')");
             }
         }
-        var flyway = Flyway.configure().dataSource(db.getJdbcUrl(), db.getUsername(), db.getPassword()).load();
+        // Pinned to V36 so this step keeps proving exactly V35 and V36; later migrations (V37 command_outbox) have their own tests.
+        var flyway = Flyway.configure().dataSource(db.getJdbcUrl(), db.getUsername(), db.getPassword()).target("36").load();
         var rest = flyway.migrate();
         flyway.validate();
         assertEquals(2, rest.migrations.size(), "V35 and V36 (V33 and V34 ran earlier)");
