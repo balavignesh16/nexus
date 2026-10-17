@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import time
+import uuid
 
 import paho.mqtt.client as mqtt
 
@@ -24,6 +25,8 @@ class MQTTPublisher(TelemetryPublisher):
         self.config = config
         self.device_id = device_id
         self.simulated_device = simulated_device
+        # The exact (topic, payload) of the last telemetry publication, kept so a test can model broker redelivery (P4.5).
+        self.last_publication: tuple[str, str] | None = None
 
         client_id = (
             f"nexus-sim-{config.instance_id}-{device_id}"
@@ -96,8 +99,12 @@ class MQTTPublisher(TelemetryPublisher):
 
     def publish(
         self, device_id: str, sensor_type: str, value: any, unit: str,
-        readback_command_id: str | None = None, capability_key: str | None = None
+        readback_command_id: str | None = None, capability_key: str | None = None,
+        message_id: str | None = None
     ) -> tuple[bool, float]:
+        """Publish one telemetry sample. Every publication carries a fresh UUID ``messageId`` (the backend's optional
+        telemetry inbox identity, R17) unless the caller supplies one. The extra field is additive: payloads stay valid
+        for the existing contract, and the committed firmware (which sends none) is unaffected."""
         start = time.time()
 
         if not device_id:
@@ -110,14 +117,26 @@ class MQTTPublisher(TelemetryPublisher):
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "sensorType": sensor_type,
             "value": value,
-            "unit": unit
+            "unit": unit,
+            "messageId": message_id if message_id is not None else str(uuid.uuid4()),
         }
         if readback_command_id is not None:
             payload["readbackCommandId"] = readback_command_id
         if capability_key is not None:
             payload["capabilityKey"] = capability_key
         payload_str = json.dumps(payload)
+        self.last_publication = (topic, payload_str)
+        return self._send(topic, payload_str, start)
 
+    def republish_last(self) -> tuple[bool, float]:
+        """Test hook modelling broker redelivery: send the last telemetry publication again, byte for byte (same
+        timestamp, same ``messageId``). Returns (False, 0.0) when nothing has been published yet."""
+        if self.last_publication is None:
+            return False, 0.0
+        topic, payload_str = self.last_publication
+        return self._send(topic, payload_str, time.time())
+
+    def _send(self, topic: str, payload_str: str, start: float) -> tuple[bool, float]:
         try:
             result = self.client.publish(topic, payload_str, qos=self.config.mqtt_qos)
             result.wait_for_publish()

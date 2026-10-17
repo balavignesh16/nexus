@@ -1,8 +1,8 @@
 # Phase 4 acceptance ledger
 
-Date: 2026-10-18.
+Date: 2026-10-17 (P4.5 amendments).
 
-Status: **P4.0 FINALIZED; P4.1, P4.2 and P4.3 COMMITTED; P4.4 IMPLEMENTED. 158 scenario IDs defined; 57 PLANNED, 100 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.4 tests are COVERED.**
+Status: **P4.0 FINALIZED; P4.1, P4.2, P4.3 and P4.4 COMMITTED; P4.5 IMPLEMENTED AND TESTED ON THE ISOLATED BRANCH `feature/p45-telemetry-inbox` (not merged). 167 scenario IDs defined; 40 PLANNED, 126 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.5 tests are COVERED.**
 
 Normative requirements: [reliability-contract.md](reliability-contract.md). Execution and dependency plan: [p4-implementation-ticket.md](p4-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract.
 
@@ -18,10 +18,10 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Status | Count |
 |---|---|
-| PLANNED | 57 |
-| COVERED | 100 |
+| PLANNED | 40 |
+| COVERED | 126 |
 | DEFERRED | 1 |
-| **Total** | **158** |
+| **Total** | **167** |
 
 
 ## A. Atomic acceptance and persistence
@@ -129,7 +129,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-069 | Reconciler never publishes | PostgreSQL + Mosquitto integration | A spy on the MQTT client shows zero publications for DELIVERY_UNKNOWN commands across restarts and with the flag ON. | R16 | P4.4 | COVERED | CommandAckFactsIntegrationTest.theReconcilerNeverPublishesAnythingAcrossRunsRestartsAndWithTheFlagOn (flag ON, dispatcher running, repeated passes: the publisher saw nothing, ActionHistory untouched, no outbox row); CommandLifecycleScannersLiveIntegrationTest.theScheduledReconcilerClassifiesAStrandedLegacyCommandWhileLiveTrafficFlowsAndNothingIsPublishedForIt (REAL broker: the only message on the wire is the live command, nothing for the stranded one); OutboxArchitectureTest.theAckTimeoutWorkerTheReconcilerAndTheAckFactsCanNeverPublishRequeueOrTouchVerificationOrDesiredState; mutation M10 is killed |
 | P4-070 | Runtime reconciler is idempotent and conservative | PostgreSQL integration | Stranded flag-OFF-era ACCEPTED_FOR_DISPATCH rows older than the grace period are marked once; rows with an outbox row are never touched. | R16 | P4.4 | COVERED | LegacyDeliveryReconcilerTest.aStrandedLegacyCommandIsMarkedDeliveryUnknownExactlyOnceAndNothingElseChanges, ...onlyAStrandedUnevidencedUnclaimedAndOldEnoughCommandIsEverClassified (young, just inside the grace, SUCCESS, FAILURE, acknowledged, published_at set, with an outbox row, with an existing fact: all untouched), ...concurrentReconcilersMarkEachStrandedCommandExactlyOnce (4 reconcilers on 4 connections, 10 commands: found and fixed a real double-classification bug, see the P4.4 evidence), ...anInterruptedRunIsRepeatedWithoutDuplicatesAndABatchIsBounded, ...aCommandThatCompletedOrWasAcknowledgedMeanwhileIsSkippedBecauseEveryConditionIsRecheckedUnderTheRowLock; mutation M11 is killed |
 | P4-071 | Commands mid-dispatch are not falsely marked | PostgreSQL integration | A legacy-path command inside the grace period is not marked DELIVERY_UNKNOWN. | R16 | P4.4 | COVERED | LegacyDeliveryReconcilerTest.aCommandInsideTheGraceIsNotFalselyMarkedAndIsMarkedOnceItsAgeExceedsIt (a grace below 5 minutes is refused at startup), ...onlyAStrandedUnevidencedUnclaimedAndOldEnoughCommandIsEverClassified (60 s and 290 s old rows untouched), ...aCommandThatCompletedOrWasAcknowledgedMeanwhileIsSkippedBecauseEveryConditionIsRecheckedUnderTheRowLock (a publication that completes while the reconciler waits for the row lock wins) |
-| P4-072 | Historical terminal rows are unchanged | Migration on populated database | Published, acknowledged and failed rows keep identical values and counts across V37 to V40. | R23 | P4.5 | PLANNED | partial (P4.1): CommandOutboxUpgradeMigrationTest proves V37 leaves every historical row identical; V39 and V40 outstanding |
+| P4-072 | Historical terminal rows are unchanged | Migration on populated database | Published, acknowledged and failed rows keep identical values and counts across V37 to V40. | R23 | P4.5 | COVERED | InboundMessageDedupeUpgradeMigrationTest.populatedV39UpgradeKeepsTelemetryAndHistoryUntouchedAndAddsOnlyTheEmptyTable (published, acknowledged, failed and stranded action rows, the outbox, the state history and desired state are identical across V39 to V40); the same property for V36 to V37 in CommandOutboxUpgradeMigrationTest.populatedV36UpgradeKeepsHistoryUntouchedAndCreatesNoPublishableWork, which migrates to the latest version and therefore passes through V40, and for V38 to V39 in CommandStateHistoryBackfillMigrationTest |
 | P4-073 | DELIVERY_UNKNOWN projection is additive | API (MockMvc) | deliveryState reports DELIVERY_UNKNOWN while the existing status field keeps its prior meaning. | R21 | P4.7 | PLANNED | not yet written |
 | P4-074 | Late ACK for DELIVERY_UNKNOWN is recorded truthfully | PostgreSQL integration | If the device had received the command, its ACK is recorded as a fact without implying NEXUS resent it. | R13, R16 | P4.4 | COVERED | CommandAckFactsIntegrationTest.aLateAckForALegacyDeliveryUnknownCommandIsRecordedTruthfullyAndNothingIsResent (facts DELIVERY_UNKNOWN then ACK_ACCEPTED, no outbox row, nothing published); CommandLifecycleScannersLiveIntegrationTest.theScheduledReconcilerClassifiesAStrandedLegacyCommandWhileLiveTrafficFlowsAndNothingIsPublishedForIt (the late ACK over the real transport) |
 
@@ -137,18 +137,18 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-075 | Redelivered messageId is processed once | PostgreSQL + Mosquitto integration | The same messageId delivered twice stores one telemetry row, makes one Twin update and emits no new event or transition. | R17 | P4.5 | PLANNED | not yet written |
-| P4-076 | Dedupe row and telemetry commit atomically | Fault injection | A rollback or crash leaves neither a dedupe row nor a telemetry row; they commit together. | R07, R17 | P4.5 | PLANNED | not yet written |
-| P4-077 | Messages without messageId are never deduplicated | PostgreSQL integration | Two samples with identical timestamp and value but no messageId are both stored. | R17 | P4.5 | PLANNED | not yet written |
-| P4-078 | MessageId is scoped by device | PostgreSQL integration | The same messageId from two devices is stored twice. | R17 | P4.5 | PLANNED | not yet written |
-| P4-079 | Conflicting duplicate keeps the first | PostgreSQL integration | Same messageId with a different value stores nothing new, logs and counts a conflict. | R17 | P4.5 | PLANNED | not yet written |
-| P4-080 | Invalid messageId is rejected | API (MockMvc) | A messageId that is non-text, too long or outside the allowed characters is treated as invalid input (HTTP 400, MQTT acknowledge and drop). | R17 | P4.5 | PLANNED | not yet written |
-| P4-081 | Crash before the MQTT acknowledgement is deduplicated | PostgreSQL + Mosquitto integration | A message processed but not acknowledged to the broker is redelivered after restart and suppressed. | R17 | P4.5 | PLANNED | not yet written |
-| P4-082 | Dedupe window purge is bounded and documented | PostgreSQL integration | Expired ids are purged without touching telemetry; a purged id is accepted again and this limit is documented. | R17, R19 | P4.5 | PLANNED | not yet written |
-| P4-083 | HTTP ingestion uses the same semantics | API (MockMvc) | POST /api/v1/telemetry with a repeated messageId returns an explicit duplicate/no-op response (success status, additive duplicate field), stores nothing and causes no second Twin transition; the MQTT path behaves identically. | R17, R21 | P4.5 | PLANNED | not yet written |
-| P4-084 | Onboarding telemetry is not double-counted | PostgreSQL integration | A duplicate first onboarding reading neither advances the session twice nor activates the device twice. | R17, R24 | P4.5 | PLANNED | not yet written |
-| P4-085 | Concurrent duplicates store once | Concurrency (multiple connections / instances) | Two threads submitting one messageId store exactly one row via the unique constraint. | R17 | P4.5 | PLANNED | not yet written |
-| P4-086 | Hypertable is untouched | Migration on populated database | V40 creates only the dedupe table; telemetry_history schema and the V1 to V36 checksums are unchanged. | R17, R23 | P4.5 | PLANNED | not yet written |
+| P4-075 | Redelivered messageId is processed once | PostgreSQL + Mosquitto integration | The same messageId delivered twice stores one telemetry row, makes one Twin update and emits no new event or transition. | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.aRedeliveredMessageIdStoresOneRowAndHasNoSecondSideEffect (one row, one Twin transition, no second event, realtime publication or rule fact); TelemetryInboxMosquittoIntegrationTest.theSameMessageIdPublishedTwiceByTheSenderIsStoredOnce (real Mosquitto) |
+| P4-076 | Dedupe row and telemetry commit atomically | Fault injection | A rollback or crash leaves neither a dedupe row nor a telemetry row; they commit together. | R07, R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.aFailureAfterTheClaimRemovesTheClaimAndEveryEffectAndTheRetryIsAcceptedNormally (an injected failure after the telemetry write and the Twin update leaves no dedupe row, telemetry, Twin, transition, event or realtime publication; the redelivery is a first acceptance); TelemetryInboxIntegrationTest.aTransientInfrastructureFailureOfTheClaimPropagatesUnchangedAndLeavesNoTrace. Rollback injection only: process-kill points belong to P4.8 |
+| P4-077 | Messages without messageId are never deduplicated | PostgreSQL integration | Two samples with identical timestamp and value but no messageId are both stored. | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.messagesWithoutAnIdAreNeverDeduplicatedEvenWhenIdentical; TelemetryInboxIntegrationTest.identicalReadingsWithDifferentIdsAreAcceptedIndependently |
+| P4-078 | MessageId is scoped by device | PostgreSQL integration | The same messageId from two devices is stored twice. | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.theSameIdFromTwoDevicesIsStoredTwice; InboundMessageDedupeSchemaTest.theKeyIsPerDeviceAndSharedByMqttAndHttp |
+| P4-079 | Conflicting duplicate keeps the first | PostgreSQL integration | Same messageId with a different value stores nothing new, logs and counts a conflict. | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.aConflictingDuplicateStoresNothingAndKeepsTheFirstPayload (first payload kept, conflict counted, a different timestamp is also a conflict); TelemetryInboxIntegrationTest.httpDuplicateIsASuccessfulNoOpAndAConflictIs409AcrossTransports (HTTP 409); TelemetryListenerPoisonClassificationTest.aConflictingDuplicateIsAcknowledgedDroppedAndCounted (MQTT) |
+| P4-080 | Invalid messageId is rejected | API (MockMvc) | A messageId that is non-text, too long or outside the allowed characters is treated as invalid input (HTTP 400, MQTT acknowledge and drop). | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.aMessageIdThatIsNotTextOrViolatesTheFormatIsHttp400AndStoresNothing; TelemetryRequestMessageIdTest.aNonTextIdIsRejectedWhileParsingAndIsNeverCoercedToText; TelemetryRequestMessageIdTest.aTextIdOutsideTheFormatIsAViolationAndNeverTreatedAsAbsent; TelemetryListenerPoisonClassificationTest.anInvalidMessageIdIsAcknowledgedDroppedAndNeverReachesTheService (MQTT acknowledge and drop, counted) |
+| P4-081 | Crash before the MQTT acknowledgement is deduplicated | PostgreSQL + Mosquitto integration | A message processed but not acknowledged to the broker is redelivered after restart and suppressed. | R17 | P4.5 | COVERED | TelemetryInboxMosquittoIntegrationTest.aMessageProcessedButNeverAcknowledgedIsRedeliveredAfterARestartAndSuppressed (real Mosquitto, persistent session: process 1 stores the message and dies before the acknowledgement, process 2 with the same client id receives the redelivery from the broker, one stored row, one Twin transition, the duplicate counted, and a further restart receives nothing) |
+| P4-082 | Dedupe window purge is bounded and documented | PostgreSQL integration | Expired ids are purged without touching telemetry; a purged id is accepted again and this limit is documented. | R17, R19 | P4.5 | COVERED | InboundMessageDedupeRetentionIntegrationTest.theWindowBoundaryIsExactOnTheDatabaseClockAndOnlyOldEntriesGo; InboundMessageDedupeRetentionIntegrationTest.thePurgeIsBoundedPerRunAndContinuesOnTheNextRun; InboundMessageDedupeRetentionIntegrationTest.aPurgedIdIsAcceptedAgainAndTelemetryIsNeverTouchedByThePurge (the documented limit, contract R35); InboundMessageDedupeRetentionIntegrationTest.aFailingPurgeLeavesEveryOtherCategoryCommitted |
+| P4-083 | HTTP ingestion uses the same semantics | API (MockMvc) | POST /api/v1/telemetry with a repeated messageId returns an explicit duplicate/no-op response (success status, additive duplicate field), stores nothing and causes no second Twin transition; the MQTT path behaves identically. | R17, R21 | P4.5 | COVERED | TelemetryInboxIntegrationTest.httpDuplicateIsASuccessfulNoOpAndAConflictIs409AcrossTransports (201 then 200 with duplicate true and the original id, no second transition, an id first seen over HTTP is a duplicate over MQTT) |
+| P4-084 | Onboarding telemetry is not double-counted | PostgreSQL integration | A duplicate first onboarding reading neither advances the session twice nor activates the device twice. | R17, R24 | P4.5 | COVERED | TelemetryInboxOnboardingAndDeletionIntegrationTest.aDuplicateOfTheFirstOnboardingReadingNeitherAdvancesTheSessionNorActivatesTheDeviceAgain; TelemetryInboxOnboardingAndDeletionIntegrationTest.anInvalidFirstOnboardingReadingLeavesNoDedupeEvidenceSoTheSameIdCanStillOnboardTheDevice |
+| P4-085 | Concurrent duplicates store once | Concurrency (multiple connections / instances) | Two threads submitting one messageId store exactly one row via the unique constraint. | R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.concurrentIdenticalSubmissionsCommitExactlyOnce (12 threads over both transports: one accepted, eleven duplicates, one row, one rule fact, one realtime publication); TelemetryInboxIntegrationTest.concurrentSubmissionsOfOneIdWithDifferentPayloadsStoreOneAndConflictTheRest |
+| P4-086 | Hypertable is untouched | Migration on populated database | V40 creates only the dedupe table; telemetry_history schema and the V1 to V36 checksums are unchanged. | R17, R23 | P4.5 | COVERED | InboundMessageDedupeUpgradeMigrationTest.populatedV39UpgradeKeepsTelemetryAndHistoryUntouchedAndAddsOnlyTheEmptyTable (telemetry_history columns, hypertable dimensions and rows identical, V1 to V39 checksums unchanged, the dedupe table empty); InboundMessageDedupeSchemaTest.v40IsInstalledAsTheLatestMigrationOnAFreshDatabase |
 
 ## I. Backpressure and rate limiting
 
@@ -185,7 +185,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-105 | Outbox flag defaults to OFF | Unit | The default configuration and the shipped application.yml have the outbox disabled. | R22 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSettingsTest.theShippedApplicationYmlLeavesTheOutboxDisabledWithTheDocumentedDefaults; CommandOutboxPersistenceIntegrationTest.theOutboxFeatureFlagIsOffInTheRunningApplication |
 | P4-106 | Flag OFF is byte-for-byte legacy behaviour | PostgreSQL integration | With the flag OFF no outbox or state-history rows are created for commands and the legacy publish path is unchanged. | R22, R24 | P4.2 | COVERED | CommandOutboxFlagOffIntegrationTest (no dispatcher bean, direct publish, publish-time timestamp, SUCCESS, no outbox or history row, API JSON unchanged); the unchanged legacy suites pass in the full gate (174 classes, 1,387 tests) |
 | P4-107 | Rollback drains the queue | Fault injection | Turning the flag OFF with queued rows lets the dispatcher drain them to a terminal state or expiry; none is stranded. | R22 | P4.8 | PLANNED | not yet written |
-| P4-108 | Migrations are forward-only and checksum-safe | Migration on populated database | V37 to V40 apply on a populated disposable database; V1 to V36 checksums are asserted unchanged. | R23 | P4.5 | PLANNED | partial (P4.1): V37 proven by CommandOutboxUpgradeMigrationTest (V1 to V36 checksums unchanged, populated upgrade); V39 and V40 outstanding |
+| P4-108 | Migrations are forward-only and checksum-safe | Migration on populated database | V37 to V40 apply on a populated disposable database; V1 to V36 checksums are asserted unchanged. | R23 | P4.5 | COVERED | CommandOutboxUpgradeMigrationTest.populatedV36UpgradeKeepsHistoryUntouchedAndCreatesNoPublishableWork (a populated V36 database migrated to the latest version, now V40, with the V1 to V36 checksums asserted unchanged); CommandStateHistoryBackfillMigrationTest (V38 to V39); InboundMessageDedupeUpgradeMigrationTest (populated V39 to V40, V1 to V39 checksums asserted unchanged); InboundMessageDedupeSchemaTest (fresh V1 to V40) |
 | P4-109 | Mixed historical rows migrate correctly | Migration on populated database | A database containing ACCEPTED_FOR_DISPATCH, PUBLISHED, acknowledged and failed commands migrates with the expected outcome for each. | R16, R23 | P4.2 | COVERED | CommandStateHistoryBackfillMigrationTest (accepted, recent, published, acknowledged, successful, failed, outbox-owned and non-command rows each get the expected outcome); P4.1 CommandOutboxUpgradeMigrationTest (V36 to latest) |
 | P4-110 | Phase 3 regression with the flag OFF | Validation gate / audit | The complete Phase 3 backend suite passes unchanged with no weakened assertion. | R24, R29 | P4.8 | PLANNED | not yet written |
 | P4-111 | Phase 3 regression with the flag ON | Validation gate / audit | The Phase 3 rule dispatch, arbitration and plan outcome suites pass with outbox delivery; candidate outcomes are not rewritten by retries. | R24, R29 | P4.8 | PLANNED | not yet written |
@@ -199,10 +199,10 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-117 | Simulator emits an optional messageId | Simulator (pytest) | Each simulated telemetry publication carries a new UUID messageId; payloads remain valid for the existing contract. | R25 | P4.5 | PLANNED | not yet written |
-| P4-118 | Simulator can re-send an identical message | Simulator (pytest) | A test hook republishes the same payload and messageId to model broker redelivery. | R25 | P4.5 | PLANNED | not yet written |
+| P4-117 | Simulator emits an optional messageId | Simulator (pytest) | Each simulated telemetry publication carries a new UUID messageId; payloads remain valid for the existing contract. | R25 | P4.5 | COVERED | test_telemetry_message_id.py::test_every_mqtt_publication_carries_a_fresh_valid_uuid_message_id_and_keeps_the_existing_contract; test_readback_telemetry_also_carries_an_id_and_a_caller_supplied_id_is_kept; test_the_http_publisher_carries_an_id_resends_identically_and_treats_a_duplicate_200_as_success |
+| P4-118 | Simulator can re-send an identical message | Simulator (pytest) | A test hook republishes the same payload and messageId to model broker redelivery. | R25 | P4.5 | COVERED | test_telemetry_message_id.py::test_the_redelivery_hook_resends_the_identical_bytes; test_a_new_publication_after_a_redelivery_gets_a_new_id; the HTTP variant in test_the_http_publisher_carries_an_id_resends_identically_and_treats_a_duplicate_200_as_success |
 | P4-119 | Firmware directory is unchanged | Validation gate / audit | git diff over firmware/** and hardware-tests/** is empty for every Phase 4 slice. | R25 | P4.8 | PLANNED | not yet written |
-| P4-120 | Legacy payloads without messageId stay accepted | PostgreSQL integration | A telemetry payload exactly as the committed firmware sends it is accepted and stored unchanged. | R17, R25 | P4.5 | PLANNED | not yet written |
+| P4-120 | Legacy payloads without messageId stay accepted | PostgreSQL integration | A telemetry payload exactly as the committed firmware sends it is accepted and stored unchanged. | R17, R25 | P4.5 | COVERED | TelemetryInboxIntegrationTest.aPayloadExactlyAsTheCommittedFirmwareSendsItIsStillAcceptedAndStoredUnchanged (HTTP 201, stored, no dedupe entry); TelemetryRequestMessageIdTest.aPayloadExactlyAsTheCommittedFirmwareSendsItStillParsesUnchanged; TelemetryRequestMessageIdTest.anAbsentOrNullIdMeansNoDeduplicationAndIsValid |
 | P4-121 | Firmware freshness semantics are modelled without changing the simulator | Unit | A test-side helper models the firmware check (absolute difference above 30 seconds is STALE) and the delivery window is verified against it; simulator behaviour, including its 300 second default, is unchanged. | R11, R25 | P4.3 | COVERED | FirmwareFreshnessBoundaryTest.theModelRejectsOnlyAnAbsoluteAgeAboveThirtySecondsInBothDirections and ...aCommandPublishedAtTheEdgeOfEveryAllowedWindowIsAcceptedByTheDeviceWithinTheBudgetedMargin (every window 2 s to 20 s, device clock error -5/0/+5 s, 8 s of budgeted extras, 2 s left over); simulator/tests/test_p43_retry_duplicates.py::test_the_test_side_model_of_the_firmware_check_is_absolute_and_thirty_seconds and ::test_the_simulator_default_is_deliberately_not_the_firmware_check_and_is_left_unchanged (the simulator and the firmware are NOT modified; the model is a test function) |
 | P4-122 | Window arithmetic at the freshness boundary | Unit | With an injected clock a command published at the window edge is accepted by a 30 second device check allowing the margin, and one past the ceiling is never produced. | R11 | P4.3 | COVERED | FirmwareFreshnessBoundaryTest.theCeilingIsExactlyTheLargestWindowThatKeepsTheWorstCaseAgeInsideTheDeviceCheck (20 s + 8 s = 28 s against 30 s; an attempt past the edge would be rejected), ...aWindowAboveTheCeilingCannotBeConfiguredSoNoCommandPastItIsEverProduced, ...theRetryPolicyNeverSchedulesAStartAtOrAfterTheEndOfTheWindowSoTheEdgeArithmeticHolds; OutboxRetryPolicyTest.aRetryThatCannotStartBeforeTheWindowEndsIsDeadLetteredAsExpiredWithExactBoundary; OutboxRetryOperationsTest.aRetryThatCannotStartBeforeExpiryIsDeadLetteredAsExpiredAndNeverSent and ...aRetryWaitRowWhoseWindowEndedDuringTheBackoffExpiresWithoutAnyFurtherAttempt (database clock); mutation M3 is killed |
 | P4-123 | Documents never claim exactly-once physical actuation | Validation gate / audit | A documentation audit over Phase 4 documents, API descriptions and UI strings finds no exactly-once or physical-actuation guarantee. | R03, R29 | P4.8 | PLANNED | partial (P4.2): OutboxArchitectureTest.noExactlyOnceDeliveryOrPublicationIsEverClaimedWithoutANegation audits backend source, yaml, SQL and frontend source; the documentation and API-description audit over all Phase 4 documents is P4.8 |
@@ -262,6 +262,20 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-157 | The timeout worker and the reconciler cannot publish or touch delivery state | Validation gate / audit | An architecture test shows they have no publisher, MQTT client, executor, dispatcher, verification or outbox writing SQL; the ACK path takes no outbox lock. | R14, R16, R31 | P4.4 | COVERED | OutboxArchitectureTest.theAckTimeoutWorkerTheReconcilerAndTheAckFactsCanNeverPublishRequeueOrTouchVerificationOrDesiredState, ...onlyTheOwningClassesAppendTheTimeoutAndTheDeliveryUnknownFacts, ...theAckPathTakesNoLockOnTheOutboxRowSoItCannotCloseALockCycleWithTheDispatcher; mutations M6, M7, M10 and M14 are killed |
 | P4-158 | An ACK racing the timeout worker never yields contradictory history | Concurrency (multiple connections / instances) | Twelve rounds of an ACK and the timeout scan racing for the same row end either with ACK_ACCEPTED alone or with ACK_TIMED_OUT, ACK_ACCEPTED, ACK_AFTER_TIMEOUT in that order; exactly one ACK outcome in every round. | R13, R14 | P4.4 | COVERED | CommandAckFactsIntegrationTest.anAckAndTheTimeoutScannerRacingForTheSameRowNeverProduceContradictoryHistory (12 rounds on two threads: ACK_ACCEPTED alone, or ACK_TIMED_OUT then ACK_ACCEPTED then ACK_AFTER_TIMEOUT, never the reverse, exactly one ACK outcome); CommandLifecycleScannersLiveIntegrationTest.manyCommandsAcksTimeoutsAndReconciliationRunningTogetherNeitherDeadlockNorContradictThemselves (12 commands on 6 devices, scheduled workers, real broker); CommandAckTimeoutScannerTest.aFirstAckHoldingTheRowWinsAndTheScannerWaitsThenWritesNothing |
 
+## Q. P4.5 additional scenarios (added by the P4.5 review)
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P4-159 | Only explicitly identified deterministic payload failures are acknowledged and dropped | Unit | The MQTT listener acknowledges, drops and counts (fixed reason tag) InvalidTelemetryException, TelemetryMessageConflictException, OnboardingTelemetryRejectedException, malformed JSON and an invalid messageId; every database, connection, lock, timeout, IllegalStateException, unknown exception, unknown device and a bare IllegalArgumentException from another layer stays unacknowledged and retryable; an identical duplicate is acknowledged without a rejection. | R17 | P4.5 | COVERED | TelemetryListenerPoisonClassificationTest (all 8 tests); TelemetryInboxMosquittoIntegrationTest.theSameMessageIdPublishedTwiceByTheSenderIsStoredOnce (real broker: the rehearsal poison message is delivered exactly once and the next message is processed) |
+| P4-160 | A messageId is a JSON string and is never coerced | Unit | A number, boolean, object or array is refused while parsing and names the messageId field; absent and JSON null mean no deduplication; the allowed alphabet and the 64 character limit are accepted; empty, whitespace, non-ASCII and 65 characters violate validation. | R17 | P4.5 | COVERED | TelemetryRequestMessageIdTest (all 5 tests) |
+| P4-161 | The fingerprint contract | Unit | The canonical text is exactly the documented encoding; property order, number spelling (1, 1.0, 1e0) and timestamp spelling never change the fingerprint; value types, absent versus empty fields and separator forgery are never confused; the messageId, device and transport are excluded; structured values ignore key order but keep array order; no timestamp is invented; MQTT and HTTP mappers give the same fingerprint. | R17 | P4.5 | COVERED | TelemetryFingerprintTest (all 8 tests) |
+| P4-162 | Device deletion removes the entries and cannot be blocked or orphaned by them | PostgreSQL integration | The device foreign key cascades; deleting through DeviceService removes the entries and leaves no orphan; a deletion racing a live ingestion ends with no entry, no telemetry and no dangling failure; the V38 deletion guard is untouched. | R17, R30 | P4.5 | COVERED | InboundMessageDedupeSchemaTest.deletingTheDeviceRemovesItsEntriesAndNothingIsOrphaned; TelemetryInboxOnboardingAndDeletionIntegrationTest.deletingADeviceThroughTheServiceRemovesItsEntriesAndLeavesNoOrphan; TelemetryInboxOnboardingAndDeletionIntegrationTest.deletionRacingALiveIngestionNeverLeavesAnOrphanedEntryOrADanglingFailure; TelemetryInboxIntegrationTest.deletingADeviceRemovesItsEntriesWithoutOrphansAndDoesNotTouchOtherDevices; the existing CommandOutboxDeviceDeletionApiIntegrationTest still passes |
+| P4-163 | The retention window cannot be configured below the floor and the purge is bounded and independent | PostgreSQL integration | A window below 24 hours, or a non-positive batch size or batch count, fails startup; the default is 168 hours; the purge deletes at most batch size times maximum batches rows per run, each batch in its own transaction, and a failing purge leaves the other categories committed. | R17, R19 | P4.5 | COVERED | RetentionManagerInboundDedupeSettingsTest (both tests); InboundMessageDedupeRetentionIntegrationTest.thePurgeIsBoundedPerRunAndContinuesOnTheNextRun; InboundMessageDedupeRetentionIntegrationTest.aFailingPurgeLeavesEveryOtherCategoryCommitted |
+| P4-164 | Concurrent different samples of one device neither deadlock nor hang | Concurrency (multiple connections / instances) | Forty rounds of six simultaneous samples of one device (MQTT and HTTP, with and without a messageId) all complete without a duplicate and the row counts are exact. Records the investigated hazard: the claim's key-share lock does not conflict with the Twin update's FOR NO KEY UPDATE. | R07, R17 | P4.5 | COVERED | TelemetryInboxIntegrationTest.concurrentDifferentMessagesOfOneDeviceNeitherDeadlockNorHang |
+| P4-165 | A poison message on the real broker is acknowledged once and does not block the next message | PostgreSQL + Mosquitto integration | The legacy numeric 1.0 for a BOOLEAN capability published QoS 1 on a real Mosquitto broker is delivered exactly once, acknowledged and dropped without a dedupe entry; the next valid message is processed. | R17, R25 | P4.5 | COVERED | TelemetryInboxMosquittoIntegrationTest.theSameMessageIdPublishedTwiceByTheSenderIsStoredOnce |
+| P4-166 | The repository simulation runner sends BOOLEAN capabilities in the generic shape | Simulator (pytest) | publish_tick sends MOTION and BUTTON as a JSON boolean with unit BOOLEAN and the capability key; numeric capabilities are unchanged. | R25 | P4.5 | COVERED | test_telemetry_message_id.py::test_the_grand_simulation_sends_boolean_capabilities_in_the_generic_boolean_shape |
+| P4-167 | The duplicate field is additive | API (MockMvc) | A normal acceptance omits the duplicate field (existing clients see the same shape and 201); an identical duplicate is 200 with duplicate true. | R17, R21 | P4.5 | COVERED | TelemetryInboxIntegrationTest.httpDuplicateIsASuccessfulNoOpAndAConflictIs409AcrossTransports; TelemetryInboxIntegrationTest.aPayloadExactlyAsTheCommittedFirmwareSendsItIsStillAcceptedAndStoredUnchanged |
+
 ## Coverage mapping
 
 ### By slice
@@ -272,7 +286,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4.2 | 46 | P4-001, P4-002, P4-003, P4-004, P4-005, P4-006, P4-009, P4-010, P4-011, P4-012, P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-024, P4-025, P4-031, P4-036, P4-068, P4-098, P4-099, P4-106, P4-109, P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-144, P4-145, P4-146, P4-147, P4-148, P4-149, P4-150, P4-151, P4-152 |
 | P4.3 | 17 | P4-026, P4-027, P4-028, P4-029, P4-030, P4-032, P4-034, P4-035, P4-039, P4-040, P4-041, P4-042, P4-043, P4-044, P4-045, P4-121, P4-122 |
 | P4.4 | 20 | P4-047, P4-048, P4-049, P4-050, P4-051, P4-052, P4-053, P4-054, P4-055, P4-056, P4-069, P4-070, P4-071, P4-074, P4-153, P4-154, P4-155, P4-156, P4-157, P4-158 |
-| P4.5 | 17 | P4-072, P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-108, P4-117, P4-118, P4-120 |
+| P4.5 | 26 | P4-072, P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-108, P4-117, P4-118, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-166, P4-167 |
 | P4.6 | 6 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092 |
 | P4.7 | 14 | P4-033, P4-057, P4-058, P4-073, P4-094, P4-095, P4-096, P4-097, P4-100, P4-101, P4-102, P4-103, P4-104, P4-114 |
 | P4.8 | 20 | P4-046, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-067, P4-093, P4-107, P4-110, P4-111, P4-112, P4-113, P4-115, P4-116, P4-119, P4-123 |
@@ -282,15 +296,15 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Layer | Count |
 |---|---|
-| PostgreSQL integration | 69 |
-| Concurrency (multiple connections / instances) | 17 |
+| PostgreSQL integration | 71 |
+| Concurrency (multiple connections / instances) | 18 |
 | Fault injection | 17 |
-| PostgreSQL + Mosquitto integration | 12 |
-| Unit | 12 |
+| PostgreSQL + Mosquitto integration | 13 |
+| Unit | 15 |
 | Validation gate / audit | 10 |
-| API (MockMvc) | 9 |
+| API (MockMvc) | 10 |
 | Migration on populated database | 5 |
-| Simulator (pytest) | 3 |
+| Simulator (pytest) | 4 |
 | Frontend (Vitest) | 2 |
 | Mutation check | 1 |
 | Design decision (no test) | 1 |
@@ -332,7 +346,7 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R04 | 8 | P4-007, P4-008, P4-125, P4-127, P4-130, P4-133, P4-134, P4-135 |
 | R05 | 1 | P4-008 |
 | R06 | 5 | P4-009, P4-010, P4-032, P4-094, P4-139 |
-| R07 | 9 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141, P4-151 |
+| R07 | 10 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141, P4-151, P4-164 |
 | R08 | 8 | P4-001, P4-002, P4-003, P4-004, P4-011, P4-031, P4-044, P4-137 |
 | R09 | 18 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133, P4-146, P4-150 |
 | R10 | 14 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149, P4-154 |
@@ -342,20 +356,20 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R14 | 9 | P4-052, P4-053, P4-054, P4-056, P4-065, P4-103, P4-155, P4-157, P4-158 |
 | R15 | 11 | P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-132 |
 | R16 | 7 | P4-068, P4-069, P4-070, P4-071, P4-074, P4-109, P4-157 |
-| R17 | 13 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120 |
+| R17 | 21 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-167 |
 | R18 | 9 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093 |
-| R19 | 8 | P4-082, P4-125, P4-126, P4-129, P4-130, P4-131, P4-132, P4-139 |
+| R19 | 9 | P4-082, P4-125, P4-126, P4-129, P4-130, P4-131, P4-132, P4-139, P4-163 |
 | R20 | 8 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103, P4-147 |
-| R21 | 11 | P4-033, P4-043, P4-073, P4-083, P4-097, P4-098, P4-099, P4-101, P4-102, P4-103, P4-104 |
+| R21 | 12 | P4-033, P4-043, P4-073, P4-083, P4-097, P4-098, P4-099, P4-101, P4-102, P4-103, P4-104, P4-167 |
 | R22 | 8 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152 |
 | R23 | 5 | P4-068, P4-072, P4-086, P4-108, P4-109 |
 | R24 | 17 | P4-011, P4-031, P4-041, P4-042, P4-044, P4-048, P4-051, P4-056, P4-084, P4-089, P4-106, P4-110, P4-111, P4-113, P4-114, P4-149, P4-152 |
-| R25 | 5 | P4-117, P4-118, P4-119, P4-120, P4-121 |
+| R25 | 7 | P4-117, P4-118, P4-119, P4-120, P4-121, P4-165, P4-166 |
 | R26 | 2 | P4-029, P4-145 |
 | R27 | 1 | P4-116 |
 | R28 | 1 | P4-124 |
 | R29 | 6 | P4-046, P4-110, P4-111, P4-116, P4-123, P4-131 |
-| R30 | 4 | P4-125, P4-126, P4-127, P4-128 |
+| R30 | 5 | P4-125, P4-126, P4-127, P4-128, P4-162 |
 | R31 | 9 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-153, P4-157 |
 | R32 | 3 | P4-145, P4-146, P4-147 |
 
@@ -363,7 +377,7 @@ Clauses with no scenario of their own (definitional or covered through other cla
 
 ## Evidence not yet produced
 
-Everything except the COVERED scenarios and the P4.1 and P4.2 evidence recorded below. In particular there is no recorded evidence yet for crash recovery, duplicate publication, retry bounds, legacy reconciliation, telemetry deduplication, backpressure or the enablement procedure.
+Everything except the COVERED scenarios and the P4.1 and P4.2 evidence recorded below. In particular there is no recorded evidence yet for process-kill crash recovery, backpressure or the enablement procedure (retries, ACK facts, legacy reconciliation and telemetry deduplication are recorded in the P4.3 to P4.5 sections).
 
 ## P4.1 evidence (2026-10-15, including the safety corrections)
 
@@ -698,3 +712,86 @@ Budget: the backend suite took **1,241 s** in the passing run, which exceeds the
 - An ACK is not authenticated and is not proof that anything physical happened; an ACK timeout is not proof that nothing did. The committed firmware still has no commandId deduplication.
 - For legacy rows the stored acceptance timestamp is an application-clock value; an application clock more than the 5 minute grace behind could make a still-running legacy dispatch look old, with a spurious history fact as the only effect. `CommandStatus.from` still computes TIMED_OUT on read with the application clock (R14).
 - A command acknowledged while QUEUED or RETRY_WAIT ends as UNCERTAIN_EXPIRED and holds its device for 40 seconds: conservative by design.
+
+## P4.5 evidence (2026-10-17, isolated worktree `D:\nexus-p45`, branch `feature/p45-telemetry-inbox`, started from `e2c77ec`)
+
+Only the scenarios marked COVERED in the tables above are proven, each by the exact tests cited in its row. Nothing here claims exactly-once processing, authenticated message identity (Phase 7), device-side deduplication, multi-process evidence, process-kill fault injection (P4.8) or any physical outcome. Authority: contract R35.
+
+### What P4.5 built
+
+- V40 `inbound_message_dedupe` (primary key `(device_id, message_id)`, source is a label only, SHA-256 fingerprint, nullable original record id without a foreign key, device foreign key ON DELETE CASCADE, database-clock `received_at`, purge index). No other table is created or altered; `telemetry_history`, V1 to V39 and `firmware/**` are untouched.
+- `TelemetryRequest.messageId` (strict JSON string, format `^[A-Za-z0-9._:-]{1,64}$`), `StrictMessageIdDeserializer`, `TelemetryFingerprint` (contract v1), `InboundMessageDedupe` (insert-first claim, MANDATORY transaction), `TelemetrySource`, `InvalidTelemetryException`, `TelemetryMessageConflictException`.
+- `TelemetryService.processTelemetry(request, source)`: claim before every effect, duplicate and conflict outcomes, counters; typed validation failures; `TelemetryController`: 201 / 200 with additive `duplicate` / 409 / 400; `GlobalExceptionHandler`: 409 for a conflict.
+- `TelemetryMQTTListener`: the narrow permanent-failure classification (decision A1) with the `nexus.telemetry.permanent.rejections` counter; everything else stays retryable.
+- `RetentionManager`: category `INBOUND_MESSAGE_DEDUPE` (bounded batches, independent transactions, database clock, 24 hour floor, default 168 hours).
+- Simulator: UUID `messageId` on every publication, `republish_last()` hooks, HTTP 200 accepted; `grand_simulation.py`: generic boolean shape for BOOLEAN capabilities.
+- Not changed: `firmware/**`, `hardware-tests/**`, the frontend, V1 to V39, the command outbox, the rule engine, ACK processing, the user-owned handoff documents, `D:\nexus` and `D:\NEXUS_Review_Prep`.
+
+### Defects and findings recorded while implementing P4.5
+
+1. The BOOLEAN poison-message defect found while rehearsing the review demonstration is now fixed in both halves: the listener classification (A1) and the simulator payload shape.
+2. A suspected lock-ordering deadlock between the claim and the Twin update was investigated and ruled out (Hibernate emits FOR NO KEY UPDATE; see P4-164). A first version of the concurrency test used twelve threads and hung; the cause was not a lock but the pre-existing connection pool starvation (finding 3), so the test uses six threads.
+3. **Pre-existing, unrelated, not changed:** with the pool at 10, twelve concurrent telemetry submissions of one device with no messageId made two fail with `CannotCreateTransactionException` after 30 s, because each committing sample needs a second connection in its after-commit step while still holding the first (reproduced by a probe that was removed). Only concurrent HTTP bursts can reach it; the MQTT callback is single threaded.
+4. **Pre-existing, unrelated, not changed:** an unknown device or a device that is not admitted is still retried forever over MQTT.
+5. `TelemetryMQTTListenerTest` was adapted mechanically: its 28 mock stubs and verifications now name the explicit source (`eq(TelemetrySource.MQTT)`), which is stricter, not weaker; no assertion was removed.
+6. The first run of the simulator mutation checks reported both mutants killed with zero failed tests: the runner had passed a wrong relative test path, so pytest errored instead of failing a test. The runner was corrected and both mutations were rerun and killed by real test failures (the table below shows the corrected results).
+
+### P4.5 tests (55 new JUnit tests in 10 new classes, 6 new pytest tests; 41 existing listener tests adapted)
+
+| Test class | Tests | Layer | What it establishes |
+|---|---|---|---|
+| `com.nexus.telemetry.inbox.InboundMessageDedupeSchemaTest` | 6 | PostgreSQL / TimescaleDB, fresh V1 to V40 | Key per device shared by both sources, constraints, cascade without orphans, no foreign key on the record reference, database-clock default and purge index |
+| `com.nexus.telemetry.inbox.InboundMessageDedupeUpgradeMigrationTest` | 1 | Migration on a populated V39 database | Telemetry (rows, columns, hypertable), commands, outbox, history and V1 to V39 checksums unchanged; only the empty dedupe table is added |
+| `com.nexus.telemetry.api.dto.TelemetryRequestMessageIdTest` | 5 | Unit | Strict parsing, validation, null and absent, firmware payload |
+| `com.nexus.telemetry.application.TelemetryFingerprintTest` | 8 | Unit | The fingerprint contract |
+| `com.nexus.infrastructure.mqtt.TelemetryListenerPoisonClassificationTest` | 8 | Unit (real mapper and validator, mocked service) | Permanent versus retryable classification, fixed-reason metric |
+| `com.nexus.infrastructure.retention.RetentionManagerInboundDedupeSettingsTest` | 2 | Unit | Floor, positive batch settings, safe default |
+| `com.nexus.infrastructure.retention.InboundMessageDedupeRetentionIntegrationTest` | 4 | Spring + PostgreSQL | Exact boundary on the database clock, bounded batches, purged id accepted again, failing purge isolated |
+| `com.nexus.telemetry.inbox.TelemetryInboxIntegrationTest` | 15 | Spring + PostgreSQL + MockMvc | Redelivery, no-id, per-device, conflict, HTTP semantics, invalid ids, firmware payload, rollback atomicity, outage propagation, typed invalid input, concurrency (identical, conflicting, mixed), cascade |
+| `com.nexus.telemetry.inbox.TelemetryInboxOnboardingAndDeletionIntegrationTest` | 4 | Spring + PostgreSQL | Onboarding duplicate and invalid first reading, deletion through the service and racing an ingestion |
+| `com.nexus.telemetry.inbox.TelemetryInboxMosquittoIntegrationTest` | 2 | Spring + PostgreSQL + REAL Mosquitto | Crash before the acknowledgement then redelivery to a restarted process and suppression; sender repeats; poison message acknowledged once |
+| `simulator/tests/test_telemetry_message_id.py` | 6 | Simulator (pytest) | UUID ids, redelivery hook, HTTP variant, boolean shape of the runner |
+
+### Mutation checks (14 of 14 killed; every file restored and verified byte for byte with `cmp`)
+
+| # | Mutation | Killed by (first tests) | Result |
+|---|---|---|---|
+| M1 | The messageId claim is skipped (no deduplication at all) | TelemetryInboxIntegrationTest.aConflictingDuplicateStoresNothingAndKeepsTheFirstPayload; TelemetryInboxIntegrationTest.aFailureAfterTheClaimRemovesTheClaimAndEveryEffectAndTheRetryIsAcceptedNormally | killed, Tests run: 21, Failures: 13, Errors: 1, 235s; restored byte for byte: yes |
+| M2 | The claim commits in its own transaction instead of the ingestion transaction (atomicity removed) | TelemetryInboxIntegrationTest.aFailureAfterTheClaimRemovesTheClaimAndEveryEffectAndTheRetryIsAcceptedNormally; TelemetryInboxIntegrationTest.concurrentIdenticalSubmissionsCommitExactlyOnce | killed, Tests run: 15, Failures: 2, Errors: 1, 198s; restored byte for byte: yes |
+| M3 | A conflicting duplicate is treated as an identical one (the fingerprint comparison is removed) | TelemetryInboxIntegrationTest.aConflictingDuplicateStoresNothingAndKeepsTheFirstPayload; TelemetryInboxIntegrationTest.concurrentSubmissionsOfOneIdWithDifferentPayloadsStoreOneAndConflictTheRest | killed, Tests run: 15, Failures: 3, Errors: 0, 137s; restored byte for byte: yes |
+| M4 | Every IllegalArgumentException is classified as a permanent invalid message (the A1 over-reach) | TelemetryListenerPoisonClassificationTest.anArbitraryIllegalArgumentExceptionFromADeeperLayerIsNotTreatedAsPermanent | killed, Tests run: 8, Failures: 1, Errors: 0, 69s; restored byte for byte: yes |
+| M5 | Every processing failure is acknowledged and dropped (transient failures lose the message) | TelemetryListenerPoisonClassificationTest.anArbitraryIllegalArgumentExceptionFromADeeperLayerIsNotTreatedAsPermanent; TelemetryListenerPoisonClassificationTest.databaseConnectionLockTimeoutAndUnknownFailuresStayRetryable | killed, Tests run: 8, Failures: 2, Errors: 0, 72s; restored byte for byte: yes |
+| M6 | The purge window is one hour too short (entries just inside the window are purged) | InboundMessageDedupeRetentionIntegrationTest.theWindowBoundaryIsExactOnTheDatabaseClockAndOnlyOldEntriesGo | killed, Tests run: 4, Failures: 1, Errors: 0, 117s; restored byte for byte: yes |
+| M7 | The payload value is left out of the fingerprint | TelemetryFingerprintTest.fieldBoundariesCannotBeForgedThroughValuesContainingSeparators; TelemetryFingerprintTest.structuredValuesIgnoreKeyOrderButKeepArrayOrder | killed, Tests run: 23, Failures: 7, Errors: 0, 136s; restored byte for byte: yes |
+| M8 | The strict messageId deserializer is removed (a number is coerced to text) | TelemetryListenerPoisonClassificationTest.anInvalidMessageIdIsAcknowledgedDroppedAndNeverReachesTheService; TelemetryRequestMessageIdTest.aNonTextIdIsRejectedWhileParsingAndIsNeverCoercedToText | killed, Tests run: 13, Failures: 2, Errors: 0, 67s; restored byte for byte: yes |
+| M9 | The device foreign key no longer cascades | InboundMessageDedupeSchemaTest.deletingTheDeviceRemovesItsEntriesAndNothingIsOrphaned; TelemetryInboxOnboardingAndDeletionIntegrationTest.deletingADeviceThroughTheServiceRemovesItsEntriesAndLeavesNoOrphan | killed, Tests run: 10, Failures: 0, Errors: 3, 145s; restored byte for byte: yes |
+| M10 | A duplicate is detected but processing continues (a second row would be stored) | TelemetryInboxIntegrationTest.aRedeliveredMessageIdStoresOneRowAndHasNoSecondSideEffect; TelemetryInboxIntegrationTest.concurrentIdenticalSubmissionsCommitExactlyOnce | killed, Tests run: 19, Failures: 3, Errors: 1, 218s; restored byte for byte: yes |
+| M11 | An HTTP duplicate answers 201 Created instead of 200 OK | TelemetryInboxIntegrationTest.httpDuplicateIsASuccessfulNoOpAndAConflictIs409AcrossTransports | killed, Tests run: 15, Failures: 1, Errors: 0, 146s; restored byte for byte: yes |
+| M12 | The dedupe purge deletes telemetry as well | InboundMessageDedupeRetentionIntegrationTest.thePurgeIsBoundedPerRunAndContinuesOnTheNextRun; InboundMessageDedupeRetentionIntegrationTest.theWindowBoundaryIsExactOnTheDatabaseClockAndOnlyOldEntriesGo | killed, Tests run: 4, Failures: 2, Errors: 0, 77s; restored byte for byte: yes |
+| M13 | The simulator publishes no messageId | test_every_mqtt_publication_carries_a_fresh_valid_uuid_message_id_and_keeps_the_existing_contract; test_readback_telemetry_also_carries_an_id_and_a_caller_supplied_id_is_kept | killed, failed=3; restored byte for byte: yes |
+| M14 | The redelivery hook does not resend the identical bytes (a new publication) | test_the_redelivery_hook_resends_the_identical_bytes; test_a_new_publication_after_a_redelivery_gets_a_new_id | killed, failed=2; restored byte for byte: yes |
+
+### Validation recorded for P4.5 (2026-10-17)
+
+All runs were made in the isolated worktree with disposable PostgreSQL and Mosquitto containers (random ports); the application's MQTT port and datasource were pointed at unused addresses through the environment, so no test could reach the review demonstration's broker or any development database. The review demonstration was stopped throughout and `D:\nexus` was not touched.
+
+| Gate | Result |
+|---|---|
+| Focused P4.5 classes (10 new classes plus the adapted `TelemetryMQTTListenerTest`) | 96 tests, 0 failures, 0 errors, 0 skipped |
+| Related existing regressions run before the full gate (telemetry, realtime, Twin verification, rule triggers, retention, command outbox persistence and schemas, device deletion, migrations, architecture audit) | 23 classes, 197 tests, 0 failures |
+| `python validate_nexus.py --fast` | 8 of 8 PASS (54 s) |
+| `python validate_nexus.py --full` | 11 of 11 PASS (backend suite 1,379 s, inside the 1,800 s budget, which was not changed; smokes 18.6 s, 25.8 s and 53.7 s) |
+| Backend | 203 test classes, 1,641 tests, 0 failures, 0 errors, 0 skipped (1,586 at P4.4 plus 55 new) |
+| Frontend | 63 files, 533 tests, all passed (unchanged), lint and production build passed |
+| Simulator | 68 passed, 3 skipped (62 at P4.4 plus 6 new; the 3 skips are the existing live-stack skips) |
+| Whitespace | `git diff --check` clean, including the new files (checked with intent-to-add) |
+| Protected paths | `firmware/**`, `hardware-tests/**`, `results/**`, the five user-owned documents: no change |
+
+The full gate was run once, after the last source change, as authorised; the backend suite was not repeated after each work package.
+
+### Limitations stated honestly
+
+- No process-kill fault injection of the telemetry path (P4.8): atomicity is proven by an injected failure and a rolled-back transaction, and the real-broker test restarts a client, not the backend process.
+- The messageId is chosen by the sender and is not authenticated (Phase 7). Protection ends when the entry is purged (168 hours by default) and never applies to messages without an id, which includes everything the committed firmware sends.
+- No multi-process evidence: concurrency is exercised with several connections and threads against one disposable PostgreSQL.
+- The pool-starvation and unknown-device retry behaviours described above are pre-existing and unchanged.

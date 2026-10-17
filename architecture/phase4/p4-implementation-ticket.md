@@ -132,6 +132,8 @@ Verification: duplicate, conflicting and late ACK tests; two-instance scanner ra
 
 ## Slice P4.5: telemetry inbox deduplication (V40)
 
+**P4.5 status (2026-10-17): implemented and tested on the isolated branch `feature/p45-telemetry-inbox` (worktree `D:\nexus-p45`, started from `e2c77ec`), not merged. The authoritative description is contract R35 and the P4.5 evidence section of the ledger. Ledger scenarios: 17 COVERED plus 9 added by the P4.5 review (P4-159 to P4-167). Decisions applied: A1 narrow poison-message classification, A2 SHA-256 fingerprint, A3 cascade on device deletion, A4 nullable original reference without a foreign key; HTTP identical duplicate 200 with `duplicate: true`, conflicting duplicate 409.**
+
 Authority: R17, R19, R23, R25. Ledger scenarios: 17 (including P4-072 and P4-108, which complete only when V40 exists).
 
 Deliverables: V40 `inbound_message_dedupe`; an invalid `messageId` is rejected (decision A1); optional `messageId` on `TelemetryRequest` for MQTT and HTTP; insert-first dedupe in the telemetry transaction; conflicting duplicate handling; purge in the retention job; metrics; an explicit duplicate/no-op response for HTTP submissions (decision A5: success status with an additive `duplicate: true` field and no second Twin transition). Simulator emits a UUID `messageId` and offers a redelivery hook. `firmware/**` is not modified; payloads from the committed firmware remain accepted without a messageId.

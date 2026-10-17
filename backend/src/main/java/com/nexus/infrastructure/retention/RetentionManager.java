@@ -41,6 +41,15 @@ public class RetentionManager {
     public static final String DOMAIN_EVENTS = "DOMAIN_EVENTS";
     public static final String COMMAND_OUTBOX = "COMMAND_OUTBOX";
     public static final String ACTION_HISTORY = "ACTION_HISTORY";
+    public static final String INBOUND_MESSAGE_DEDUPE = "INBOUND_MESSAGE_DEDUPE";
+
+    /**
+     * Floor for nexus.retention.inbound-dedupe-hours (P4.5, contract R17/R19). The dedupe entry is the only protection against a redelivered
+     * telemetry message being stored twice, so it must outlive a realistic backend outage; the default is 168 hours and a value below this
+     * floor is refused at startup instead of silently weakening the protection. There is no finite value that covers every redelivery
+     * (the broker keeps a persistent session's unacknowledged messages until the client returns): protection ends when the entry is purged.
+     */
+    public static final int MIN_INBOUND_DEDUPE_HOURS = 24;
 
     /** Outcome of one category: rows affected (or -1 when the operation does not report a count) and the failure, if any. */
     public record CategoryResult(String category, boolean success, long rows, String error) {}
@@ -75,6 +84,25 @@ public class RetentionManager {
 
     @Value("${nexus.retention.actions-days:90}")
     private int actionsDays;
+
+    @Value("${nexus.retention.inbound-dedupe-hours:168}")
+    private int inboundDedupeHours = 168;
+
+    /** Rows deleted per transaction and the most batches one run may issue, so a purge never holds a long lock or runs unbounded. */
+    @Value("${nexus.retention.inbound-dedupe-batch-size:1000}")
+    private int inboundDedupeBatchSize = 1000;
+
+    @Value("${nexus.retention.inbound-dedupe-max-batches:100}")
+    private int inboundDedupeMaxBatches = 100;
+
+    @jakarta.annotation.PostConstruct
+    void validateInboundDedupeSettings() {
+        if (inboundDedupeHours < MIN_INBOUND_DEDUPE_HOURS)
+            throw new IllegalStateException("nexus.retention.inbound-dedupe-hours must be at least " + MIN_INBOUND_DEDUPE_HOURS
+                    + " (was " + inboundDedupeHours + "): a shorter window would stop recognising redelivered telemetry");
+        if (inboundDedupeBatchSize < 1 || inboundDedupeMaxBatches < 1)
+            throw new IllegalStateException("nexus.retention.inbound-dedupe-batch-size and -max-batches must be positive");
+    }
 
     public RetentionManager(EntityManager entityManager, PlatformTransactionManager transactionManager) {
         this.entityManager = entityManager;
@@ -118,15 +146,41 @@ public class RetentionManager {
                 (long) entityManager.createNativeQuery("DELETE FROM action_history a WHERE a.timestamp < NOW() - INTERVAL '" + actionsDays + " days'"
                         + " AND NOT EXISTS (SELECT 1 FROM command_outbox o WHERE o.command_id = a.request_id)"
                         + " AND NOT EXISTS (SELECT 1 FROM current_desired_twin_state d WHERE d.command_id = a.request_id)").executeUpdate()));
+        // P4.5: replay-protection entries of the telemetry inbox, purged by database age in small independent transactions.
+        results.add(report(INBOUND_MESSAGE_DEDUPE, this::purgeInboundMessageDedupe));
         Report report = new Report(List.copyOf(results));
         if (report.failed()) log.error("Retention cleanup job completed WITH FAILURES in categories {}; the other categories were committed.", report.failedCategories());
         else log.info("Retention cleanup job completed.");
         return report;
     }
 
+    /**
+     * Deletes dedupe entries older than the window, one bounded batch per REQUIRES_NEW transaction, until a batch comes back short or the
+     * per-run limit is reached (the next run continues). Age is measured by the database clock (NOW() of each batch transaction), never
+     * the application clock. A purged id is accepted again: the documented limit of the protection.
+     */
+    private Long purgeInboundMessageDedupe() {
+        long total = 0;
+        for (int batch = 0; batch < inboundDedupeMaxBatches; batch++) {
+            Integer deleted = transaction.execute(status -> entityManager.createNativeQuery(
+                    "DELETE FROM inbound_message_dedupe WHERE ctid IN (SELECT ctid FROM inbound_message_dedupe"
+                            + " WHERE received_at < NOW() - make_interval(hours => " + inboundDedupeHours + ")"
+                            + " ORDER BY received_at LIMIT " + inboundDedupeBatchSize + ")").executeUpdate());
+            int rows = deleted == null ? 0 : deleted;
+            total += rows;
+            if (rows < inboundDedupeBatchSize) break;
+        }
+        return total;
+    }
+
     private CategoryResult run(String category, Supplier<Long> body) {
+        return report(category, () -> transaction.execute(status -> body.get()));
+    }
+
+    /** Runs one category and reports it; the body supplies its own transaction(s). A failure is contained to the category. */
+    private CategoryResult report(String category, Supplier<Long> body) {
         try {
-            Long rows = transaction.execute(status -> body.get());
+            Long rows = body.get();
             long count = rows == null ? -1L : rows;
             log.info("Retention category {} completed ({} rows affected)", category, count < 0 ? "n/a" : count);
             if (meters != null && count > 0) meters.counter("nexus.retention.rows.deleted", "category", category).increment(count);

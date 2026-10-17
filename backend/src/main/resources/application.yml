@@ -44,6 +44,8 @@ nexus:
     pipeline-days: 7
     events-days: 90
     actions-days: 90
+    # P4.5 telemetry inbox: how long a messageId is remembered. Protection against redelivery ends when the entry is purged. Minimum 24.
+    inbound-dedupe-hours: ${NEXUS_RETENTION_INBOUND_DEDUPE_HOURS:168}
   command:
     # Phase 4 P4.4 command lifecycle scanners (persisted ACK timeout, legacy delivery reconciliation). Always beans; they never publish
     # and do not consult the outbox flag. Only test contexts that never use them switch the scheduled loops off.

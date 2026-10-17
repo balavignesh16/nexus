@@ -143,6 +143,12 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(com.nexus.telemetry.application.TelemetryMessageConflictException.class)
+    public ResponseEntity<ErrorResponse> handleTelemetryMessageConflict(com.nexus.telemetry.application.TelemetryMessageConflictException ex) {
+        return new ResponseEntity<>(new ErrorResponse(HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(), ex.getMessage(), Instant.now()), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
         ErrorResponse error = new ErrorResponse(

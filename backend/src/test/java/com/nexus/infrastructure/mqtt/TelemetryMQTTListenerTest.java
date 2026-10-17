@@ -6,6 +6,7 @@ import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
+import com.nexus.telemetry.application.TelemetrySource;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
@@ -113,7 +114,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, message);
 
-        verify(telemetryService, times(1)).processTelemetry(any(TelemetryRequest.class));
+        verify(telemetryService, times(1)).processTelemetry(any(TelemetryRequest.class), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -127,7 +128,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         InOrder inOrder = inOrder(telemetryService, mqttClient);
-        inOrder.verify(telemetryService).processTelemetry(any(TelemetryRequest.class));
+        inOrder.verify(telemetryService).processTelemetry(any(TelemetryRequest.class), eq(TelemetrySource.MQTT));
         inOrder.verify(mqttClient).messageArrivedComplete(anyInt(), anyInt());
     }
 
@@ -140,7 +141,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         ArgumentCaptor<TelemetryRequest> captor = ArgumentCaptor.forClass(TelemetryRequest.class);
-        verify(telemetryService).processTelemetry(captor.capture());
+        verify(telemetryService).processTelemetry(captor.capture(), eq(TelemetrySource.MQTT));
         TelemetryRequest request = captor.getValue();
         assertEquals(deviceId, request.deviceId());
         assertEquals(Instant.parse("2026-01-01T00:00:00Z"), request.timestamp());
@@ -156,7 +157,7 @@ class TelemetryMQTTListenerTest {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         MqttMessage message = messageFor(validPayload(deviceId));
-        when(telemetryService.processTelemetry(any())).thenThrow(new RuntimeException("simulated DB failure"));
+        when(telemetryService.processTelemetry(any(), eq(TelemetrySource.MQTT))).thenThrow(new RuntimeException("simulated DB failure"));
 
         assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
 
@@ -173,7 +174,7 @@ class TelemetryMQTTListenerTest {
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         MqttMessage message = messageFor(validPayload(deviceId));
         RuntimeException cause = new RuntimeException("device repository unavailable");
-        when(telemetryService.processTelemetry(any())).thenThrow(cause);
+        when(telemetryService.processTelemetry(any(), eq(TelemetrySource.MQTT))).thenThrow(cause);
 
         RuntimeException thrown = assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
         assertEquals(cause, thrown.getCause(), "original failure must be preserved as the cause");
@@ -190,7 +191,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, message);
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -218,7 +219,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived("short/topic", message);
 
-        verify(telemetryService, times(1)).processTelemetry(any());
+        verify(telemetryService, times(1)).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(anyInt(), anyInt());
     }
 
@@ -243,7 +244,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, messageFor(json)));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -271,7 +272,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -286,7 +287,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -308,7 +309,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -329,7 +330,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -348,7 +349,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -452,7 +453,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, messageFor("{not valid json at all"));
 
         assertEquals(1.0, counterValue("mqtt.messages.received"));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -551,7 +552,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         verify(deviceStatusMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -614,7 +615,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         verify(deviceCommandAckMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(deviceStatusMessageHandler, never()).handle(anyString(), any(byte[].class));
     }
 

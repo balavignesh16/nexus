@@ -1,10 +1,14 @@
 package com.nexus.infrastructure.mqtt;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
+import com.nexus.telemetry.application.InvalidTelemetryException;
+import com.nexus.telemetry.application.TelemetryMessageConflictException;
 import com.nexus.telemetry.application.TelemetryService;
+import com.nexus.telemetry.application.TelemetrySource;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -194,7 +198,11 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         try {
             request = objectMapper.readValue(message.getPayload(), TelemetryRequest.class);
         } catch (IOException e) {
-            log.error("Malformed MQTT telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic, e);
+            boolean badMessageId = e instanceof JsonMappingException mapping
+                    && mapping.getPath().stream().anyMatch(reference -> "messageId".equals(reference.getFieldName()));
+            log.error("Malformed MQTT telemetry payload on topic {}{}. Acknowledging and dropping (not retryable).", topic,
+                    badMessageId ? " (messageId is not a JSON string)" : "", e);
+            rejectedPermanently(badMessageId ? REASON_INVALID_MESSAGE_ID : REASON_MALFORMED_JSON);
             acknowledgeQuietly(message);
             return;
         }
@@ -207,6 +215,8 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         Set<ConstraintViolation<TelemetryRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
             log.warn("Invalid telemetry payload on topic {}: {}. Acknowledging and dropping (not retryable).", topic, violations);
+            rejectedPermanently(violations.stream().anyMatch(v -> "messageId".equals(v.getPropertyPath().toString()))
+                    ? REASON_INVALID_MESSAGE_ID : REASON_INVALID_FIELDS);
             acknowledgeQuietly(message);
             return;
         }
@@ -220,6 +230,7 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
                 || request.unit() == null || request.unit().isBlank()
                 || !(request.value() instanceof Number))) {
             log.warn("Invalid legacy telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
+            rejectedPermanently(REASON_INVALID_LEGACY_PAYLOAD);
             acknowledgeQuietly(message);
             return;
         }
@@ -230,26 +241,53 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             String topicDeviceId = parts[2];
             if (!topicDeviceId.equals(request.deviceId().toString())) {
                 log.warn("Device ID mismatch! Topic ID: {}, Payload ID: {}. Acknowledging and dropping.", topicDeviceId, request.deviceId());
+                rejectedPermanently(REASON_TOPIC_DEVICE_MISMATCH);
                 acknowledgeQuietly(message);
                 return;
             }
         }
 
         // 4. TelemetryService Processing (Authoritative Persistence) and
-        // 5. Manual ACK ONLY AFTER successful persistence. A failure here is
-        // treated as transient: do not ack, so the broker redelivers this
-        // QoS 1 message later.
+        // 5. Manual ACK ONLY AFTER successful persistence. An identical duplicate (same messageId, same payload) returns
+        // normally and is acknowledged without being processed again (R17). A failure of an unknown or infrastructural kind
+        // (database, connection, lock, timeout, any unexpected exception) is treated as transient: do not ack, so the broker
+        // redelivers this QoS 1 message later. Only the explicit, deterministic payload failures below are permanent
+        // (decision A1); an arbitrary IllegalArgumentException from deeper layers is deliberately NOT one of them.
         try {
-            telemetryService.processTelemetry(request);
+            telemetryService.processTelemetry(request, TelemetrySource.MQTT);
             log.debug("Successfully processed MQTT telemetry for device {}", request.deviceId());
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
         } catch (com.nexus.device.onboarding.OnboardingTelemetryRejectedException e) {
             log.warn("Rejected onboarding telemetry on topic {}: {}. Acknowledging and dropping.", topic, e.getMessage());
+            rejectedPermanently(REASON_ONBOARDING_REJECTED);
+            acknowledgeQuietly(message);
+        } catch (InvalidTelemetryException e) {
+            log.warn("Permanently invalid telemetry on topic {} ({}): {}. Acknowledging and dropping (not retryable).", topic, e.reason(), e.getMessage());
+            rejectedPermanently(REASON_INVALID_TELEMETRY);
+            acknowledgeQuietly(message);
+        } catch (TelemetryMessageConflictException e) {
+            log.warn("Conflicting duplicate messageId on topic {}: {}. Nothing stored; acknowledging and dropping (not retryable).", topic, e.getMessage());
+            rejectedPermanently(REASON_DUPLICATE_CONFLICT);
             acknowledgeQuietly(message);
         } catch (Exception e) {
             log.error("Error processing MQTT message from topic {}. Did NOT ack. Message will be retried.", topic, e);
             throw new RuntimeException("MQTT processing failed, triggering retry", e);
         }
+    }
+
+    // Fixed, low-cardinality reasons for nexus.telemetry.permanent.rejections (never payload content or identifiers).
+    static final String REASON_MALFORMED_JSON = "MALFORMED_JSON";
+    static final String REASON_INVALID_MESSAGE_ID = "INVALID_MESSAGE_ID";
+    static final String REASON_INVALID_FIELDS = "INVALID_FIELDS";
+    static final String REASON_INVALID_LEGACY_PAYLOAD = "INVALID_LEGACY_PAYLOAD";
+    static final String REASON_TOPIC_DEVICE_MISMATCH = "TOPIC_DEVICE_MISMATCH";
+    static final String REASON_INVALID_TELEMETRY = "INVALID_TELEMETRY";
+    static final String REASON_ONBOARDING_REJECTED = "ONBOARDING_REJECTED";
+    static final String REASON_DUPLICATE_CONFLICT = "DUPLICATE_CONFLICT";
+
+    private void rejectedPermanently(String reason) {
+        Counter counter = meterRegistry == null ? null : meterRegistry.counter("nexus.telemetry.permanent.rejections", "reason", reason);
+        if (counter != null) counter.increment();
     }
 
     /**

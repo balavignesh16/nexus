@@ -392,12 +392,13 @@ def publish_tick(devices) -> None:
             if value is None:
                 continue
             unit = rc.unit
-            out_value = value
             if isinstance(value, bool):
-                out_value = 1.0 if value else 0.0
-                if unit in (None, "RAW"):
-                    unit = "BOOLEAN"
-            device.mqtt_publisher.publish(device.device_id, cap_type, out_value, unit)
+                # BOOLEAN capabilities (MOTION, BUTTON) use the generic shape: the capability key plus a JSON boolean. The
+                # legacy numeric 1.0/0.0 is rejected by the backend's value-type validation (and, before P4.5, was retried
+                # forever by the MQTT listener).
+                device.mqtt_publisher.publish(device.device_id, cap_type, value, "BOOLEAN", capability_key=cap_type.lower())
+                continue
+            device.mqtt_publisher.publish(device.device_id, cap_type, value, unit)
 
 
 # ---------------------------------------------------------------------------
