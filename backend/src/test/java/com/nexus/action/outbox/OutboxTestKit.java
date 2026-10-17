@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -33,7 +34,7 @@ final class OutboxTestKit implements AutoCloseable {
     }
 
     OutboxTestKit(PostgreSQLContainer<?> db) {
-        this(db, null);
+        this(db, (java.util.function.Function<JdbcTemplate, CommandStateHistory>) null);
     }
 
     /** @param historyOverride a history writer to inject (for failure injection); null uses the real one */
@@ -41,8 +42,18 @@ final class OutboxTestKit implements AutoCloseable {
         this(db, historyOverride, Clock.systemUTC());
     }
 
+    /** @param retryPolicy a policy with an injected, deterministic jitter source */
+    OutboxTestKit(PostgreSQLContainer<?> db, OutboxRetryPolicy retryPolicy) {
+        this(db, null, Clock.systemUTC(), retryPolicy);
+    }
+
     /** @param applicationClock the clock the operations RECORD timestamps with; decisions always use the database clock */
     OutboxTestKit(PostgreSQLContainer<?> db, java.util.function.Function<JdbcTemplate, CommandStateHistory> historyOverride, Clock applicationClock) {
+        this(db, historyOverride, applicationClock, null);
+    }
+
+    private OutboxTestKit(PostgreSQLContainer<?> db, java.util.function.Function<JdbcTemplate, CommandStateHistory> historyOverride, Clock applicationClock,
+                          OutboxRetryPolicy retryPolicy) {
         this.db = db;
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(db.getJdbcUrl());
@@ -53,7 +64,8 @@ final class OutboxTestKit implements AutoCloseable {
         this.jdbc = new JdbcTemplate(dataSource);
         this.transactions = new DataSourceTransactionManager(dataSource);
         this.history = historyOverride == null ? new CommandStateHistory(jdbc) : historyOverride.apply(jdbc);
-        this.ops = new OutboxDeliveryOperations(jdbc, transactions, history, applicationClock, Duration.ofSeconds(30));
+        this.ops = retryPolicy == null ? new OutboxDeliveryOperations(jdbc, transactions, history, applicationClock, Duration.ofSeconds(30))
+                : new OutboxDeliveryOperations(jdbc, transactions, history, applicationClock, Duration.ofSeconds(30), retryPolicy);
     }
 
     UUID device() {
@@ -69,6 +81,20 @@ final class OutboxTestKit implements AutoCloseable {
         try (Connection c = dataSource.getConnection()) {
             UUID command = OutboxSql.action(c, device, "ACCEPTED_FOR_DISPATCH", createdAt);
             OutboxSql.insert(c, OutboxSql.queued(command, device, createdAt));
+            return command;
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Like {@link #enqueueDue} but with chosen column values (for example a short {@code expires_at}); the delivery bounds are immutable (V37) so they must be set at creation. */
+    UUID enqueueDue(UUID device, int orderIndex, Map<String, Object> overrides) {
+        Instant createdAt = Instant.now().minusSeconds(2).plusMillis(orderIndex * 5L);
+        try (Connection c = dataSource.getConnection()) {
+            UUID command = OutboxSql.action(c, device, "ACCEPTED_FOR_DISPATCH", createdAt);
+            Map<String, Object> row = OutboxSql.queued(command, device, createdAt);
+            row.putAll(overrides);
+            OutboxSql.insert(c, row);
             return command;
         } catch (SQLException e) {
             throw new IllegalStateException(e);

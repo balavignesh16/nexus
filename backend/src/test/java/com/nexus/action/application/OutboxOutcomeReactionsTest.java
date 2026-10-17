@@ -92,6 +92,38 @@ class OutboxOutcomeReactionsTest {
     }
 
     @Test
+    void recoveryReAppliesTheTwoDurableSignalsForARetryExhaustedDeadLetterWithoutBroadcastingAgain() {
+        reactions.recoverFailureSignals(deadLetter(OutboxTerminalReason.RETRY_EXHAUSTED, true), true);
+        verify(verification).commandFailed(device, command, "MQTT_PUBLICATION_FAILED");
+        verify(ruleFacts).publicationFailed(eq(command), eq(device), any(Instant.class), anyString());
+        verify(realtime, never()).publishActionExecuted(any(), anyString());
+        verify(pipeline, never()).recordTrace(any());
+    }
+
+    @Test
+    void recoveryRefusesAnUncertainOrAcknowledgedOutcomeAsASecondGuardBesideTheQuery() {
+        reactions.recoverFailureSignals(deadLetter(OutboxTerminalReason.UNCERTAIN_EXPIRED, true), true);
+        reactions.recoverFailureSignals(new Resolution(Disposition.DEAD_LETTERED, command, device, OutboxTerminalReason.RETRY_EXHAUSTED, "CODE", "message",
+                Instant.now(), true, "corr", true), true);
+        verify(verification, never()).commandFailed(any(), any(), any());
+        verify(ruleFacts, never()).publicationFailed(any(), any(), any(), any());
+    }
+
+    @Test
+    void recoveryDoesNotLockTheDeviceRowWhenTheTwinNeedsNoTelling() {
+        reactions.recoverFailureSignals(deadLetter(OutboxTerminalReason.RETRY_EXHAUSTED, true), false);
+        verify(ruleFacts).publicationFailed(eq(command), eq(device), any(Instant.class), anyString());
+        verify(verification, never()).commandFailed(any(), any(), any());
+    }
+
+    @Test
+    void aFailingRecoveryNeverEscapesAndTheOtherSignalIsStillApplied() {
+        doThrow(new IllegalStateException("rule fact failed")).when(ruleFacts).publicationFailed(any(), any(), any(), any());
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> reactions.recoverFailureSignals(deadLetter(OutboxTerminalReason.EXPIRED, true), true));
+        verify(verification).commandFailed(device, command, "MQTT_PUBLICATION_FAILED");
+    }
+
+    @Test
     void aHeldCommandIsTracedAsHeldWithItsHoldEnd() {
         Instant until = Instant.now().plusSeconds(20);
         reactions.held(new com.nexus.action.outbox.OutboxDeliveryOperations.Held(command, device, "corr", until));

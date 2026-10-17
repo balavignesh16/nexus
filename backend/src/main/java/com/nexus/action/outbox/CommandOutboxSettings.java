@@ -154,7 +154,24 @@ public class CommandOutboxSettings {
         // Only meaningful once the individual values are sane.
         if (p.isEmpty() && worstCaseSchedule().compareTo(deliveryWindow) > 0)
             p.add("worst-case retry schedule " + worstCaseSchedule() + " does not fit delivery-window " + deliveryWindow);
+        else if (p.isEmpty() && worstCaseEndToEnd().compareTo(deliveryWindow) > 0)
+            p.add("worst-case end-to-end schedule " + worstCaseEndToEnd() + " (attempts, jittered backoffs, one poll interval per claim and the"
+                    + " one-second payload timestamp truncation) does not fit delivery-window " + deliveryWindow);
         return p;
+    }
+
+    /**
+     * The longest time from the payload timestamp to the end of the last possible attempt, derived from the ACTUAL attempt
+     * budget, backoff and jitter settings rather than an assumed figure: every attempt runs to its full timeout, every backoff
+     * is at its jittered maximum, every claim waits one full poll interval (the dispatcher only looks for due work that often,
+     * the after-commit nudge being only an optimisation), and the payload timestamp has second precision (up to one second of
+     * the window is already gone when the command is created). Fixed bookkeeping transactions are not counted: they take
+     * milliseconds and the lease margin and the 10 second clock-uncertainty margin of the window ceiling absorb them.
+     */
+    public Duration worstCaseEndToEnd() {
+        return worstCaseSchedule()
+                .plus(pollInterval.multipliedBy(maxAttempts))
+                .plus(CommandDeliveryLimits.TIMESTAMP_PRECISION_BUDGET);
     }
 
     /** Delay before attempt number {@code attemptNumber} (2 for the first retry), without jitter and capped. */

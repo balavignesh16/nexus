@@ -45,7 +45,7 @@ public class OutboxDeliveryOperations {
     /** What the dispatcher observed for one attempt. */
     public enum AttemptResult { CONFIRMED, NOT_SENT, UNCERTAIN, PAYLOAD_INTEGRITY }
 
-    public enum Disposition { PUBLISHED, DEAD_LETTERED, FENCED }
+    public enum Disposition { PUBLISHED, DEAD_LETTERED, FENCED, RETRY_SCHEDULED }
 
     public record Claimed(UUID commandId, UUID deviceId, String topic, OutboxPayload payload, int attempt, int maxAttempts,
                           String leaseOwner, String correlationId) {}
@@ -63,9 +63,18 @@ public class OutboxDeliveryOperations {
         }
         public boolean published() { return disposition == Disposition.PUBLISHED; }
         public boolean deadLettered() { return disposition == Disposition.DEAD_LETTERED; }
+        /** The attempt was proven not sent and the command was parked in RETRY_WAIT; nothing is terminal and no failure signal is due. */
+        public boolean retryScheduled() { return disposition == Disposition.RETRY_SCHEDULED; }
         /** The delivery outcome is UNCERTAIN: the command may still reach, or already have reached, the device. */
         public boolean uncertain() { return deadLettered() && reason == OutboxTerminalReason.UNCERTAIN_EXPIRED; }
     }
+
+    /**
+     * A proven-not-sent dead letter whose follow-up signals may be missing.
+     * @param twinPending the Twin verification of this command is still PENDING, so telling it is still needed; the device row is locked
+     *     for that call, so it is made ONLY when needed (never on every scan of an outcome whose only missing signal is a rule fact nobody subscribes to)
+     */
+    public record Unreacted(Resolution resolution, boolean twinPending) {}
 
     /** A queued command that is being held behind an earlier command whose delivery outcome was uncertain. */
     public record Held(UUID commandId, UUID deviceId, String correlationId, Instant holdUntil) {}
@@ -77,10 +86,26 @@ public class OutboxDeliveryOperations {
     private final CommandStateHistory history;
     private final Clock clock;
     private final Duration ackTimeout;
+    private final OutboxRetryPolicy retryPolicy;
 
     @Autowired
     public OutboxDeliveryOperations(JdbcTemplate jdbc, PlatformTransactionManager transactionManager, CommandStateHistory history,
-                                    Clock clock, @Value("${nexus.command.ack-timeout:PT30S}") Duration ackTimeout) {
+                                    Clock clock, @Value("${nexus.command.ack-timeout:PT30S}") Duration ackTimeout, CommandOutboxSettings settings) {
+        this(jdbc, transactionManager, history, clock, ackTimeout,
+                new OutboxRetryPolicy(settings, () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()));
+    }
+
+    /** The default retry configuration (the shipped defaults, outbox flag irrelevant here): for tests that do not care about backoff values. */
+    public OutboxDeliveryOperations(JdbcTemplate jdbc, PlatformTransactionManager transactionManager, CommandStateHistory history,
+                                    Clock clock, Duration ackTimeout) {
+        this(jdbc, transactionManager, history, clock, ackTimeout, new CommandOutboxSettings(false, Duration.ofSeconds(15), 3, Duration.ofSeconds(3),
+                Duration.ofMillis(500), 2.0, Duration.ofSeconds(4), 0.2, Duration.ofSeconds(6), 10, Duration.ofMillis(250), Duration.ofSeconds(1), 4));
+    }
+
+    /** @param retryPolicy carries the backoff configuration and the jitter source; tests inject a deterministic source */
+    public OutboxDeliveryOperations(JdbcTemplate jdbc, PlatformTransactionManager transactionManager, CommandStateHistory history,
+                                    Clock clock, Duration ackTimeout, OutboxRetryPolicy retryPolicy) {
+        this.retryPolicy = retryPolicy;
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactionManager);
         this.tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -92,14 +117,15 @@ public class OutboxDeliveryOperations {
     // ----------------------------------------------------------------------------------------------- claim (T2)
 
     /**
-     * Commands that may be claimed now, oldest first. A row is a candidate only if it is QUEUED, due, NOT expired
-     * (database clock) and nothing older is unresolved for the same device: an older QUEUED or RETRY_WAIT command
-     * blocks a newer one, and a device with an IN_FLIGHT command has no candidate. This only SELECTS; the claim
+     * Commands that may be claimed now, oldest first. A row is a candidate only if it is QUEUED or RETRY_WAIT, due
+     * ({@code next_attempt_at}, a retry's backoff end), NOT expired (database clock) and nothing else is unresolved ahead of it for the
+     * same device: an older QUEUED command or ANY RETRY_WAIT command of another id blocks it, and a device with an IN_FLIGHT command
+     * has no candidate. So a command waiting for its retry also blocks every later command of its device. This only SELECTS; the claim
      * itself re-checks every condition atomically.
      */
     public List<UUID> candidates(int limit) {
         return jdbc.queryForList("SELECT o.command_id FROM command_outbox o"
-                + " WHERE o.state = 'QUEUED' AND o.next_attempt_at <= now() AND now() < o.expires_at"
+                + " WHERE o.state IN ('QUEUED', 'RETRY_WAIT') AND o.next_attempt_at <= now() AND now() < o.expires_at"
                 + " AND " + DEVICE_GUARDS
                 + " ORDER BY o.created_at, o.command_id LIMIT ?", UUID.class, limit);
     }
@@ -178,7 +204,7 @@ public class OutboxDeliveryOperations {
                 List<Claimed> rows = jdbc.query("UPDATE command_outbox SET state = 'IN_FLIGHT', attempt_count = attempt_count + 1,"
                                 + " next_attempt_at = NULL, lease_owner = ?, lease_expires_at = now() + make_interval(secs => ?), updated_at = ?"
                                 + " WHERE command_id = (SELECT o.command_id FROM command_outbox o WHERE o.command_id = ?"
-                                + " AND o.state = 'QUEUED' AND o.next_attempt_at <= now() AND now() < o.expires_at AND " + DEVICE_GUARDS
+                                + " AND o.state IN ('QUEUED', 'RETRY_WAIT') AND o.next_attempt_at <= now() AND now() < o.expires_at AND " + DEVICE_GUARDS
                                 + " FOR UPDATE SKIP LOCKED)"
                                 + " RETURNING device_id, topic, payload_text, payload_sha256, payload_epoch_seconds, attempt_count, max_attempts, correlation_id",
                         (rs, i) -> new Claimed(commandId, rs.getObject("device_id", UUID.class), rs.getString("topic"),
@@ -187,8 +213,9 @@ public class OutboxDeliveryOperations {
                         leaseOwner, lease.toMillis() / 1000.0, Timestamp.from(now), commandId);
                 if (rows.isEmpty()) return Optional.<Claimed>empty();
                 Claimed claimed = rows.get(0);
-                history.record(new OutboxTransitionRecord(commandId, OutboxState.QUEUED, OutboxState.IN_FLIGHT, claimed.attempt(),
-                        "CLAIMED", claimed.correlationId(), now));
+                // a QUEUED row has attempt_count 0 (V37), so attempt 1 is the first claim and any later claim leaves RETRY_WAIT
+                history.record(new OutboxTransitionRecord(commandId, claimed.attempt() == 1 ? OutboxState.QUEUED : OutboxState.RETRY_WAIT,
+                        OutboxState.IN_FLIGHT, claimed.attempt(), claimed.attempt() == 1 ? "CLAIMED" : "RETRY_CLAIMED", claimed.correlationId(), now));
                 return Optional.of(claimed);
             });
         } catch (DataIntegrityViolationException e) {
@@ -213,12 +240,14 @@ public class OutboxDeliveryOperations {
         return tx.execute(status -> {
             Instant at = clock.instant();
             // Lock the outbox row (fence) first; the window is judged on the database clock at this instant.
-            List<Boolean> inWindow = jdbc.query("SELECT (clock_timestamp() < expires_at) FROM command_outbox"
+            List<Long> remaining = jdbc.query("SELECT (EXTRACT(EPOCH FROM (expires_at - clock_timestamp())) * 1000)::bigint FROM command_outbox"
                             + " WHERE command_id = ? AND state = 'IN_FLIGHT' AND lease_owner = ? AND attempt_count = ? FOR UPDATE",
-                    (rs, i) -> rs.getBoolean(1), claimed.commandId(), claimed.leaseOwner(), claimed.attempt());
-            if (inWindow.isEmpty())
+                    (rs, i) -> rs.getLong(1), claimed.commandId(), claimed.leaseOwner(), claimed.attempt());
+            if (remaining.isEmpty())
                 return new Resolution(Disposition.FENCED, claimed.commandId(), claimed.deviceId(), null, null, null, at, false, claimed.correlationId());
-            if (result == AttemptResult.CONFIRMED && inWindow.get(0)) return publish(claimed, at);
+            Duration remainingWindow = Duration.ofMillis(remaining.get(0));
+            boolean inWindow = remainingWindow.isPositive();
+            if (result == AttemptResult.CONFIRMED && inWindow) return publish(claimed, at);
             if (result == AttemptResult.CONFIRMED) {
                 // Completed after expires_at: recorded as late and uncertain, never as a normal publication (R31.4).
                 return deadLetter(claimed.commandId(), claimed.deviceId(), claimed.attempt(), claimed.correlationId(), at,
@@ -227,9 +256,7 @@ public class OutboxDeliveryOperations {
                                 + " and NEXUS does not resend it");
             }
             return switch (result) {
-                case NOT_SENT -> deadLetter(claimed.commandId(), claimed.deviceId(), claimed.attempt(), claimed.correlationId(), at,
-                        OutboxTerminalReason.PERMANENT_FAILURE, "NOT_SENT_" + safe(code), false,
-                        "MQTT publish failed: the command was not sent (" + safe(code) + "); automatic retry is not available in this release");
+                case NOT_SENT -> notSent(claimed, at, code, remainingWindow);
                 case UNCERTAIN -> deadLetter(claimed.commandId(), claimed.deviceId(), claimed.attempt(), claimed.correlationId(), at,
                         OutboxTerminalReason.UNCERTAIN_EXPIRED, safe(code), true,
                         "DELIVERY_UNCONFIRMED: the broker did not confirm the publish (" + safe(code)
@@ -240,6 +267,36 @@ public class OutboxDeliveryOperations {
                 case CONFIRMED -> throw new IllegalStateException("handled above");
             };
         });
+    }
+
+    /**
+     * A PROVEN non-publication (the client refused the hand-over, contract R10). The retry policy decides, from durable facts only (the
+     * attempt number, the stored budget and the window left on the database clock): park the command in RETRY_WAIT with a backoff, or
+     * dead-letter it as RETRY_EXHAUSTED or EXPIRED. Either way the same payload, command id, hash and timestamp stay in the row and
+     * nothing is resent from here. ActionHistory stays ACCEPTED_FOR_DISPATCH while a retry is pending: the command is neither
+     * published nor failed yet.
+     */
+    private Resolution notSent(Claimed c, Instant at, String code, Duration remainingWindow) {
+        String errorCode = "NOT_SENT_" + safe(code);
+        OutboxRetryPolicy.Decision decision = retryPolicy.decide(AttemptResult.NOT_SENT, c.attempt(),
+                c.maxAttempts(), remainingWindow, errorCode);
+        if (decision.retry()) {
+            jdbc.update("UPDATE command_outbox SET state = 'RETRY_WAIT', lease_owner = NULL, lease_expires_at = NULL,"
+                            + " next_attempt_at = clock_timestamp() + make_interval(secs => ?), last_error_code = ?, updated_at = ? WHERE command_id = ?",
+                    decision.delay().toMillis() / 1000.0, code64(errorCode), Timestamp.from(at), c.commandId());
+            String message = "Publication attempt " + c.attempt() + " of " + c.maxAttempts() + " was not sent (" + safe(code)
+                    + "); the same command is retried in " + decision.delay().toMillis() + " ms";
+            jdbc.update("UPDATE action_history SET message = ? WHERE request_id = ? AND status = 'ACCEPTED_FOR_DISPATCH'", message, c.commandId());
+            history.append(c.commandId(), Fact.ATTEMPT_FAILED_TRANSIENT, OutboxState.IN_FLIGHT.name(), OutboxState.RETRY_WAIT.name(), c.attempt(),
+                    code64(errorCode), Source.DISPATCHER, c.correlationId(), at, "retry in " + decision.delay().toMillis() + " ms");
+            return new Resolution(Disposition.RETRY_SCHEDULED, c.commandId(), c.deviceId(), null, errorCode, message, at, false, c.correlationId());
+        }
+        if (decision.reason() == OutboxTerminalReason.RETRY_EXHAUSTED)
+            return deadLetter(c.commandId(), c.deviceId(), c.attempt(), c.correlationId(), at, OutboxTerminalReason.RETRY_EXHAUSTED, errorCode, false,
+                    "MQTT publish failed: the command was not sent in any of " + c.attempt() + " attempts (" + safe(code) + ")");
+        return deadLetter(c.commandId(), c.deviceId(), c.attempt(), c.correlationId(), at, OutboxTerminalReason.EXPIRED, errorCode, false,
+                "Command expired before delivery (EXPIRED): the delivery window left no time for another attempt after attempt " + c.attempt()
+                        + " was not sent (" + safe(code) + "); the command was never sent");
     }
 
     private Resolution publish(Claimed c, Instant at) {
@@ -294,6 +351,33 @@ public class OutboxDeliveryOperations {
     private static String code64(String code) {
         String c = safe(code);
         return c.length() > 64 ? c.substring(0, 64) : c;
+    }
+
+    // ------------------------------------------------------------------------------ crash-safe reactions (P4.3)
+
+    /**
+     * Dead letters whose follow-up signals may have been lost to a crash between the outcome commit and the post-commit reaction
+     * (contract R12: the Twin verification told once, one COMMAND_PUBLICATION_FAILED rule fact). Only outcomes that PROVE the command
+     * was never sent qualify (never UNCERTAIN_EXPIRED, never one the device acknowledged), and only when the outcome is older than a
+     * few seconds so the normal reaction has finished. A row is reported while its Twin verification is still PENDING for that command
+     * (no age limit; telling the Twin clears it) or while its rule fact is missing within a ten-minute lookback. Both signals are
+     * idempotent (the rule fact is unique per command, commandFailed only changes PENDING), so re-applying them is harmless.
+     */
+    public List<Unreacted> unreactedFailures(int limit) {
+        return jdbc.query("SELECT o.command_id, o.device_id, o.terminal_reason, o.last_error_code, o.terminal_at, o.correlation_id, a.message,"
+                        + " EXISTS (SELECT 1 FROM current_twin_verification_state v WHERE v.device_id = o.device_id"
+                        + " AND v.desired_command_id = o.command_id AND v.verification_status = 'PENDING') AS twin_pending"
+                        + " FROM command_outbox o JOIN action_history a ON a.request_id = o.command_id"
+                        + " WHERE o.state = 'DEAD_LETTER' AND o.terminal_reason IN ('PERMANENT_FAILURE', 'EXPIRED', 'PAYLOAD_INTEGRITY', 'RETRY_EXHAUSTED')"
+                        + " AND a.status = 'FAILURE' AND a.ack_status IS NULL AND o.terminal_at < now() - INTERVAL '5 seconds'"
+                        + " AND (EXISTS (SELECT 1 FROM current_twin_verification_state v WHERE v.device_id = o.device_id"
+                        + " AND v.desired_command_id = o.command_id AND v.verification_status = 'PENDING')"
+                        + " OR (o.terminal_at > now() - INTERVAL '10 minutes' AND NOT EXISTS (SELECT 1 FROM rule_trigger_facts f"
+                        + " WHERE f.trigger_type = 'COMMAND_PUBLICATION_FAILED' AND f.source_key = o.command_id::text)))"
+                        + " ORDER BY o.terminal_at LIMIT ?",
+                (rs, i) -> new Unreacted(new Resolution(Disposition.DEAD_LETTERED, rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+                        OutboxTerminalReason.valueOf(rs.getString(3)), rs.getString(4), rs.getString(7), rs.getTimestamp(5).toInstant(), true,
+                        rs.getString(6)), rs.getBoolean(8)), limit);
     }
 
     // ---------------------------------------------------------------------------------------------- sweeps (T5)

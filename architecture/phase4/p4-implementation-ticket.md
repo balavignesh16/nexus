@@ -2,7 +2,7 @@
 
 Date: 2026-10-15.
 
-Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED, TESTED AND COMMITTED (1936c2b), INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 IMPLEMENTED AND TESTED, UNCOMMITTED (V39, atomic acceptance, bounded dispatcher, status separation, R31 safety requirements). P4.3 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
+Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED, TESTED AND COMMITTED (1936c2b), INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 IMPLEMENTED, TESTED AND COMMITTED (e91f2f7: V39, atomic acceptance, bounded dispatcher, status separation, R31 safety requirements). P4.3 IMPLEMENTED AND TESTED (evidence-gated retries, persisted backoff, dead letter, crash-safe failure signals; no migration; see below and contract R33). P4.4 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
 
 Normative authority: [reliability-contract.md](reliability-contract.md). This ticket owns rollout, source ownership, dependencies and verification gates. It does not override contract clauses. Acceptance authority: [p4-acceptance-ledger.md](p4-acceptance-ledger.md); a planned test is not proof.
 
@@ -108,13 +108,15 @@ Verification: transaction atomicity and rollback tests; two-worker and two-insta
 
 Authority: R10 to R12, R24, R26. Ledger scenarios: 17 (P4-036 and P4-140 moved to P4.2). P4.3 dependencies carried from P4.2: retry ONLY outcomes proven as not sent (contract R10 classification) with backoff inside the window, and NEVER automatically retry an UNCERTAIN outcome without a proven device-side idempotency mechanism (keep the R32 hold); replace the terminal-only transient branch with RETRY_WAIT while attempts and window remain; classify exhaustion as RETRY_EXHAUSTED; extend the ordering proof to RETRY_WAIT; keep the bounded publish, the uncertain-never-success rule, zero reauthorisation and the 23505 handling; model the 30 second firmware freshness check for the window-boundary test.
 
+**P4.3 status (2026-10-17): implemented and tested; the authoritative description of what was built is contract R33 and the P4.3 evidence section of the ledger.** The deliverables below are kept as originally written; where the approved safe policy changed their meaning the change is stated in brackets.
+
 Deliverables:
 
-- Retry scheduler with deterministic backoff, attempt cap and window enforcement; expiry sweep; lease-expiry recovery as uncertain attempts.
-- Failure classification table (transient, uncertain, permanent) mapped from Paho exceptions and tested row by row.
-- Dead-letter transition: ActionHistory failure, `commandFailed` once, single COMMAND_PUBLICATION_FAILED rule fact, desired state retained.
+- Retry scheduler with deterministic backoff, attempt cap and window enforcement; expiry sweep; lease-expiry recovery as uncertain attempts. [Built inside the existing dispatcher, not as a second scheduler: `OutboxRetryPolicy` (pure decision), `OutboxDeliveryOperations.notSent` (the only RETRY_WAIT writer), the claim now accepts RETRY_WAIT rows; the worst case is recomputed from the real settings (10.8 s schedule, 12.55 s end-to-end) and validated at startup. Lease recovery stays uncertain and is NEVER retried.]
+- Failure classification table (transient, uncertain, permanent) mapped from Paho exceptions and tested row by row. [`PahoClassificationTableTest` covers every `MqttException.REASON_CODE_*` by reflection: four proven pre-handover codes are transient, everything else is uncertain; permanent = payload integrity.]
+- Dead-letter transition: ActionHistory failure, `commandFailed` once, single COMMAND_PUBLICATION_FAILED rule fact, desired state retained. [Added: a bounded recovery scan re-applies exactly those two idempotent signals when a crash lost the post-commit reaction; no new table.]
 - No requeue operation in any form (R21).
-- Simulator duplicate-command test coverage. The simulator is **not changed** (decision A8): the 30 second firmware freshness check is modelled in a test-side helper and the 300 second simulator default is left as is.
+- Simulator duplicate-command test coverage. The simulator is **not changed** (decision A8): the 30 second firmware freshness check is modelled in a test-side helper and the 300 second simulator default is left as is. [Done as `simulator/tests/test_p43_retry_duplicates.py` and `FirmwareFreshnessBoundaryTest`; neither firmware nor simulator source was modified.]
 
 Verification: bounded-retry, expiry boundary, byte-identical payload capture on a real Mosquitto broker, uncertain-outcome fault injection, zero-reauthorisation assertion, mutation checks on the attempt cap and the expiry guard (recorded and reverted).
 

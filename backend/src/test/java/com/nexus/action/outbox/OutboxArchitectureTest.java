@@ -74,6 +74,32 @@ class OutboxArchitectureTest {
     }
 
     @Test
+    void onlyTheDeliveryOperationsCanParkACommandInRetryWaitAndOnlyThroughTheRetryPolicy() throws IOException {
+        // P4.3 / S1: no other class may write the RETRY_WAIT state, so a retry cannot be scheduled around the eligibility decision
+        Set<String> writers = namesOfFilesMatching(Pattern.compile("state\\s*=\\s*'RETRY_WAIT'"));
+        assertEquals(Set.of("OutboxDeliveryOperations.java"), writers, "RETRY_WAIT is written by exactly one class");
+        String operations = read(MAIN.resolve("com/nexus/action/outbox/OutboxDeliveryOperations.java"));
+        assertEquals(1, new Matcher(operations, "state = 'RETRY_WAIT'").count(), "and in exactly one statement");
+        assertTrue(operations.contains("retryPolicy.decide(AttemptResult.NOT_SENT"),
+                "that statement is reached only after the retry policy decided on a proven NOT_SENT outcome");
+        // the repository and the entity expose no way to set the state or the schedule
+        String entity = read(MAIN.resolve("com/nexus/action/outbox/CommandOutboxEntity.java"));
+        assertTrue(!entity.contains("setState") && !entity.contains("setNextAttemptAt") && !entity.contains("setAttemptCount"),
+                "the JPA entity has no mutator that could schedule a retry or change the attempt count");
+    }
+
+    @Test
+    void retriesNeverDependOnRuleAuthorisationOrAcceptanceAndNeverCallThePublisherOutsideTheDispatcher() throws IOException {
+        for (String name : List.of("OutboxDeliveryOperations.java", "OutboxRetryPolicy.java", "CommandOutboxDispatcher.java")) {
+            String text = read(MAIN.resolve("com/nexus/action/outbox/" + name));
+            assertTrue(!text.contains("RuleExecutionAuthorization") && !text.contains("CommandAcceptanceService") && !text.contains("com.nexus.rule."),
+                    name + " must not reauthorise or reaccept a command (contract R08)");
+        }
+        assertEquals(Set.of("CommandOutboxDispatcher.java"), namesOfFilesMatching(Pattern.compile("publisher\\.publish\\(")),
+                "only the dispatcher hands bytes to the bounded publisher");
+    }
+
+    @Test
     void theLegacyExecutorRefusesToPublishWhenTheOutboxIsEnabledOnBothEntryPoints() {
         String text = read(MAIN.resolve("com/nexus/action/application/executor/CommandExecutor.java"));
         Matcher guards = new Matcher(text, "if \\(directPublicationDisabled\\(\\)\\) return failure\\(request, DIRECT_PUBLICATION_DISABLED\\);");
@@ -93,7 +119,12 @@ class OutboxArchitectureTest {
     @Test
     void onlyTheDispatcherAndItsReactionsTouchTheClaimAndOutcomeOperations() throws IOException {
         Set<String> users = namesOfFilesMatching(Pattern.compile("\\bOutboxDeliveryOperations\\b"));
-        assertEquals(Set.of("CommandOutboxDispatcher.java", "OutboxDeliveryOperations.java", "OutboxOutcomeListener.java", "OutboxOutcomeReactions.java"), users);
+        // OutboxRetryPolicy (P4.3) is the pure retry decision: it only reads the AttemptResult enum nested in the operations and never claims or completes anything
+        assertEquals(Set.of("CommandOutboxDispatcher.java", "OutboxDeliveryOperations.java", "OutboxOutcomeListener.java", "OutboxOutcomeReactions.java",
+                "OutboxRetryPolicy.java"), users);
+        String policy = read(MAIN.resolve("com/nexus/action/outbox/OutboxRetryPolicy.java"));
+        assertTrue(!policy.contains(".claim(") && !policy.contains(".complete(") && !policy.contains("JdbcTemplate") && !policy.contains("Clock"),
+                "the retry policy is pure: no claim, no outcome, no SQL, no clock");
         // the reactions only receive committed resolutions; they never claim or complete anything
         String reactions = read(MAIN.resolve("com/nexus/action/application/OutboxOutcomeReactions.java"));
         assertTrue(!reactions.contains(".claim(") && !reactions.contains(".complete(") && !reactions.contains(".candidates("));

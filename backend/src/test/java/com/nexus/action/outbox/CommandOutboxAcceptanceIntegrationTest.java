@@ -302,7 +302,7 @@ class CommandOutboxAcceptanceIntegrationTest {
 
     @Test
     @Timeout(60)
-    void aNonPublicationIsReportedAsAFailureWithAnHonestReasonAndTheTwinIsToldOnce() throws Exception {
+    void aCommandThatIsNeverSentIsRetriedWithinItsBudgetThenFailsHonestlyAndTheTwinIsToldOnce() throws Exception {
         broker.behaviour = (topic, bytes) -> BrokerCommandPublisher.Attempt.notSent("CLIENT_NOT_CONNECTED");
         UUID id = send(true).requestId();
         await(() -> outbox.findById(id).orElseThrow().getState() == OutboxState.DEAD_LETTER, "dead letter");
@@ -310,13 +310,14 @@ class CommandOutboxAcceptanceIntegrationTest {
         assertEquals(ExecutionStatus.FAILURE, record.getStatus());
         assertTrue(record.getMessage().contains("not sent"));
         assertNull(record.getPublishedAt());
-        assertEquals("PERMANENT_FAILURE", outbox.findById(id).orElseThrow().getTerminalReason().name());
-        assertEquals(1, broker.calls.size(), "one attempt, no retry in P4.2");
+        assertEquals("RETRY_EXHAUSTED", outbox.findById(id).orElseThrow().getTerminalReason().name());
+        assertEquals(3, broker.calls.size(), "the attempt budget (3) is used and never exceeded");
+        assertEquals(1, broker.calls.stream().map(FakeBroker.Call::text).distinct().count(), "every attempt carried the identical bytes");
         // desired state is retained, verification is told the command failed, nothing is cleared
         assertEquals(1, desired.findByDeviceId(deviceId).size());
         verify(verificationSpy, timeout(5000).times(1)).commandFailed(deviceId, id, "MQTT_PUBLICATION_FAILED");   // a PROVEN non-publication tells the twin, once
         Thread.sleep(800);
-        assertEquals(1, broker.calls.size(), "still exactly one attempt");
+        assertEquals(3, broker.calls.size(), "still exactly the three attempts of the budget");
     }
 
     @Test

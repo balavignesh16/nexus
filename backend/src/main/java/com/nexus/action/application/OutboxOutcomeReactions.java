@@ -111,6 +111,32 @@ public class OutboxOutcomeReactions implements OutboxOutcomeListener {
         broadcastAndTrace(r, "FAILURE");
     }
 
+    /**
+     * Crash recovery: re-applies ONLY the two durable signals (no realtime message, no trace, which the normal reaction already sent or
+     * never will). Both are idempotent: the rule fact is unique per command (ON CONFLICT DO NOTHING) and the Twin only moves a PENDING
+     * verification to UNVERIFIED. An uncertain or acknowledged outcome never reaches this method (the query excludes them) and is refused
+     * again here as a second guard.
+     */
+    @Override
+    public void recoverFailureSignals(Resolution r, boolean twinPending) {
+        if (r.uncertain() || r.ackRecorded()) return;
+        if (ruleFacts != null && transactions != null) {
+            try {
+                new TransactionTemplate(transactions).executeWithoutResult(tx ->
+                        ruleFacts.publicationFailed(r.commandId(), r.deviceId(), r.at(), r.message()));
+            } catch (RuntimeException failure) {
+                log.error("RULE_SOURCE_FACT_FAILED recovered publication-failure command={}", r.commandId(), failure);
+            }
+        }
+        if (verification != null && twinPending) {          // commandFailed locks the device row: only when the Twin still needs telling
+            try {
+                verification.commandFailed(r.deviceId(), r.commandId(), "MQTT_PUBLICATION_FAILED");
+            } catch (RuntimeException failure) {
+                log.error("Twin verification could not be told (recovery) that command {} failed", r.commandId(), failure);
+            }
+        }
+    }
+
     private void broadcastAndTrace(Resolution r, String traceStatus) {
         Optional<ActionHistoryRecord> record = actions.findById(r.commandId());
         if (record.isEmpty()) return;

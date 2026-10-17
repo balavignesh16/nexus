@@ -83,6 +83,8 @@ class RuleOriginOutboxIntegrationTest {
     @Autowired RuleMatcher matcher;
     @Autowired FakeBroker broker;
     @Autowired com.nexus.device.connectivity.DeviceConnectivityRegistry connectivity;
+    @org.springframework.boot.test.mock.mockito.SpyBean RuleExecutionAuthorization authorization;
+    @org.springframework.boot.test.mock.mockito.SpyBean com.nexus.action.application.CommandAcceptanceService acceptance;
 
     private record Fixture(UUID device, UUID ruleId) {}
 
@@ -151,6 +153,42 @@ class RuleOriginOutboxIntegrationTest {
         assertEquals(0, count("current_desired_twin_state", f.device()));
         assertEquals(0, count("current_twin_verification_state", f.device()));
         assertTrue(broker.calls.isEmpty());
+    }
+
+    @Test
+    @Timeout(90)
+    void aRetryAfterANonPublicationNeverReauthorisesAndStillDeliversAfterTheRuleWasPausedWithIdenticalBytes() throws Exception {
+        broker.reset();
+        CountDownLatch rulePaused = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        broker.behaviour = (topic, bytes) -> {
+            if (calls.incrementAndGet() == 1) return BrokerCommandPublisher.Attempt.notSent("CLIENT_NOT_CONNECTED");
+            try { rulePaused.await(25, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            return BrokerCommandPublisher.Attempt.confirmed();
+        };
+        Fixture f = fixture();
+        fire(f.device());
+        await(() -> sql.queryForObject("SELECT count(*) FROM command_outbox WHERE device_id=? AND attempt_count>=2", Integer.class, f.device()) == 1,
+                "the retry attempt to be claimed");
+        // the first attempt was NOT sent; the retry is now in flight, blocked inside the publisher. Authorisation and acceptance already ran, before the outbox row existed.
+        int authorisations = org.mockito.Mockito.mockingDetails(authorization).getInvocations().size();
+        int acceptances = org.mockito.Mockito.mockingDetails(acceptance).getInvocations().size();
+        assertTrue(authorisations >= 1 && acceptances >= 1, "the Phase 3 gates ran at acceptance");
+
+        lifecycle.transition(f.ruleId(), "pause", null);
+        rulePaused.countDown();
+        await(() -> sql.queryForObject("SELECT count(*) FROM command_outbox WHERE device_id=? AND state='PUBLISHED'", Integer.class, f.device()) == 1,
+                "delivery of the retry after the pause");
+
+        assertEquals("SUCCESS", sql.queryForObject("SELECT status FROM action_history WHERE device_id=?", String.class, f.device()));
+        assertEquals(2, broker.calls.size(), "one non-publication, then exactly one publication");
+        assertEquals(broker.calls.get(0).text(), broker.calls.get(1).text(), "the retry carried the identical bytes");
+        assertEquals(1, count("action_history", f.device()), "a retry never creates a second command");
+        assertEquals(1, count("current_desired_twin_state", f.device()), "and never a second desired state");
+        assertEquals(authorisations, org.mockito.Mockito.mockingDetails(authorization).getInvocations().size(),
+                "the retry and its delivery invoked RuleExecutionAuthorization zero additional times");
+        assertEquals(acceptances, org.mockito.Mockito.mockingDetails(acceptance).getInvocations().size(),
+                "and the acceptance service zero additional times");
     }
 
     @Test

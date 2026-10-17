@@ -112,20 +112,23 @@ class CommandOutboxDispatcherTest {
     }
 
     @Test
-    void aDefiniteNonPublicationEndsInHonestTerminalFailureWithExactlyOneAttempt() throws Exception {
+    void aCommandThatIsNeverSentIsTriedExactlyItsAttemptBudgetThenFailsHonestlyAndIsReportedOnce() throws Exception {
         FakeBroker broker = new FakeBroker();
         broker.behaviour = (t, b) -> BrokerCommandPublisher.Attempt.notSent("CLIENT_NOT_CONNECTED");
         var listener = new FakeBroker.RecordingListener();
         var dispatcher = dispatcher(broker, listener, 2);
         UUID command = kit.enqueueDue(kit.device(), 0);
-        dispatcher.runPass();
-        await(() -> "DEAD_LETTER".equals(kit.state(command)), "dead letter");
+        await(() -> { dispatcher.runPass(); return "DEAD_LETTER".equals(kit.state(command)); }, "dead letter");
         for (int i = 0; i < 5; i++) { dispatcher.runPass(); dispatcher.sweepOnce(); }
-        assertEquals(1, broker.calls.size(), "P4.2 has no retries: a failed command is never claimed or sent again");
+        assertEquals(3, broker.calls.size(), "exactly the attempt budget, and a dead letter is never claimed or sent again");
+        assertEquals(1, broker.calls.stream().map(FakeBroker.Call::text).distinct().count(), "every attempt carried the identical bytes");
+        assertEquals("RETRY_EXHAUSTED", kit.terminalReason(command));
         assertEquals("FAILURE", kit.actionStatus(command));
-        assertEquals(1, kit.attempts(command));
+        assertEquals(3, kit.attempts(command));
+        assertEquals(List.of("ATTEMPT_STARTED", "ATTEMPT_FAILED_TRANSIENT", "ATTEMPT_STARTED", "ATTEMPT_FAILED_TRANSIENT", "ATTEMPT_STARTED", "DEAD_LETTERED"),
+                kit.facts(command));
         await(() -> listener.deadLettered.size() == 1, "reaction");
-        assertEquals(1, listener.deadLettered.size(), "the failure is reported exactly once");
+        assertEquals(1, listener.deadLettered.size(), "the failure is reported exactly once, at the terminal outcome and not per attempt");
         assertTrue(listener.published.isEmpty());
     }
 

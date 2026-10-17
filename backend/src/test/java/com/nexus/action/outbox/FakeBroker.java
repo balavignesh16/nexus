@@ -83,10 +83,13 @@ public final class FakeBroker implements BrokerCommandPublisher {
         final List<OutboxDeliveryOperations.Resolution> published = Collections.synchronizedList(new ArrayList<>());
         final List<OutboxDeliveryOperations.Resolution> deadLettered = Collections.synchronizedList(new ArrayList<>());
         final List<OutboxDeliveryOperations.Held> held = Collections.synchronizedList(new ArrayList<>());
+        final List<OutboxDeliveryOperations.Resolution> recovered = Collections.synchronizedList(new ArrayList<>());
+        final List<Boolean> recoveredTwinPending = Collections.synchronizedList(new ArrayList<>());
         volatile boolean failing;
 
         @Override public void published(OutboxDeliveryOperations.Resolution r) { published.add(r); if (failing) throw new IllegalStateException("reaction failed"); }
         @Override public void deadLettered(OutboxDeliveryOperations.Resolution r) { deadLettered.add(r); if (failing) throw new IllegalStateException("reaction failed"); }
         @Override public void held(OutboxDeliveryOperations.Held h) { held.add(h); }
+        @Override public void recoverFailureSignals(OutboxDeliveryOperations.Resolution r, boolean twinPending) { recovered.add(r); recoveredTwinPending.add(twinPending); }
     }
 }

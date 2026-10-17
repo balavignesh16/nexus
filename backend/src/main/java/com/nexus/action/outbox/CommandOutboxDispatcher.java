@@ -39,9 +39,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <li>The payload bytes are verified against the stored hash before every attempt and published verbatim; the stored
  *     timestamp is never refreshed.</li>
  * <li>No attempt starts for a row at or after {@code expires_at} (database clock).</li>
- * <li>Until retries exist (P4.3) there is exactly one attempt per command; a failed attempt is dead-lettered with an
- *     honest reason. Nothing is re-claimed, so a failure cannot cause repeated publication.</li>
+ * <li>Only a PROVEN non-publication (NOT_SENT) is ever tried again: the outcome transaction parks the command in RETRY_WAIT with a
+ *     persisted, jittered backoff, bounded by the attempt budget and by the delivery window ({@link OutboxRetryPolicy}). A retry
+ *     is claimed through the same fenced claim as a first attempt and publishes the same stored bytes. An UNCERTAIN outcome and an
+ *     expired lease are NEVER retried: they end as UNCERTAIN_EXPIRED and keep the per-device hold.</li>
  * <li>A worker that crashes or stalls leaves an IN_FLIGHT row; lease recovery turns it into an uncertain dead letter.</li>
+ * <li>Failure signals of a proven-not-sent dead letter (Twin verification, rule fact) are re-applied by a bounded recovery scan when
+ *     a crash lost the post-commit reaction; both are idempotent.</li>
  * </ul>
  * This class does NOT claim strict per-device FIFO or exactly-once publication; see the contract (R03, R09).
  */
@@ -114,7 +118,40 @@ public class CommandOutboxDispatcher {
 
     @Scheduled(fixedDelayString = "${nexus.command.outbox.expiry-scan-interval:PT1S}")
     public void sweep() {
-        if (scheduledLoops && anyWork()) sweepOnce();
+        if (!scheduledLoops) return;
+        if (anyWork()) sweepOnce();
+        recoverReactionsIfDue();
+    }
+
+    private static final long REACTION_RECOVERY_EVERY_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    private final java.util.concurrent.atomic.AtomicLong lastReactionRecovery = new java.util.concurrent.atomic.AtomicLong(System.nanoTime() - REACTION_RECOVERY_EVERY_NANOS);
+
+    /** At most once every five seconds, also while the system is otherwise idle: a lost reaction must not wait for the next command. */
+    void recoverReactionsIfDue() {
+        long last = lastReactionRecovery.get();
+        long now = System.nanoTime();
+        if (now - last < REACTION_RECOVERY_EVERY_NANOS || !lastReactionRecovery.compareAndSet(last, now)) return;
+        recoverReactions();
+    }
+
+    /** Re-applies the failure signals of dead letters whose post-commit reaction was lost. Returns the number of commands handled. */
+    public int recoverReactions() {
+        int handled = 0;
+        try {
+            for (OutboxDeliveryOperations.Unreacted u : operations.unreactedFailures(SWEEP_BATCH)) {
+                handled++;
+                listeners.stream().forEach(l -> {
+                    try { l.recoverFailureSignals(u.resolution(), u.twinPending()); } catch (RuntimeException e) {
+                        log.error("Recovery of the failure signals of command {} failed; it is repeated on the next scan", u.resolution().commandId(), e);
+                    }
+                });
+            }
+            if (handled > 0) count("reaction_recovered");
+        } catch (RuntimeException e) {
+            log.error("Outbox reaction recovery failed; it is repeated on the next scan", e);
+            count("recovery_error");
+        }
+        return handled;
     }
 
     private final AtomicInteger probeFailures = new AtomicInteger();
@@ -215,6 +252,10 @@ public class CommandOutboxDispatcher {
             if (resolution.disposition() == OutboxDeliveryOperations.Disposition.FENCED) {
                 log.warn("Outbox outcome for command {} attempt {} was fenced out; nothing was written", c.commandId(), c.attempt());
                 count("fenced");
+                return;
+            }
+            if (resolution.retryScheduled()) {
+                count("retry_scheduled");
                 return;
             }
             count(resolution.published() ? "published" : "dead_letter");

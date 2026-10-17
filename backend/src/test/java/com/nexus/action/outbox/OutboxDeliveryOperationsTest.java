@@ -111,11 +111,17 @@ class OutboxDeliveryOperationsTest {
     }
 
     @Test
-    void aFailedOlderCommandUnblocksTheNextOneInOrderAndNeverLetsItOvertakeBeforeThat() {
+    void aFailedOlderCommandUnblocksTheNextOneInOrderOnlyWhenItIsTerminalAndNeverBeforeThat() {
         UUID device = kit.device();
         UUID c1 = kit.enqueueDue(device, 0), c2 = kit.enqueueDue(device, 1);
         Claimed first = claim(c1);
+        // proven not sent: the command waits for its retry (RETRY_WAIT) and still blocks the newer command
         kit.ops.complete(first, AttemptResult.NOT_SENT, "CLIENT_NOT_CONNECTED");
+        assertEquals("RETRY_WAIT", kit.state(c1));
+        assertTrue(kit.ops.candidates(10).isEmpty(), "C2 may not overtake C1 while C1 waits for its retry");
+        // an integrity failure is terminal: only then is C2 released
+        kit.jdbc.update("UPDATE command_outbox SET next_attempt_at = now() - INTERVAL '1 millisecond' WHERE command_id = ?", c1);
+        kit.ops.complete(claim(c1), AttemptResult.PAYLOAD_INTEGRITY, null);
         assertEquals("DEAD_LETTER", kit.state(c1));
         assertEquals(List.of(c2), kit.ops.candidates(10));
     }
@@ -161,18 +167,22 @@ class OutboxDeliveryOperationsTest {
     }
 
     @Test
-    void aDefiniteNonPublicationIsAnHonestTerminalFailureNotAPublishAndNotARetry() {
+    void aFirstDefiniteNonPublicationParksTheCommandForARetryAndIsNeitherAPublishNorAFailure() {
         UUID command = kit.enqueueDue(kit.device(), 0);
         Resolution r = kit.ops.complete(claim(command), AttemptResult.NOT_SENT, "CLIENT_NOT_CONNECTED");
-        assertTrue(r.deadLettered());
-        assertEquals("DEAD_LETTER", kit.state(command));
-        assertEquals("PERMANENT_FAILURE", kit.terminalReason(command));
-        assertEquals("FAILURE", kit.actionStatus(command));
+        assertTrue(r.retryScheduled());
+        assertFalse(r.published());
+        assertFalse(r.deadLettered());
+        assertEquals("RETRY_WAIT", kit.state(command));
+        assertNull(kit.terminalReason(command));
+        assertEquals("ACCEPTED_FOR_DISPATCH", kit.actionStatus(command), "a pending retry is neither a success nor a failure");
         assertTrue(kit.actionMessage(command).contains("not sent"));
         assertFalse(kit.actionMessage(command).toLowerCase().contains("published to mqtt"));
         assertNull(kit.jdbc.queryForObject("SELECT first_publish_confirmed_at FROM command_outbox WHERE command_id = ?", java.sql.Timestamp.class, command));
-        assertEquals(List.of("ATTEMPT_STARTED", "DEAD_LETTERED"), kit.facts(command));
-        assertEquals(1, kit.attempts(command), "exactly one attempt: P4.2 has no retries");
+        assertEquals(List.of("ATTEMPT_STARTED", "ATTEMPT_FAILED_TRANSIENT"), kit.facts(command));
+        assertEquals(1, kit.attempts(command));
+        assertTrue(kit.jdbc.queryForObject("SELECT next_attempt_at > now() FROM command_outbox WHERE command_id = ?", Boolean.class, command),
+                "the retry is scheduled in the future on the database clock");
     }
 
     @Test
