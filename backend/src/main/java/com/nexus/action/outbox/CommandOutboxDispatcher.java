@@ -66,6 +66,10 @@ public class CommandOutboxDispatcher {
     private final ExecutorService workers;
     private final ExecutorService claimer;
     private final AtomicBoolean claimPassRunning = new AtomicBoolean();
+    /** Earliest {@link System#nanoTime} at which the next claim may be attempted after the publish gate refused one (never a busy loop). */
+    private final java.util.concurrent.atomic.AtomicLong deferClaimsUntilNanos = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+    private static final long RATE_LIMIT_MIN_DEFER_MILLIS = 50;
+    private final java.util.concurrent.atomic.AtomicLong lastRateLimitLogNanos = new java.util.concurrent.atomic.AtomicLong(System.nanoTime() - java.util.concurrent.TimeUnit.SECONDS.toNanos(60));
 
     /** Convenience for tests: the scheduled loops are on. */
     public CommandOutboxDispatcher(OutboxDeliveryOperations operations, BrokerCommandPublisher publisher, CommandOutboxSettings settings,
@@ -186,7 +190,12 @@ public class CommandOutboxDispatcher {
         try {
             for (Resolution r : operations.recoverExpiredLeases(SWEEP_BATCH)) { resolved++; react(r); }
             for (Resolution r : operations.resolveAcknowledgedUnpublished(SWEEP_BATCH)) { resolved++; react(r); }
-            for (Resolution r : operations.expireDue(SWEEP_BATCH)) { resolved++; react(r); }
+            for (Resolution r : operations.expireDue(SWEEP_BATCH)) {
+                resolved++;
+                // a command whose delivery window ended while it waited (for a device, a retry or publication permission) is never sent
+                if (meters != null) meters.counter("nexus.command.flow.expired_waiting").increment();
+                react(r);
+            }
             for (OutboxDeliveryOperations.Held h : operations.markHeld(SWEEP_BATCH)) listeners.stream().forEach(l -> {
                 try { l.held(h); } catch (RuntimeException e) { log.error("Post-commit hold reaction for command {} failed", h.commandId(), e); }
             });
@@ -204,12 +213,24 @@ public class CommandOutboxDispatcher {
         try {
             sweepOnce();
             if (freeWorkers.availablePermits() == 0) return 0;
+            // The publish gate said "no permit" a moment ago: do not ask again (a database round trip and a lock) before the oldest counted
+            // publication leaves its window, and never busy-poll. The rows stay QUEUED or RETRY_WAIT untouched and are expired by the sweep above if
+            // their delivery window ends first.
+            if (System.nanoTime() < deferClaimsUntilNanos.get()) { count("rate_limited_skipped"); return 0; }
             List<UUID> candidates = operations.candidates(Math.min(settings.claimBatchSize(), freeWorkers.availablePermits()));
             for (UUID id : candidates) {
                 if (!freeWorkers.tryAcquire()) break;
                 boolean handedOver = false;
                 try {
-                    var claim = operations.claim(id, instanceId + "/" + claimSequence.incrementAndGet(), settings.leaseDuration());
+                    var attempt = operations.tryClaim(id, instanceId + "/" + claimSequence.incrementAndGet(), settings.leaseDuration());
+                    if (attempt.rateLimited()) {
+                        long waitMillis = Math.max(attempt.retryAfterMillis(), RATE_LIMIT_MIN_DEFER_MILLIS);
+                        deferClaimsUntilNanos.set(System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(waitMillis));
+                        count("rate_limited");
+                        logRateLimited(waitMillis);
+                        break;   // every remaining candidate would be refused too; nothing was claimed or changed
+                    }
+                    var claim = attempt.claimed();
                     if (claim.isEmpty()) continue;
                     claimed++;
                     Claimed c = claim.get();
@@ -231,6 +252,14 @@ public class CommandOutboxDispatcher {
             claimPassRunning.set(false);
         }
         return claimed;
+    }
+
+    /** Waiting for publication permission is not publishing: logged once per 30 s while the limit holds. */
+    private void logRateLimited(long waitMillis) {
+        long last = lastRateLimitLogNanos.get(), now = System.nanoTime();
+        if (now - last >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30) && lastRateLimitLogNanos.compareAndSet(last, now))
+            log.info("Outbox publication is waiting for permission: the publish rate limit is reached; unpublished commands stay queued"
+                    + " (next attempt in about {} ms). Nothing was published or claimed.", waitMillis);
     }
 
     /** Publish (outside any transaction) and write the fenced outcome. Never throws. */

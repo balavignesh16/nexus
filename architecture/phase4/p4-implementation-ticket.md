@@ -142,6 +142,8 @@ Verification: redelivery tests on real Mosquitto including a message processed b
 
 ## Slice P4.6: backpressure and rate limiting
 
+**P4.6 status (2026-10-17): implemented and tested on the isolated branch `feature/p46-flow-control` (worktree `D:\nexus-p46`, based on the P4.5 commit `4b73289`), not merged. The authoritative description is contract R36 and the P4.6 evidence section of the ledger. Ledger scenarios: the 6 planned ones COVERED plus 14 added by the P4.6 review (P4-168 to P4-181). No migration was needed. Interpretations and the one deviation from the contract wording (sliding-window permit count instead of an in-memory token bucket) are recorded in R36.**
+
 Authority: R18. Ledger scenarios: 6.
 
 Deliverables: queue caps checked inside acceptance under the device lock with typed rejection or visible rule suppression; token-bucket publish rate limiter; ingestion lag metric; no new unbounded in-memory queue.

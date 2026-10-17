@@ -1,8 +1,8 @@
 # Phase 4 acceptance ledger
 
-Date: 2026-10-17 (P4.5 amendments).
+Date: 2026-10-17 (P4.6 amendments).
 
-Status: **P4.0 FINALIZED; P4.1, P4.2, P4.3 and P4.4 COMMITTED; P4.5 IMPLEMENTED AND TESTED ON THE ISOLATED BRANCH `feature/p45-telemetry-inbox` (not merged). 167 scenario IDs defined; 40 PLANNED, 126 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.5 tests are COVERED.**
+Status: **P4.0 FINALIZED; P4.1 to P4.4 COMMITTED on main; P4.5 COMMITTED on `feature/p45-telemetry-inbox`; P4.6 IMPLEMENTED AND TESTED ON THE ISOLATED BRANCH `feature/p46-flow-control` (based on P4.5, not merged). 181 scenario IDs defined; 34 PLANNED, 146 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.6 tests are COVERED.**
 
 Normative requirements: [reliability-contract.md](reliability-contract.md). Execution and dependency plan: [p4-implementation-ticket.md](p4-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract.
 
@@ -18,10 +18,10 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Status | Count |
 |---|---|
-| PLANNED | 40 |
-| COVERED | 126 |
+| PLANNED | 34 |
+| COVERED | 146 |
 | DEFERRED | 1 |
-| **Total** | **167** |
+| **Total** | **181** |
 
 
 ## A. Atomic acceptance and persistence
@@ -154,12 +154,12 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-087 | Global queue cap rejects new manual commands | PostgreSQL integration | Above the cap a typed rejection is returned before any ActionHistory, desired state or outbox row is written. | R18 | P4.6 | PLANNED | not yet written |
-| P4-088 | Per-device queue cap | PostgreSQL integration | Above the device cap a typed rejection occurs and other devices are unaffected. | R18 | P4.6 | PLANNED | not yet written |
-| P4-089 | Rule-origin command over the cap is suppressed visibly | PostgreSQL integration | A recorded suppression with a reason is stored, nothing is dispatched and no desired state is written. | R18, R24 | P4.6 | PLANNED | not yet written |
-| P4-090 | Publish rate limit bounds publications | PostgreSQL + Mosquitto integration | Publications per second never exceed the configured limit; excess commands wait and expire visibly rather than burst. | R18 | P4.6 | PLANNED | not yet written |
-| P4-091 | Cap checks are race-safe | Concurrency (multiple connections / instances) | Concurrent acceptances cannot exceed the cap because the count is checked under the device lock. | R18 | P4.6 | PLANNED | not yet written |
-| P4-092 | No new unbounded in-memory queue | Validation gate / audit | An architecture test and review confirm that ingestion and dispatch add no unbounded in-memory queue; ingestion lag is exported as a metric. | R18 | P4.6 | PLANNED | not yet written |
+| P4-087 | Global queue cap rejects new manual commands | PostgreSQL integration | Above the cap a typed rejection is returned before any ActionHistory, desired state or outbox row is written. | R18 | P4.6 | COVERED | CommandFlowAcceptanceIntegrationTest.aManualCommandOverTheDeviceCapIsRefusedWithHttp429AndLeavesNothingBehind (HTTP 429, code COMMAND_QUEUE_FULL, Retry-After, no ActionHistory, outbox, desired state, desired transition or publication for the refused command); CommandFlowAcceptanceIntegrationTest.aFullDeviceNeverBlocksAnotherDeviceAndTheGlobalCapIsExactAcrossDevices (GLOBAL scope, nothing written); CommandAdmissionTest.theGlobalCapIsExactAcrossDevicesAndOneDeviceCannotOccupyItAll (one-below, at, one-above); CommandFlowMetricsTest.aRefusalIsCountedByScopeAndOriginOnly |
+| P4-088 | Per-device queue cap | PostgreSQL integration | Above the device cap a typed rejection occurs and other devices are unaffected. | R18 | P4.6 | COVERED | CommandAdmissionTest.theDeviceCapIsExactOneBelowAtAndOneAbove (the refused command leaves no outbox or ActionHistory row); CommandAdmissionTest.aFullDeviceNeverBlocksAnotherDevice; CommandFlowAcceptanceIntegrationTest.aFullDeviceNeverBlocksAnotherDeviceAndTheGlobalCapIsExactAcrossDevices |
+| P4-089 | Rule-origin command over the cap is suppressed visibly | PostgreSQL integration | A recorded suppression with a reason is stored, nothing is dispatched and no desired state is written. | R18, R24 | P4.6 | COVERED | CommandFlowAcceptanceIntegrationTest.aRuleOriginatedCommandOverTheCapIsAVisibleSuppressionWithNothingDispatchedOrWritten (RuleExecutionSuppressedException QUEUE_CAPACITY_EXCEEDED_DEVICE, the persisted candidate is DENIED with that reason through the engine, no ActionHistory, outbox, desired state or publication); CommandFlowAcceptanceIntegrationTest.aRuleCommandIsAcceptedNormallyWhileThereIsCapacity |
+| P4-090 | Publish rate limit bounds publications | PostgreSQL + Mosquitto integration | Publications per second never exceed the configured limit; excess commands wait and expire visibly rather than burst. | R18 | P4.6 | COVERED | CommandFlowMqttRateIntegrationTest.twentyCommandsAreSpreadOverTimeNeverExceedFivePerSecondAndEachReachesTheBrokerOnce (real Mosquitto and the production dispatcher and Paho publisher: at most 5 confirmed in any one-second window on the database clock, one attempt each, an independent subscriber receives each command exactly once); CommandOutboxFlowDispatcherTest.aBurstIsSpreadOverTimeNeverExceedsTheRateAndEveryCommandIsPublishedExactlyOnce; CommandPublishGateTest.exactlyTheRateOfClaimsIsAllowedAndTheNextOneIsRefusedWithoutTouchingTheRow |
+| P4-091 | Cap checks are race-safe | Concurrency (multiple connections / instances) | Concurrent acceptances cannot exceed the cap because the count is checked under the device lock. | R18 | P4.6 | COVERED | CommandAdmissionTest.concurrentAcceptancesForManyDevicesNeverExceedTheGlobalCap (16 threads, cap 5: exactly 5); CommandAdmissionTest.concurrentAcceptancesForOneDeviceNeverExceedTheDeviceCap; CommandAdmissionTest.anAcceptanceHeldBetweenItsCheckAndItsInsertMakesTheNextOneWaitInsteadOfOverAdmitting (deterministic barrier: the second acceptance waits on the admission lock and is then refused, never 6 of 5); CommandAdmissionTest.theAdmissionLockIsReleasedWhenAnAcceptanceRollsBackSoNothingStaysBlocked |
+| P4-092 | No new unbounded in-memory queue | Validation gate / audit | An architecture test and review confirm that ingestion and dispatch add no unbounded in-memory queue; ingestion lag is exported as a metric. | R18 | P4.6 | COVERED | FlowControlArchitectureTest.ingestionAndDispatchIntroduceNoUnboundedInMemoryQueue (no unbounded queue or executor on the ingestion or dispatch path; work reaches the fixed pool only after a free-worker permit); TelemetryListenerProcessingTimerTest.everyProcessingAttemptIsTimedWhetherItSucceedsOrFails and TelemetryListenerProcessingTimerTest.aMessageThatNeverReachesTheServiceIsNotTimedAndTheTagsAreFixed (ingestion lag exported as nexus.telemetry.processing) |
 | P4-093 | Flood is bounded | Fault injection | A command flood keeps memory and table growth within limits and every command reaches PUBLISHED, DEAD_LETTER or a typed rejection within its window. | R18, R12 | P4.8 | PLANNED | not yet written |
 
 ## J. Traceability, API and access
@@ -276,6 +276,25 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-166 | The repository simulation runner sends BOOLEAN capabilities in the generic shape | Simulator (pytest) | publish_tick sends MOTION and BUTTON as a JSON boolean with unit BOOLEAN and the capability key; numeric capabilities are unchanged. | R25 | P4.5 | COVERED | test_telemetry_message_id.py::test_the_grand_simulation_sends_boolean_capabilities_in_the_generic_boolean_shape |
 | P4-167 | The duplicate field is additive | API (MockMvc) | A normal acceptance omits the duplicate field (existing clients see the same shape and 201); an identical duplicate is 200 with duplicate true. | R17, R21 | P4.5 | COVERED | TelemetryInboxIntegrationTest.httpDuplicateIsASuccessfulNoOpAndAConflictIs409AcrossTransports; TelemetryInboxIntegrationTest.aPayloadExactlyAsTheCommittedFirmwareSendsItIsStillAcceptedAndStoredUnchanged |
 
+## R. P4.6 additional scenarios (added by the P4.6 review)
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P4-168 | Every unresolved state occupies a slot and terminal outcomes release it | PostgreSQL integration | QUEUED, IN_FLIGHT and RETRY_WAIT each occupy capacity; a retry is the same obligation and takes no second slot; PUBLISHED and DEAD_LETTER release the slot at once; a published command no longer counts. | R18 | P4.6 | COVERED | CommandAdmissionTest.everyUnresolvedStateOccupiesASlotAndTerminalStatesReleaseIt; CommandFlowAcceptanceIntegrationTest.aTerminalOutcomeReleasesCapacityAndTheNextCommandIsAccepted |
+| P4-169 | Several dispatcher instances share one publish limit | Concurrency (multiple connections / instances) | Three instances with eight threads each racing for the permits claim exactly the rate in total; two dispatchers publish 20 commands once each with at most the rate confirmed in any one second; while another transaction holds the gate lock a claim waits instead of deciding on a stale count. | R09, R18 | P4.6 | COVERED | CommandPublishGateTest.manyInstancesAndThreadsRacingForTheLimitedPermitsClaimExactlyTheRate; CommandPublishGateTest.aClaimWaitsWhileAnotherTransactionHoldsTheGateLockInsteadOfDecidingOnAStaleCount; CommandOutboxFlowDispatcherTest.twoDispatchersOfTwoInstancesShareOneLimit |
+| P4-170 | A rate-limited command is untouched and consumes no attempt; a retry under the limit keeps its budget | PostgreSQL integration | A refused claim leaves the row, its history and its payload byte for byte as they were (QUEUED, attempt 0, same timestamp and deadline); a retry that becomes due while the permits are exhausted keeps attempt 1 and its bytes and becomes attempt 2, not 3; the dispatcher publishes the stored bytes verbatim on both attempts; a NOT_SENT attempt consumes no permit. | R11, R12, R18 | P4.6 | COVERED | CommandPublishGateTest.exactlyTheRateOfClaimsIsAllowedAndTheNextOneIsRefusedWithoutTouchingTheRow; CommandPublishGateTest.aRetryThatBecomesDueWhileThePermitsAreExhaustedWaitsWithItsAttemptCounterAndDeadlineIntact; CommandPublishGateTest.aNotSentAttemptConsumesNothingBecauseNothingReachedTheBroker; CommandPublishGateTest.aSingleClaimTakesExactlyOnePermitSoTheGateAndTheClaimCannotDisagree; CommandOutboxFlowDispatcherTest.aRetryUnderTheLimitKeepsItsIdentityBytesAndAttemptBudget |
+| P4-171 | A command that expires while waiting for permission is dead-lettered visibly and never refreshed | PostgreSQL integration | An expired command is never claimed whatever the permits; the sweep dead-letters it EXPIRED (never sent, attempt 0, ActionHistory FAILURE with the message), its payload and timestamp are unchanged, and the expiry is counted. | R11, R12, R18 | P4.6 | COVERED | CommandPublishGateTest.aCommandWhoseWindowEndsWhileItWaitsForPermissionIsExpiredNeverSentAndNeverRefreshed; CommandOutboxFlowDispatcherTest.aCommandThatExpiresWhileWaitingForPermissionIsDeadLetteredVisiblyAndNeverPublished |
+| P4-172 | A command acknowledged while it waits for permission is never published | PostgreSQL integration | An acknowledged command is never claimed and takes no permit; once a permit is free it is still not published and the existing sweep resolves it as an unconfirmed delivery. | R13, R18 | P4.6 | COVERED | CommandPublishGateTest.anAcknowledgedCommandIsNeverClaimedAndTakesNoPermit; CommandOutboxFlowDispatcherTest.aCommandAcknowledgedWhileItWaitsForPermissionIsNeverPublished |
+| P4-173 | Device ordering and cross-device fairness survive the limiter | PostgreSQL integration | A later command never overtakes an earlier one that waits for permission; a busy device does not starve others (oldest-first, one in flight per device) and keeps its own order. | R09, R18 | P4.6 | COVERED | CommandPublishGateTest.aLaterCommandNeverOvertakesAnEarlierOneThatIsWaitingForPermission; CommandOutboxFlowDispatcherTest.aBusyDeviceDoesNotStarveOtherDevicesBecauseWorkIsClaimedOldestFirstWithOneInFlightPerDevice |
+| P4-174 | The limiter fails closed | PostgreSQL integration | When the gate cannot decide, the claim fails with no state change and nothing is published; the dispatcher counts claim_error and the commands stay queued; the gate decision is never swallowed in the claim. | R18, R22 | P4.6 | COVERED | CommandPublishGateTest.whenTheGateCannotDecideTheClaimFailsClosedAndNothingIsPublishable; CommandOutboxFlowDispatcherTest.whenTheLimiterCannotDecideNothingIsPublishedAndTheCommandsStayQueued; FlowControlArchitectureTest.theOnlyClaimOfAnOutboxRowIsInsideTheGatedClaimOfTheDeliveryOperations |
+| P4-175 | Capacity and the limiter survive restarts and a dispatcher that dies | PostgreSQL integration | A new instance counts the same capacity and sees the same limiter state because both are derived from durable rows; a dispatcher that dies while commands wait loses nothing, and its successor delivers every command exactly once within the same limit. | R15, R18 | P4.6 | COVERED | CommandAdmissionTest.aRestartedInstanceSeesTheSameCapacityBecauseItIsCountedFromDurableRows; CommandPublishGateTest.aRestartedInstanceSeesTheSameLimiterStateBecauseItIsDerivedFromDurableRows; CommandOutboxFlowDispatcherTest.aDispatcherThatDiesWhileCommandsWaitForPermissionLosesNothingAndANewOneContinuesWithinTheSameLimit |
+| P4-176 | An exhausted budget does not busy-poll | PostgreSQL integration | A hot loop of 300 claim passes asks the gate at most once per 50 ms and skips the rest locally; nothing is published or changed. | R18 | P4.6 | COVERED | CommandOutboxFlowDispatcherTest.anExhaustedBudgetDoesNotBusyPollTheDatabaseOrThePublisher |
+| P4-177 | Flow-control configuration is validated at startup | Unit | Defaults, every boundary and one beyond it, zero, negative and overflow-prone values and a device cap above the global cap are refused with all problems reported together. | R18, R22 | P4.6 | COVERED | CommandFlowSettingsTest (all 5 tests) |
+| P4-178 | With the outbox flag OFF legacy behaviour is unchanged and no cap applies | PostgreSQL + Mosquitto integration | With caps of 1 and 1 and the flag off, three commands for one device are published directly, the admission check is never consulted and no outbox row exists. | R18, R22 | P4.6 | COVERED | CommandFlowFlagOffIntegrationTest.withTheOutboxOffNoCapAppliesAndEveryCommandIsPublishedDirectly |
+| P4-179 | A broker outage consumes no permits and the limit holds on recovery | PostgreSQL integration | While the client refuses every publish, attempts end NOT_SENT and consume nothing; after recovery every command is published or dead-lettered within its budget and never more than the rate is confirmed in a second. | R10, R18 | P4.6 | COVERED | CommandOutboxFlowDispatcherTest.aBrokerOutageConsumesNoPermitsAndRecoveryResumesWithinTheLimit |
+| P4-180 | Flow-control metrics have bounded tags and tolerate failures | Unit | Rejections are counted by scope and origin only; the queue gauges report the unresolved count and utilization and read the database at most once a second; a database failure yields NaN instead of a failed scrape; no identifier is ever a tag. | R18, R20 | P4.6 | COVERED | CommandFlowMetricsTest (all 3 tests); TelemetryListenerProcessingTimerTest.aMessageThatNeverReachesTheServiceIsNotTimedAndTheTagsAreFixed |
+| P4-181 | Flow control cannot be bypassed structurally | Validation gate / audit | The only claim statement is inside the gated claim and precedes nothing network-related; the dispatcher claims only through the gate; only acceptance takes the admission lock and only the gate takes the gate lock, in distinct key spaces from the history lock; flow-control classes never touch the device row, the broker or an executor; the gate is never held across publication. | R18, R31 | P4.6 | COVERED | FlowControlArchitectureTest (all 6 tests) |
+
 ## Coverage mapping
 
 ### By slice
@@ -287,7 +306,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4.3 | 17 | P4-026, P4-027, P4-028, P4-029, P4-030, P4-032, P4-034, P4-035, P4-039, P4-040, P4-041, P4-042, P4-043, P4-044, P4-045, P4-121, P4-122 |
 | P4.4 | 20 | P4-047, P4-048, P4-049, P4-050, P4-051, P4-052, P4-053, P4-054, P4-055, P4-056, P4-069, P4-070, P4-071, P4-074, P4-153, P4-154, P4-155, P4-156, P4-157, P4-158 |
 | P4.5 | 26 | P4-072, P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-108, P4-117, P4-118, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-166, P4-167 |
-| P4.6 | 6 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092 |
+| P4.6 | 20 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181 |
 | P4.7 | 14 | P4-033, P4-057, P4-058, P4-073, P4-094, P4-095, P4-096, P4-097, P4-100, P4-101, P4-102, P4-103, P4-104, P4-114 |
 | P4.8 | 20 | P4-046, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-067, P4-093, P4-107, P4-110, P4-111, P4-112, P4-113, P4-115, P4-116, P4-119, P4-123 |
 | none | 1 | P4-124 |
@@ -296,12 +315,12 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Layer | Count |
 |---|---|
-| PostgreSQL integration | 71 |
-| Concurrency (multiple connections / instances) | 18 |
+| PostgreSQL integration | 80 |
+| Concurrency (multiple connections / instances) | 19 |
 | Fault injection | 17 |
-| PostgreSQL + Mosquitto integration | 13 |
-| Unit | 15 |
-| Validation gate / audit | 10 |
+| PostgreSQL + Mosquitto integration | 14 |
+| Unit | 17 |
+| Validation gate / audit | 11 |
 | API (MockMvc) | 10 |
 | Migration on populated database | 5 |
 | Simulator (pytest) | 4 |
@@ -348,20 +367,20 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R06 | 5 | P4-009, P4-010, P4-032, P4-094, P4-139 |
 | R07 | 10 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141, P4-151, P4-164 |
 | R08 | 8 | P4-001, P4-002, P4-003, P4-004, P4-011, P4-031, P4-044, P4-137 |
-| R09 | 18 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133, P4-146, P4-150 |
-| R10 | 14 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149, P4-154 |
-| R11 | 18 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142, P4-145, P4-150, P4-155 |
-| R12 | 21 | P4-006, P4-026, P4-030, P4-034, P4-035, P4-036, P4-038, P4-039, P4-040, P4-041, P4-042, P4-043, P4-045, P4-046, P4-064, P4-067, P4-093, P4-135, P4-136, P4-144, P4-149 |
-| R13 | 17 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074, P4-151, P4-153, P4-154, P4-156, P4-158 |
+| R09 | 20 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133, P4-146, P4-150, P4-169, P4-173 |
+| R10 | 15 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149, P4-154, P4-179 |
+| R11 | 20 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142, P4-145, P4-150, P4-155, P4-170, P4-171 |
+| R12 | 23 | P4-006, P4-026, P4-030, P4-034, P4-035, P4-036, P4-038, P4-039, P4-040, P4-041, P4-042, P4-043, P4-045, P4-046, P4-064, P4-067, P4-093, P4-135, P4-136, P4-144, P4-149, P4-170, P4-171 |
+| R13 | 18 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074, P4-151, P4-153, P4-154, P4-156, P4-158, P4-172 |
 | R14 | 9 | P4-052, P4-053, P4-054, P4-056, P4-065, P4-103, P4-155, P4-157, P4-158 |
-| R15 | 11 | P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-132 |
+| R15 | 12 | P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-132, P4-175 |
 | R16 | 7 | P4-068, P4-069, P4-070, P4-071, P4-074, P4-109, P4-157 |
 | R17 | 21 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-167 |
-| R18 | 9 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093 |
+| R18 | 23 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181 |
 | R19 | 9 | P4-082, P4-125, P4-126, P4-129, P4-130, P4-131, P4-132, P4-139, P4-163 |
-| R20 | 8 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103, P4-147 |
+| R20 | 9 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103, P4-147, P4-180 |
 | R21 | 12 | P4-033, P4-043, P4-073, P4-083, P4-097, P4-098, P4-099, P4-101, P4-102, P4-103, P4-104, P4-167 |
-| R22 | 8 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152 |
+| R22 | 11 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152, P4-174, P4-177, P4-178 |
 | R23 | 5 | P4-068, P4-072, P4-086, P4-108, P4-109 |
 | R24 | 17 | P4-011, P4-031, P4-041, P4-042, P4-044, P4-048, P4-051, P4-056, P4-084, P4-089, P4-106, P4-110, P4-111, P4-113, P4-114, P4-149, P4-152 |
 | R25 | 7 | P4-117, P4-118, P4-119, P4-120, P4-121, P4-165, P4-166 |
@@ -370,14 +389,14 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R28 | 1 | P4-124 |
 | R29 | 6 | P4-046, P4-110, P4-111, P4-116, P4-123, P4-131 |
 | R30 | 5 | P4-125, P4-126, P4-127, P4-128, P4-162 |
-| R31 | 9 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-153, P4-157 |
+| R31 | 10 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-153, P4-157, P4-181 |
 | R32 | 3 | P4-145, P4-146, P4-147 |
 
 Clauses with no scenario of their own (definitional or covered through other clauses): R01.
 
 ## Evidence not yet produced
 
-Everything except the COVERED scenarios and the P4.1 and P4.2 evidence recorded below. In particular there is no recorded evidence yet for process-kill crash recovery, backpressure or the enablement procedure (retries, ACK facts, legacy reconciliation and telemetry deduplication are recorded in the P4.3 to P4.5 sections).
+Everything except the COVERED scenarios and the P4.1 and P4.2 evidence recorded below. In particular there is no recorded evidence yet for process-kill crash recovery or the enablement procedure (retries, ACK facts, legacy reconciliation, telemetry deduplication and flow control are recorded in the P4.3 to P4.6 sections).
 
 ## P4.1 evidence (2026-10-15, including the safety corrections)
 
@@ -795,3 +814,84 @@ The full gate was run once, after the last source change, as authorised; the bac
 - The messageId is chosen by the sender and is not authenticated (Phase 7). Protection ends when the entry is purged (168 hours by default) and never applies to messages without an id, which includes everything the committed firmware sends.
 - No multi-process evidence: concurrency is exercised with several connections and threads against one disposable PostgreSQL.
 - The pool-starvation and unknown-device retry behaviours described above are pre-existing and unchanged.
+
+## P4.6 evidence (2026-10-17, isolated worktree `D:\nexus-p46`, branch `feature/p46-flow-control`, started from the P4.5 commit `4b73289`)
+
+Only the scenarios marked COVERED in the tables above are proven, each by the exact tests cited in its row. Nothing here claims exactly-once publication or delivery, any physical outcome, device-side deduplication, process-kill fault injection (P4.8) or multi-process evidence beyond several dispatcher objects and threads against one PostgreSQL. Authority: contract R36.
+
+### What P4.6 built
+
+- `CommandFlowSettings` (validated limits), `CommandAdmission` (bounded admission: per-device count under the device row lock, global count under the admission advisory lock), `CommandQueueFullException` and its HTTP 429 mapping, `CommandPublishGate` (shared sliding-window permit count under the gate advisory lock), `CommandFlowMetrics` (gauges).
+- `CommandAcceptanceService`: admission after authorisation and before the first durable write; a manual command over a cap is the typed refusal, a rule-originated one a visible suppression. `OutboxDeliveryOperations.tryClaim`: the permit decision and the claim in one transaction (`claim` is its thin alias); a refusal changes nothing. `CommandOutboxDispatcher`: claims only through `tryClaim`, defers by the wait hint instead of polling, counts deferrals and commands that expired while waiting.
+- `TelemetryMQTTListener`: the `nexus.telemetry.processing` timer (ingestion lag, measurement only).
+- Configuration: `nexus.command.flow.*` in `application.yml`; the test resource defaults raise the caps and the rate.
+- **No migration** (V41 stays reserved). Not changed: `firmware/**`, `hardware-tests/**`, the frontend, V1 to V40, the rule engine, ACK processing, P4.5 telemetry deduplication, the user-owned documents, `D:\nexus` and `D:\NEXUS_Review_Prep`.
+
+### Defects and findings recorded while implementing P4.6
+
+1. Every P4.1 to P4.5 test that put more than ten commands on one device was refused by the new per-device cap (`CommandOutboxAcceptanceIntegrationTest.commandsOfOneDeviceAreOrderedByAStrictlyIncreasingCreationKeyInAcceptanceOrder`, `CommandDispatchMqttOutboxModeIntegrationTest.concurrentSameTargetUsesDurableAcceptanceOrder`). No test or assertion was changed; the test resource defaults now raise the caps (and the rate) far above production, and the flow-control tests set them explicitly.
+2. **A P4.5 deadlock (follow-up F3).** `TelemetryInboxOnboardingAndDeletionIntegrationTest.deletionRacingALiveIngestionNeverLeavesAnOrphanedEntryOrADanglingFailure` failed once in a wide regression run: PostgreSQL detected a deadlock between a device deletion (it holds the row lock and its DELETE waits for key-share holders) and a telemetry ingestion (it holds the foreign key's key-share lock from the dedupe claim and then asks for the row lock). One transaction is aborted and nothing is corrupted, but it is a real lock-upgrade cycle that P4.5 introduced. It is not part of the P4.6 contract and no production code was changed; the test now retries the aborted deletion (up to 8 times) and still proves the end state. The proper fix (take the device lock before the claim, in the order `prepareUpdate` uses, which needs the in-process lock first to avoid a cycle the database cannot see) is recorded in the follow-ups and needs a scope decision.
+3. A first version of the busy-poll test expected one gate question in a hot loop; the deferral is 50 ms, so the test now asserts at most one question per 50 ms and that every pass is either a question or a local skip.
+4. Tests that leave a permit holder in flight made the next test wait 20 s in teardown; they now end their holders.
+
+### P4.6 tests (60 new JUnit tests in 10 new classes; 1 existing test adapted; the test resource defaults changed)
+
+| Test class | Tests | Layer | What it establishes |
+|---|---|---|---|
+| `com.nexus.action.outbox.CommandFlowSettingsTest` | 5 | Unit | Defaults, boundaries, negative and overflow-prone values, contradictions |
+| `com.nexus.action.outbox.CommandAdmissionTest` | 9 | PostgreSQL, real connections and barriers | Cap boundaries per device and in all, states that occupy and release, restart, 16-thread and 12-thread races, the deterministic last-slot race, rollback releases the lock |
+| `com.nexus.action.outbox.CommandPublishGateTest` | 17 | PostgreSQL, real connections | The limit and its boundary, in-flight and uncertain count, not-sent does not, retry and expiry and ACK and ordering and fencing interplay, 3 instances x 8 threads, the lock wait, restart, fail closed |
+| `com.nexus.action.outbox.CommandOutboxFlowDispatcherTest` | 10 | PostgreSQL + scripted broker | Spread burst, two dispatchers, no busy loop, expiry while waiting, retry, ACK, outage, dispatcher death, fairness, fail closed |
+| `com.nexus.action.outbox.CommandFlowAcceptanceIntegrationTest` | 6 | Spring + PostgreSQL + Mosquitto + MockMvc | HTTP 429 and nothing left behind, global scope, release, the transaction requirement, rule suppression through the engine |
+| `com.nexus.action.outbox.CommandFlowFlagOffIntegrationTest` | 1 | Spring + PostgreSQL + Mosquitto | Flag off, caps of 1: legacy behaviour unchanged |
+| `com.nexus.action.outbox.CommandFlowMqttRateIntegrationTest` | 1 | Spring + PostgreSQL + REAL Mosquitto, production dispatcher and publisher | 20 commands at 5 per second on the real wire |
+| `com.nexus.action.outbox.CommandFlowMetricsTest` | 3 | Unit | Counters, gauges, tolerance |
+| `com.nexus.action.outbox.FlowControlArchitectureTest` | 6 | Source audit | No bypass, lock isolation, no unbounded queue |
+| `com.nexus.infrastructure.mqtt.TelemetryListenerProcessingTimerTest` | 2 | Unit | Ingestion lag timer |
+
+### Mutation checks (see the table; every file restored and verified byte for byte with `cmp`)
+
+| # | Mutation | Killed by (first tests) | Result |
+|---|---|---|---|
+| M1 | The per-device queue cap is not enforced | CommandAdmissionTest.aFullDeviceNeverBlocksAnotherDevice; CommandAdmissionTest.aRestartedInstanceSeesTheSameCapacityBecauseItIsCountedFromDurableRows | killed, Tests run: 15, Failures: 9, Errors: 0, 35s; restored byte for byte: yes |
+| M2 | The global queue cap is not enforced | CommandAdmissionTest.anAcceptanceHeldBetweenItsCheckAndItsInsertMakesTheNextOneWaitInsteadOfOverAdmitting; CommandAdmissionTest.concurrentAcceptancesForManyDevicesNeverExceedTheGlobalCap | killed, Tests run: 15, Failures: 4, Errors: 0, 64s; restored byte for byte: yes |
+| M3 | The atomic admission guard (the global advisory lock) is removed: count-then-insert without coordination | CommandAdmissionTest.anAcceptanceHeldBetweenItsCheckAndItsInsertMakesTheNextOneWaitInsteadOfOverAdmitting; CommandAdmissionTest.concurrentAcceptancesForManyDevicesNeverExceedTheGlobalCap | killed, Tests run: 15, Failures: 2, Errors: 0, 64s; restored byte for byte: yes |
+| M4 | Only QUEUED obligations occupy capacity (IN_FLIGHT and RETRY_WAIT are not counted) | CommandAdmissionTest.everyUnresolvedStateOccupiesASlotAndTerminalStatesReleaseIt; CommandFlowAcceptanceIntegrationTest.aFullDeviceNeverBlocksAnotherDeviceAndTheGlobalCapIsExactAcrossDevices | killed, Tests run: 15, Failures: 5, Errors: 0, 36s; restored byte for byte: yes |
+| M5 | A rule-originated command over the cap throws the manual refusal instead of a visible suppression | CommandFlowAcceptanceIntegrationTest.aRuleOriginatedCommandOverTheCapIsAVisibleSuppressionWithNothingDispatchedOrWritten | killed, Tests run: 6, Failures: 1, Errors: 0, 60s; restored byte for byte: yes |
+| M6 | The publish rate limit is not enforced (the gate always allows) | CommandFlowMqttRateIntegrationTest.twentyCommandsAreSpreadOverTimeNeverExceedFivePerSecondAndEachReachesTheBrokerOnce; CommandOutboxFlowDispatcherTest.aBrokerOutageConsumesNoPermitsAndRecoveryResumesWithinTheLimit | killed, Tests run: 26, Failures: 18, Errors: 0, 108s; restored byte for byte: yes |
+| M7 | The shared coordination is removed from the gate (no advisory lock: two claimers can both see a free permit) | CommandPublishGateTest.aClaimWaitsWhileAnotherTransactionHoldsTheGateLockInsteadOfDecidingOnAStaleCount; CommandPublishGateTest.manyInstancesAndThreadsRacingForTheLimitedPermitsClaimExactlyTheRate | killed, Tests run: 15, Failures: 2, Errors: 0, 24s; restored byte for byte: yes |
+| M8 | In-flight publications are not counted by the gate | CommandPublishGateTest.aClaimedButUnfinishedPublicationCountsUntilItsOutcomeIsRecorded; CommandPublishGateTest.aCommandWhoseWindowEndsWhileItWaitsForPermissionIsExpiredNeverSentAndNeverRefreshed | killed, Tests run: 15, Failures: 5, Errors: 0, 23s; restored byte for byte: yes |
+| M9 | Uncertain attempts are not counted by the gate | CommandPublishGateTest.anUncertainAttemptCountsLikeAPublicationBecauseTheBrokerMayHaveReceivedIt | killed, Tests run: 15, Failures: 1, Errors: 0, 24s; restored byte for byte: yes |
+| M10 | The original delivery deadline is not checked by the claim (an expired command could be claimed and published) | CommandPublishGateTest.anExpiredCommandIsNeverClaimedEvenWhenAPermitIsFree; OutboxRetryOperationsTest.aRetryWaitRowWhoseWindowEndedDuringTheBackoffExpiresWithoutAnyFurtherAttempt | killed, Tests run: 38, Failures: 0, Errors: 2, 33s; restored byte for byte: yes |
+| M11 | Retry eligibility is not checked by the claim (a command still in backoff could be claimed) | CommandPublishGateTest.aRetryStillInBackoffIsNotClaimedEvenWhenAPermitIsFree; OutboxRetryOperationsTest.aProvenNonPublicationIsScheduledOnTheDatabaseClockAndIsNotClaimableBeforeItsBackoffEnds | killed, Tests run: 38, Failures: 2, Errors: 0, 33s; restored byte for byte: yes |
+| M12 | Lease fencing is removed from the outcome (a stale worker could complete an attempt it no longer owns) | OutboxDeliveryOperationsTest.aWorkerWithTheWrongLeaseOwnerOrAttemptIsFencedOutAndTheRowIsUntouched | killed, Tests run: 40, Failures: 1, Errors: 0, 51s; restored byte for byte: yes |
+| M13 | Per-device ordering and the uncertainty hold are removed from the claim | CommandPublishGateTest.aLaterCommandNeverOvertakesAnEarlierOneThatIsWaitingForPermission; OutboxDispatchConcurrencyTest.aStalledOlderAttemptNeverLetsANewerCommandOvertakeAndTheHoldThatFollowsItsLossIsEnforced | killed, Tests run: 35, Failures: 11, Errors: 0, 47s; restored byte for byte: yes |
+| M14 | Fail-closed is removed: when the gate cannot decide, the claim is allowed | CommandOutboxFlowDispatcherTest.whenTheLimiterCannotDecideNothingIsPublishedAndTheCommandsStayQueued; CommandPublishGateTest.whenTheGateCannotDecideTheClaimFailsClosedAndNothingIsPublishable | killed, Tests run: 31, Failures: 3, Errors: 0, 61s; restored byte for byte: yes |
+| M15 | The dispatcher ignores the wait hint (it asks the gate on every pass: a busy loop) | CommandOutboxFlowDispatcherTest.anExhaustedBudgetDoesNotBusyPollTheDatabaseOrThePublisher | killed, Tests run: 10, Failures: 1, Errors: 0, 62s; restored byte for byte: yes |
+| M16 | A refused claim consumes an attempt (the attempt counter is incremented before the gate is consulted) | CommandPublishGateTest.aClaimThatLosesItsLeaseIsFencedOutAndNothingIsPublishedOrCountedTwice; CommandPublishGateTest.aClaimWaitsWhileAnotherTransactionHoldsTheGateLockInsteadOfDecidingOnAStaleCount | killed, Tests run: 15, Failures: 2, Errors: 13, 19s; restored byte for byte: yes |
+
+### Validation recorded for P4.6 (2026-10-17)
+
+All runs were made in the isolated worktree with disposable PostgreSQL and Mosquitto containers (random ports); the application's MQTT port and datasource were pointed at unused addresses through the environment, so no test could reach the review demonstration's broker or any development database. The review demonstration was stopped throughout and `D:\nexus` was not touched.
+
+| Gate | Result |
+|---|---|
+| Focused P4.6 classes (10 new classes) | 60 tests, 0 failures, 0 errors, 0 skipped |
+| Wide regression before the full gate (`com.nexus.action`, `rule`, `telemetry`, `device` and `infrastructure` test classes) | 1,494 tests; the only error was the P4.5 deletion-race test (finding 2, follow-up F3), fixed in the test and rerun green inside the full gate |
+| `python validate_nexus.py --fast` | 8 of 8 PASS (44 s) |
+| `python validate_nexus.py --full` | 11 of 11 PASS (backend suite 1,451 s, inside the 1,800 s budget, which was not changed; smokes 18.8 s, 25.5 s and 53.8 s) |
+| Backend | 213 test classes, 1,701 tests, 0 failures, 0 errors, 0 skipped (1,641 at P4.5 plus 60 new) |
+| Frontend | 63 files, 533 tests, all passed (unchanged), lint and production build passed |
+| Simulator | 68 passed, 3 skipped (unchanged; the 3 skips are the existing live-stack skips) |
+| Whitespace | `git diff --check` clean, including the new files (checked with intent-to-add) |
+| Protected paths | `firmware/**`, `hardware-tests/**`, `results/**`, the five user-owned documents, migrations V1 to V40: no change |
+
+The full gate was run once, after the last source and test change, as authorised; the backend suite was not repeated after each work package.
+
+### Limitations stated honestly
+
+- The limiter bounds permits (claims), each leading to at most one publication; broker confirmation times can shift by the publisher's latency, and the uncertain term uses the application-clock instant of that outcome.
+- No process-kill fault injection (P4.8): a dispatcher that dies is simulated by discarding the object and its pools, not by killing a process.
+- The legacy (flag OFF) path has no cap and no rate limit by design; only the dispatcher's claims are limited, including the drain after a rollback.
+- Several dispatcher objects and threads against one PostgreSQL are not multi-process evidence.
+- P4.5 follow-ups F1, F2, L1 and the new F3 remain open and unchanged.

@@ -53,6 +53,12 @@ nexus:
     ack-timeout-scan-interval: ${NEXUS_COMMAND_ACK_TIMEOUT_SCAN_INTERVAL:PT5S}
     legacy-reconcile-interval: ${NEXUS_COMMAND_LEGACY_RECONCILE_INTERVAL:PT60S}
     legacy-reconcile-grace: ${NEXUS_COMMAND_LEGACY_RECONCILE_GRACE:PT5M}   # at least 5 minutes: must exceed any legitimate legacy dispatch
+    flow:
+      # Phase 4 P4.6 flow control (contract R18). Validated at startup; see CommandFlowSettings. The queue caps are enforced only while the
+      # outbox flag is on (only then does acceptance create obligations); the publish rate applies to every dispatcher claim.
+      global-queue-cap: ${NEXUS_COMMAND_FLOW_GLOBAL_QUEUE_CAP:500}
+      device-queue-cap: ${NEXUS_COMMAND_FLOW_DEVICE_QUEUE_CAP:10}
+      publish-rate-per-second: ${NEXUS_COMMAND_FLOW_PUBLISH_RATE_PER_SECOND:20}
     outbox:
       # Phase 4 reliable command delivery. OFF by default (decision D7); P4.1 only reads and validates these values.
       enabled: ${NEXUS_COMMAND_OUTBOX_ENABLED:false}

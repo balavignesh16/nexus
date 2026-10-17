@@ -207,7 +207,19 @@ class TelemetryInboxOnboardingAndDeletionIntegrationTest {
         Future<?> delete = pool.submit(() -> {
             go.await();
             Thread.sleep(150);
-            deviceService.deleteDevice(device);
+            // A deletion that races a live ingestion can lose a database-detected deadlock (the ingestion holds the foreign key's key-share lock
+            // from its dedupe claim and then asks for the row lock the deleter already holds; PostgreSQL aborts one of the two). Aborting the
+            // deletion is a legitimate, retryable outcome and corrupts nothing; it is tracked as follow-up F3 (P4.6 audit of this test). The test
+            // retries the deletion and still proves the end state: no orphan, no dangling entry.
+            for (int attempt = 1; ; attempt++) {
+                try {
+                    deviceService.deleteDevice(device);
+                    break;
+                } catch (org.springframework.dao.PessimisticLockingFailureException deadlockVictim) {
+                    if (attempt >= 8) throw deadlockVictim;
+                    Thread.sleep(50);
+                }
+            }
             deleted.set(true);
             return null;
         });

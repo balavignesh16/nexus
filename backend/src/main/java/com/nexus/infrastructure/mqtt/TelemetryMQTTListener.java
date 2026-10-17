@@ -254,7 +254,15 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         // redelivers this QoS 1 message later. Only the explicit, deterministic payload failures below are permanent
         // (decision A1); an arbitrary IllegalArgumentException from deeper layers is deliberately NOT one of them.
         try {
-            telemetryService.processTelemetry(request, TelemetrySource.MQTT);
+            long processingStarted = System.nanoTime();
+            try {
+                telemetryService.processTelemetry(request, TelemetrySource.MQTT);
+            } finally {
+                // Ingestion lag (contract R18, ledger P4-092): telemetry is processed inside the single MQTT callback, with no queue of its own,
+                // so the time spent here is exactly what makes the broker's delivery queue grow. Measurement only; it changes no behaviour.
+                if (meterRegistry != null)
+                    meterRegistry.timer("nexus.telemetry.processing", "source", "MQTT").record(System.nanoTime() - processingStarted, java.util.concurrent.TimeUnit.NANOSECONDS);
+            }
             log.debug("Successfully processed MQTT telemetry for device {}", request.deviceId());
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
         } catch (com.nexus.device.onboarding.OnboardingTelemetryRejectedException e) {

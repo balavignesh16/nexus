@@ -63,6 +63,11 @@ public class CommandAcceptanceService {
         this.outboxSettings=settings; this.outbox=outbox; this.stateHistory=stateHistory; this.mapper=mapper;
     }
 
+    // Phase 4 (P4.6): bounded admission. Only consulted in outbox mode, because only then does acceptance create delivery obligations.
+    private com.nexus.action.outbox.CommandAdmission admission;
+    @Autowired(required = false)
+    void setAdmission(com.nexus.action.outbox.CommandAdmission admission) { this.admission=admission; }
+
     // Rule actions can run inside the telemetry transaction. A separate commit
     // is required before the caller is permitted to publish MQTT.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -93,6 +98,16 @@ public class CommandAcceptanceService {
             throw invalid;
         }
         if(ruleAuthorization!=null)ruleAuthorization.check(request,context);
+        // R18: queue caps are checked under the device row lock and BEFORE the first durable write. A manual command over a cap is a typed
+        // refusal (HTTP 429); a rule-originated one is a visible suppression (the candidate is DENIED with this reason). Either way the
+        // acceptance transaction rolls back, so no ActionHistory, desired state, outbox row or publication exists for the refused command.
+        if(admission!=null&&outboxSettings!=null&&outboxSettings.enabled()) {
+            try { admission.admit(deviceId,ruleOrigin); }
+            catch(com.nexus.action.outbox.CommandQueueFullException full) {
+                if(ruleOrigin)throw new com.nexus.rule.application.RuleExecutionSuppressedException("QUEUE_CAPACITY_EXCEEDED_"+full.scope().name());
+                throw full;
+            }
+        }
         Instant acceptedAt = clock.instant();
         String source = context != null && context.matchedRule() != null ? "RULE_ACTION" : "MANUAL_COMMAND";
         actions.saveAndFlush(new ActionHistoryRecord(request.requestId(), request.matchId(), deviceId,

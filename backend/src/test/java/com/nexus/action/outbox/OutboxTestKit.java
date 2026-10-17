@@ -68,6 +68,16 @@ final class OutboxTestKit implements AutoCloseable {
                 : new OutboxDeliveryOperations(jdbc, transactions, history, applicationClock, Duration.ofSeconds(30), retryPolicy);
     }
 
+    /**
+     * A second, independent operations object (another backend "instance") over the SAME database, with the shared publish gate at the given
+     * rate. The gate's state lives in the database, so any number of these see the same limit.
+     */
+    OutboxDeliveryOperations opsWithRate(int ratePerSecond) {
+        OutboxDeliveryOperations operations = new OutboxDeliveryOperations(jdbc, transactions, history, Clock.systemUTC(), Duration.ofSeconds(30));
+        operations.setPublishGate(new CommandPublishGate(jdbc, new CommandFlowSettings(100_000, 1_000, ratePerSecond)));
+        return operations;
+    }
+
     UUID device() {
         try (Connection c = dataSource.getConnection()) {
             return OutboxSql.device(c);
