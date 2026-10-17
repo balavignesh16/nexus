@@ -2,7 +2,7 @@
 
 Date: 2026-10-17 (P4.6 amendments).
 
-Status: **P4.0 FINALIZED; P4.1 to P4.4 COMMITTED on main; P4.5 COMMITTED on `feature/p45-telemetry-inbox`; P4.6 IMPLEMENTED AND TESTED ON THE ISOLATED BRANCH `feature/p46-flow-control` (based on P4.5, not merged). 181 scenario IDs defined; 34 PLANNED, 146 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.6 tests are COVERED.**
+Status: **P4.0 FINALIZED; P4.1 to P4.4 COMMITTED on main; P4.5 COMMITTED on `feature/p45-telemetry-inbox`; P4.6 IMPLEMENTED AND TESTED ON THE ISOLATED BRANCH `feature/p46-flow-control` (based on P4.5, not merged). 187 scenario IDs defined; 34 PLANNED, 152 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 to P4.6 tests are COVERED.**
 
 Normative requirements: [reliability-contract.md](reliability-contract.md). Execution and dependency plan: [p4-implementation-ticket.md](p4-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract.
 
@@ -19,9 +19,9 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | Status | Count |
 |---|---|
 | PLANNED | 34 |
-| COVERED | 146 |
+| COVERED | 152 |
 | DEFERRED | 1 |
-| **Total** | **181** |
+| **Total** | **187** |
 
 
 ## A. Atomic acceptance and persistence
@@ -295,6 +295,17 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-180 | Flow-control metrics have bounded tags and tolerate failures | Unit | Rejections are counted by scope and origin only; the queue gauges report the unresolved count and utilization and read the database at most once a second; a database failure yields NaN instead of a failed scrape; no identifier is ever a tag. | R18, R20 | P4.6 | COVERED | CommandFlowMetricsTest (all 3 tests); TelemetryListenerProcessingTimerTest.aMessageThatNeverReachesTheServiceIsNotTimedAndTheTagsAreFixed |
 | P4-181 | Flow control cannot be bypassed structurally | Validation gate / audit | The only claim statement is inside the gated claim and precedes nothing network-related; the dispatcher claims only through the gate; only acceptance takes the admission lock and only the gate takes the gate lock, in distinct key spaces from the history lock; flow-control classes never touch the device row, the broker or an executor; the gate is never held across publication. | R18, R31 | P4.6 | COVERED | FlowControlArchitectureTest (all 6 tests) |
 
+## S. P4.6 safety repair scenarios (added by the P4.6 targeted safety audit)
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P4-182 | A possibly-published attempt counts for one second of DATABASE time whatever the application clock says | PostgreSQL integration | With the application clock one hour behind, about 1.2 seconds behind and one hour ahead of the database, uncertain attempt A (rate 1) records a database-time terminal instant, blocks claim B inside the same database second, and B becomes eligible once a full database second has passed (never an hour later); window boundaries are judged with database time. | R14, R18 | P4.6 | COVERED | CommandPublishGateClockSkewTest.anUncertainAttemptStillCountsWhenTheApplicationClockIsAnHourBehindTheDatabase; CommandPublishGateClockSkewTest.anUncertainAttemptStillCountsWhenTheApplicationClockIsAboutOnePointTwoSecondsBehind; CommandPublishGateClockSkewTest.anUncertainAttemptStillCountsWhenTheApplicationClockIsAheadOfTheDatabase; CommandPublishGateClockSkewTest.aSkewedClockCannotCountAnUncertainAttemptForLongerThanOneDatabaseSecond |
+| P4-183 | Late-completed and lease-recovered uncertain attempts are counted on database time | PostgreSQL integration | A publish that completes after the delivery window (recorded UNCERTAIN_EXPIRED) and an attempt recovered after its lease expired both record database time and keep a permit under a skewed application clock. | R11, R18, R31 | P4.6 | COVERED | CommandPublishGateClockSkewTest.anAttemptCompletedAfterTheWindowAndALeaseRecoveredAttemptAreAlsoCountedOnDatabaseTime |
+| P4-184 | Acknowledged confirmed publications stay counted and an uncertain outcome is never retried | PostgreSQL integration | A confirmed publication that is acknowledged at once stays PUBLISHED and counted for its whole rolling second; an uncertain command is dead-lettered after one attempt, is never a claim candidate again and cannot be claimed. | R10, R13, R18 | P4.6 | COVERED | CommandPublishGateClockSkewTest.aConfirmedPublicationThatIsAcknowledgedAtOnceStaysCountedForItsFullSecond; CommandPublishGateClockSkewTest.anUncertainOutcomeIsNeverRetriedAndNeverACandidateAgain; the 90-publication acknowledged series recorded in the audit (max 20 in any rolling second at rate 20) |
+| P4-185 | Instances with different clocks share one limit and the limiter stays fail-closed | Concurrency (multiple connections / instances) | Three instances whose application clocks are an hour behind, an hour ahead and exact claim and complete uncertain attempts concurrently: together exactly the rate inside one database second and never more than the rate in any rolling window; when the gate cannot decide nothing is claimed. | R18, R22 | P4.6 | COVERED | CommandPublishGateClockSkewTest.instancesWithDifferentClocksShareOneLimit; CommandPublishGateClockSkewTest.whenTheGateCannotDecideAnUncertainBurstStillFailsClosed |
+| P4-186 | Identified telemetry and device deletion serialise on the device row lock (follow-up F3 resolved) | PostgreSQL integration | With the ingestion parked right after its dedupe claim and a deletion started meanwhile, the deletion waits, both complete without SQLSTATE 40P01, and nothing is left behind (device, dedupe row, telemetry, Twin); the race test no longer retries a deletion; identified and unidentified concurrent samples of one device (40 rounds) neither deadlock nor hang. | R17, R30 | P4.6 | COVERED | TelemetryInboxOnboardingAndDeletionIntegrationTest.aDeletionStartedWhileAnIdentifiedIngestionIsInFlightWaitsForItAndNeverDeadlocks; TelemetryInboxOnboardingAndDeletionIntegrationTest.deletionRacingALiveIngestionNeverLeavesAnOrphanedEntryOrADanglingFailure (no retry); TelemetryInboxIntegrationTest.concurrentDifferentMessagesOfOneDeviceNeitherDeadlockNorHang |
+| P4-187 | Concurrent identical message ids are deduplicated per device, never across devices | Concurrency (multiple connections / instances) | Eight threads send the same id to two devices: exactly one acceptance per device, one row each. | R17 | P4.6 | COVERED | TelemetryInboxIntegrationTest.concurrentIdenticalMessagesForSeveralDevicesAreDeduplicatedPerDeviceNeverAcrossThem; TelemetryInboxIntegrationTest.concurrentIdenticalSubmissionsCommitExactlyOnce; TelemetryInboxIntegrationTest.aFailureAfterTheClaimRemovesTheClaimAndEveryEffectAndTheRetryIsAcceptedNormally (a rolled-back ingestion leaves no Twin, telemetry, event, rule or dedupe effect) |
+
 ## Coverage mapping
 
 ### By slice
@@ -306,7 +317,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4.3 | 17 | P4-026, P4-027, P4-028, P4-029, P4-030, P4-032, P4-034, P4-035, P4-039, P4-040, P4-041, P4-042, P4-043, P4-044, P4-045, P4-121, P4-122 |
 | P4.4 | 20 | P4-047, P4-048, P4-049, P4-050, P4-051, P4-052, P4-053, P4-054, P4-055, P4-056, P4-069, P4-070, P4-071, P4-074, P4-153, P4-154, P4-155, P4-156, P4-157, P4-158 |
 | P4.5 | 26 | P4-072, P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-108, P4-117, P4-118, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-166, P4-167 |
-| P4.6 | 20 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181 |
+| P4.6 | 26 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181, P4-182, P4-183, P4-184, P4-185, P4-186, P4-187 |
 | P4.7 | 14 | P4-033, P4-057, P4-058, P4-073, P4-094, P4-095, P4-096, P4-097, P4-100, P4-101, P4-102, P4-103, P4-104, P4-114 |
 | P4.8 | 20 | P4-046, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-067, P4-093, P4-107, P4-110, P4-111, P4-112, P4-113, P4-115, P4-116, P4-119, P4-123 |
 | none | 1 | P4-124 |
@@ -315,8 +326,8 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Layer | Count |
 |---|---|
-| PostgreSQL integration | 80 |
-| Concurrency (multiple connections / instances) | 19 |
+| PostgreSQL integration | 84 |
+| Concurrency (multiple connections / instances) | 21 |
 | Fault injection | 17 |
 | PostgreSQL + Mosquitto integration | 14 |
 | Unit | 17 |
@@ -368,19 +379,19 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R07 | 10 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141, P4-151, P4-164 |
 | R08 | 8 | P4-001, P4-002, P4-003, P4-004, P4-011, P4-031, P4-044, P4-137 |
 | R09 | 20 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133, P4-146, P4-150, P4-169, P4-173 |
-| R10 | 15 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149, P4-154, P4-179 |
-| R11 | 20 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142, P4-145, P4-150, P4-155, P4-170, P4-171 |
+| R10 | 16 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149, P4-154, P4-179, P4-184 |
+| R11 | 21 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142, P4-145, P4-150, P4-155, P4-170, P4-171, P4-183 |
 | R12 | 23 | P4-006, P4-026, P4-030, P4-034, P4-035, P4-036, P4-038, P4-039, P4-040, P4-041, P4-042, P4-043, P4-045, P4-046, P4-064, P4-067, P4-093, P4-135, P4-136, P4-144, P4-149, P4-170, P4-171 |
-| R13 | 18 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074, P4-151, P4-153, P4-154, P4-156, P4-158, P4-172 |
-| R14 | 9 | P4-052, P4-053, P4-054, P4-056, P4-065, P4-103, P4-155, P4-157, P4-158 |
+| R13 | 19 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074, P4-151, P4-153, P4-154, P4-156, P4-158, P4-172, P4-184 |
+| R14 | 10 | P4-052, P4-053, P4-054, P4-056, P4-065, P4-103, P4-155, P4-157, P4-158, P4-182 |
 | R15 | 12 | P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-132, P4-175 |
 | R16 | 7 | P4-068, P4-069, P4-070, P4-071, P4-074, P4-109, P4-157 |
-| R17 | 21 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-167 |
-| R18 | 23 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181 |
+| R17 | 23 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120, P4-159, P4-160, P4-161, P4-162, P4-163, P4-164, P4-165, P4-167, P4-186, P4-187 |
+| R18 | 27 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093, P4-168, P4-169, P4-170, P4-171, P4-172, P4-173, P4-174, P4-175, P4-176, P4-177, P4-178, P4-179, P4-180, P4-181, P4-182, P4-183, P4-184, P4-185 |
 | R19 | 9 | P4-082, P4-125, P4-126, P4-129, P4-130, P4-131, P4-132, P4-139, P4-163 |
 | R20 | 9 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103, P4-147, P4-180 |
 | R21 | 12 | P4-033, P4-043, P4-073, P4-083, P4-097, P4-098, P4-099, P4-101, P4-102, P4-103, P4-104, P4-167 |
-| R22 | 11 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152, P4-174, P4-177, P4-178 |
+| R22 | 12 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152, P4-174, P4-177, P4-178, P4-185 |
 | R23 | 5 | P4-068, P4-072, P4-086, P4-108, P4-109 |
 | R24 | 17 | P4-011, P4-031, P4-041, P4-042, P4-044, P4-048, P4-051, P4-056, P4-084, P4-089, P4-106, P4-110, P4-111, P4-113, P4-114, P4-149, P4-152 |
 | R25 | 7 | P4-117, P4-118, P4-119, P4-120, P4-121, P4-165, P4-166 |
@@ -388,8 +399,8 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R27 | 1 | P4-116 |
 | R28 | 1 | P4-124 |
 | R29 | 6 | P4-046, P4-110, P4-111, P4-116, P4-123, P4-131 |
-| R30 | 5 | P4-125, P4-126, P4-127, P4-128, P4-162 |
-| R31 | 10 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-153, P4-157, P4-181 |
+| R30 | 6 | P4-125, P4-126, P4-127, P4-128, P4-162, P4-186 |
+| R31 | 11 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-153, P4-157, P4-181, P4-183 |
 | R32 | 3 | P4-145, P4-146, P4-147 |
 
 Clauses with no scenario of their own (definitional or covered through other clauses): R01.
@@ -895,3 +906,53 @@ The full gate was run once, after the last source and test change, as authorised
 - The legacy (flag OFF) path has no cap and no rate limit by design; only the dispatcher's claims are limited, including the drain after a rollback.
 - Several dispatcher objects and threads against one PostgreSQL are not multi-process evidence.
 - P4.5 follow-ups F1, F2, L1 and the new F3 remain open and unchanged.
+
+## P4.6 safety repair evidence (2026-10-17, commit on `feature/p46-flow-control` after `e6d95e8`)
+
+The targeted safety audit of P4.6 found two defects; both were repaired in a separate corrective commit. Authority: contract R36 (publish gate, clock) and R35 (telemetry locks).
+
+### Root causes and changes
+
+1. **Rate limiter and the application clock.** `OutboxDeliveryOperations.deadLetter` recorded `terminal_at` of an UNCERTAIN outcome (and of a publish that completed after the delivery window) from the APPLICATION clock, and `recoverExpiredLeases` did the same for a lease-recovered attempt, while `CommandPublishGate` counts such rows with `terminal_at > clock_timestamp() - 1 s` on the DATABASE clock. A host whose clock is about a second or more off the database's (the JVM and the database container differ by 1.18 s on the development machine) could record an instant the gate no longer counted, so a second publication could start inside the same second although the first may have reached the broker. The audit reproduced it (rate 1, application clock an hour behind: second claim allowed). Fix: `terminal_at` of a possibly-published attempt is now `clock_timestamp()` (three SQL spots, no other outcome and no history fact changed; payload, identity and wire timestamp untouched).
+2. **F3, telemetry ingestion versus device deletion.** Identified telemetry inserted its dedupe claim (foreign key: key-share lock on the device row) before asking `prepareUpdate` for `FOR NO KEY UPDATE`, while a deletion holds that row lock and its DELETE waits for the key-share holder: a cycle, SQLSTATE `40P01`, reproduced deterministically by the audit. Fix: `DigitalTwinService.underDeviceLock` takes the per-device in-process lock and then the device row lock, in the order `prepareUpdate` uses, and identified telemetry runs its whole ingestion (claim included) inside it. Unidentified telemetry is unchanged. The row lock is requested inside the ingestion transaction (the lambda is not a proxied call, so there is no self-invocation issue); the in-process lock is reentrant and covers the claim and the Twin mutation, and is released when the ingestion body returns while the row lock stays to commit; no database/in-process inversion exists because every path takes the in-process lock first. A device that vanished before the lock is the established `ResourceNotFoundException`, so MQTT unknown-device behaviour (F2) is unchanged.
+
+### Tests added or changed
+
+| Test | Layer | What it establishes |
+|---|---|---|
+| `CommandPublishGateClockSkewTest` (9 tests, new) | PostgreSQL, real connections | Application clock an hour behind, 1.2 s behind and ahead; capacity one; window boundary in database time; late-completed and lease-recovered attempts; acknowledged confirmed publication stays counted; uncertain never retried; three instances with different clocks share one limit; fail-closed |
+| `TelemetryInboxOnboardingAndDeletionIntegrationTest.aDeletionStartedWhileAnIdentifiedIngestionIsInFlightWaitsForItAndNeverDeadlocks` (new) | Spring + PostgreSQL | The F3 interleaving with transaction barriers: no 40P01, both complete, nothing left behind |
+| `TelemetryInboxOnboardingAndDeletionIntegrationTest.deletionRacingALiveIngestionNeverLeavesAnOrphanedEntryOrADanglingFailure` (changed) | Spring + PostgreSQL | The test-only deletion retry was REMOVED; the race now passes without it |
+| `TelemetryInboxIntegrationTest.concurrentIdenticalMessagesForSeveralDevicesAreDeduplicatedPerDeviceNeverAcrossThem` (new) | Concurrency | Cross-device concurrency |
+
+### Negative regression evidence (each mutation temporary, restored and verified byte for byte)
+
+| # | Mutation | Killed by (first tests) | Result |
+|---|---|---|---|
+| N1 | An uncertain outcome records the application clock again (the audited defect) | CommandPublishGateClockSkewTest.aSkewedClockCannotCountAnUncertainAttemptForLongerThanOneDatabaseSecond; CommandPublishGateClockSkewTest.anAttemptCompletedAfterTheWindowAndALeaseRecoveredAttemptAreAlsoCountedOnDatabaseTime | killed, Tests run: 9, Failures: 0, Errors: 7, 26s; restored byte for byte: yes |
+| N2 | A lease-recovered uncertain attempt records the application clock | CommandPublishGateClockSkewTest.anAttemptCompletedAfterTheWindowAndALeaseRecoveredAttemptAreAlsoCountedOnDatabaseTime | killed, Tests run: 9, Failures: 1, Errors: 0, 33s; restored byte for byte: yes |
+| N3 | Identified telemetry no longer takes the device locks before its claim (the F3 deadlock returns) | TelemetryInboxOnboardingAndDeletionIntegrationTest.aDeletionStartedWhileAnIdentifiedIngestionIsInFlightWaitsForItAndNeverDeadlocks | killed, Tests run: 5, Failures: 0, Errors: 1, 35s; restored byte for byte: yes |
+| N4 | The early lock takes the in-process lock but not the device row lock | TelemetryInboxOnboardingAndDeletionIntegrationTest.aDeletionStartedWhileAnIdentifiedIngestionIsInFlightWaitsForItAndNeverDeadlocks | killed, Tests run: 5, Failures: 0, Errors: 1, 35s; restored byte for byte: yes |
+
+Before the repair (recorded by the audit): the rate-limit probe allowed the second claim under a one-hour skew, and the F3 probe ended with the deletion aborted by `deadlock detected` (SQLSTATE 40P01). With the repair neither occurs; mutations N3 and N4 bring the deadlock back (the deterministic test fails).
+
+### Validation recorded for the repair (2026-10-17)
+
+All runs were made in the isolated worktree with disposable PostgreSQL and Mosquitto containers; the application's MQTT port and datasource were pointed at unused addresses, so no test could reach the review demonstration or any development database.
+
+| Stage | Result |
+|---|---|
+| A, focused (clock-skew, gate, deletion and ingestion tests) | `CommandPublishGateClockSkewTest` 9/9, `CommandPublishGateTest` 17/17, `TelemetryInboxIntegrationTest` 16/16, `TelemetryInboxOnboardingAndDeletionIntegrationTest` 5/5 |
+| B, impacted regressions (`action`, `rule`, `telemetry`, `twin`, `device`, `infrastructure` test classes) | 1,599 tests, 0 failures |
+| C, `python validate_nexus.py --fast` | 8 of 8 PASS (35 s) |
+| D, `python validate_nexus.py --full` | First run 10 of 11: the backend suite had one error, `CommandAdmissionTest.everyUnresolvedStateOccupiesASlotAndTerminalStatesReleaseIt` (a test of P4.6 itself, not of the repair): it stamped its test commands with this JVM's clock, and when the database clock is BEHIND the JVM's the row is not yet due and cannot be claimed (the offset between the two drifts, 1.2 s measured, in either direction over time); the earlier P4.6 gate had passed with the database ahead. The test now creates its commands a few seconds in the past (as the other flow tests already did), the class passed on its own, and the full gate was rerun once. Second run: 11 of 11 PASS (backend suite 1,445 s, inside the 1,800 s budget, unchanged; smokes 18.7 s, 25.8 s, 53.8 s) |
+| Backend | 214 test classes, 1,712 tests, 0 failures, 0 errors, 0 skipped (1,701 at the P4.6 commit plus 11 new) |
+| Frontend | 63 files, 533 tests passed (unchanged); simulator 68 passed, 3 existing skips |
+| Whitespace | `git diff --check` clean including new files |
+| Protected paths | `firmware/**`, `hardware-tests/**`, `results/**`, the five user-owned documents, migrations V1 to V40: no change |
+
+### Limitations that remain
+
+- The gate still bounds permits, which lead to at most one publication each; it does not guarantee exact broker arrival times, and no network-level timing guarantee is claimed.
+- An uncertain outcome is counted from its recorded database instant, not from the (unknown) instant the broker may have received it; the in-flight period before it was already counted.
+- F1, F2 and L1 are unchanged. F3 is resolved by this repair.

@@ -74,7 +74,10 @@ class CommandAdmissionTest {
             kit.jdbc.queryForList("SELECT id FROM devices WHERE id = ? FOR NO KEY UPDATE", device);
             admission.admit(device, false);
             betweenAdmitAndWrite.run();
-            Instant createdAt = Instant.now();
+            // Created a little in the PAST so the command is due on the database clock whatever the offset between this JVM and the database
+            // container (it was 1.2 s on the development machine, in either direction over time): a row stamped "now" by the JVM could still lie in the
+            // database's future and not be claimable. The creation order is still strictly increasing.
+            Instant createdAt = Instant.now().minusSeconds(3);
             kit.jdbc.update("INSERT INTO action_history(request_id,match_id,device_id,action_type,status,parameters,timestamp,message)"
                     + " VALUES (?,?,?,'SEND_COMMAND','ACCEPTED_FOR_DISPATCH','{}'::jsonb,?,'admitted')", command, UUID.randomUUID(), device, Timestamp.from(createdAt));
             Map<String, Object> row = OutboxSql.queued(command, device, createdAt);

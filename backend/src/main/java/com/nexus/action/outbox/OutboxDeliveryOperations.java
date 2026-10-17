@@ -355,9 +355,14 @@ public class OutboxDeliveryOperations {
      */
     private Resolution deadLetter(UUID commandId, UUID deviceId, int attempt, String correlationId, Instant at,
                                   OutboxTerminalReason reason, String errorCode, boolean uncertain, String message) {
+        // An UNCERTAIN outcome may have put the command on the broker, so the publish gate counts it (CommandPublishGate) against the database clock.
+        // Its terminal instant is therefore the DATABASE clock as well (P4.6 correction): with the application clock a skewed host could record an
+        // instant the gate no longer counts and let a second publication start inside the same second. The history facts and the message keep
+        // the application instant as before; only terminal_at of a possibly-published attempt changes, and the other outcomes are untouched.
         jdbc.update("UPDATE command_outbox SET state = 'DEAD_LETTER', next_attempt_at = NULL, lease_owner = NULL, lease_expires_at = NULL,"
-                        + " terminal_at = ?, terminal_reason = ?, last_error_code = ?, updated_at = ? WHERE command_id = ?",
-                Timestamp.from(at), reason.name(), code64(errorCode), Timestamp.from(at), commandId);
+                        + " terminal_at = " + (uncertain ? "clock_timestamp()" : "?") + ", terminal_reason = ?, last_error_code = ?, updated_at = ? WHERE command_id = ?",
+                uncertain ? new Object[]{reason.name(), code64(errorCode), Timestamp.from(at), commandId}
+                          : new Object[]{Timestamp.from(at), reason.name(), code64(errorCode), Timestamp.from(at), commandId});
         return finishDeadLetter(commandId, deviceId, attempt, correlationId, at, reason, errorCode, uncertain, message,
                 attempt > 0 ? OutboxState.IN_FLIGHT : OutboxState.QUEUED);
     }
@@ -488,12 +493,12 @@ public class OutboxDeliveryOperations {
         return tx.execute(status -> {
             Instant at = clock.instant();
             List<Object[]> rows = jdbc.query("UPDATE command_outbox SET state = 'DEAD_LETTER', lease_owner = NULL, lease_expires_at = NULL,"
-                            + " terminal_at = ?, terminal_reason = 'UNCERTAIN_EXPIRED', last_error_code = 'LEASE_EXPIRED_UNCERTAIN', updated_at = ?"
+                            + " terminal_at = clock_timestamp(), terminal_reason = 'UNCERTAIN_EXPIRED', last_error_code = 'LEASE_EXPIRED_UNCERTAIN', updated_at = ?"
                             + " WHERE command_id IN (SELECT command_id FROM command_outbox WHERE state = 'IN_FLIGHT' AND lease_expires_at < now()"
                             + " ORDER BY lease_expires_at LIMIT ? FOR UPDATE SKIP LOCKED)"
                             + " RETURNING command_id, device_id, attempt_count, correlation_id",
                     (rs, i) -> new Object[]{rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getInt(3), rs.getString(4)},
-                    Timestamp.from(at), Timestamp.from(at), limit);
+                    Timestamp.from(at), limit);
             List<Resolution> out = new ArrayList<>();
             for (Object[] r : rows)
                 out.add(finishDeadLetter((UUID) r[0], (UUID) r[1], (Integer) r[2], (String) r[3], at, OutboxTerminalReason.UNCERTAIN_EXPIRED,

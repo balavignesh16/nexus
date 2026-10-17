@@ -434,6 +434,28 @@ class TelemetryInboxIntegrationTest {
         assertEquals(expectedClaims, dedupeRows(device));
     }
 
+    @Test
+    void concurrentIdenticalMessagesForSeveralDevicesAreDeduplicatedPerDeviceNeverAcrossThem() throws Exception {
+        List<UUID> deviceList = List.of(device, otherDevice);
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<TelemetryResponse>> results = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            UUID target = deviceList.get(i % 2);
+            results.add(pool.submit((Callable<TelemetryResponse>) () -> {
+                go.await();
+                return telemetry.processTelemetry(temperature(target, 21.5, "cross-1"), TelemetrySource.MQTT);   // the SAME id on both devices
+            }));
+        }
+        go.countDown();
+        int fresh = 0;
+        for (Future<TelemetryResponse> f : results) if (!f.get(60, TimeUnit.SECONDS).repeatsAcceptedMessage()) fresh++;
+        pool.shutdownNow();
+        assertEquals(2, fresh, "exactly one acceptance per device");
+        assertEquals(1, telemetryRows(device));
+        assertEquals(1, telemetryRows(otherDevice));
+    }
+
     // ---- the claim never reaches past the device it belongs to ----
 
     @Test

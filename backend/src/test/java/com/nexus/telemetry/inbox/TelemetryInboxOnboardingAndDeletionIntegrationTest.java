@@ -93,6 +93,8 @@ class TelemetryInboxOnboardingAndDeletionIntegrationTest {
     @Autowired BuildingRepository buildings;
     @Autowired SpaceRepository spaces;
     @Autowired JdbcTemplate jdbc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @org.springframework.boot.test.mock.mockito.SpyBean com.nexus.telemetry.application.InboundMessageDedupe dedupeSpy;
 
     private static final Instant SAMPLE_TIME = Instant.parse("2026-10-17T12:00:00Z");
 
@@ -207,19 +209,7 @@ class TelemetryInboxOnboardingAndDeletionIntegrationTest {
         Future<?> delete = pool.submit(() -> {
             go.await();
             Thread.sleep(150);
-            // A deletion that races a live ingestion can lose a database-detected deadlock (the ingestion holds the foreign key's key-share lock
-            // from its dedupe claim and then asks for the row lock the deleter already holds; PostgreSQL aborts one of the two). Aborting the
-            // deletion is a legitimate, retryable outcome and corrupts nothing; it is tracked as follow-up F3 (P4.6 audit of this test). The test
-            // retries the deletion and still proves the end state: no orphan, no dangling entry.
-            for (int attempt = 1; ; attempt++) {
-                try {
-                    deviceService.deleteDevice(device);
-                    break;
-                } catch (org.springframework.dao.PessimisticLockingFailureException deadlockVictim) {
-                    if (attempt >= 8) throw deadlockVictim;
-                    Thread.sleep(50);
-                }
-            }
+            deviceService.deleteDevice(device);   // no retry: the two now serialise on the device row lock (follow-up F3 fixed), so no deadlock victim exists
             deleted.set(true);
             return null;
         });
@@ -232,5 +222,49 @@ class TelemetryInboxOnboardingAndDeletionIntegrationTest {
         assertEquals(0, count("SELECT COUNT(*) FROM devices WHERE id = ?", device));
         assertEquals(0, count("SELECT COUNT(*) FROM inbound_message_dedupe WHERE device_id = ?", device), "no dedupe entry survives the device");
         assertEquals(0, count("SELECT COUNT(*) FROM telemetry_history WHERE device_id = ?", device), "no telemetry survives the device (unchanged behaviour)");
+    }
+
+    /**
+     * Follow-up F3, deterministically. The ingestion is parked immediately AFTER its dedupe claim (the point where, before the fix, it held only the
+     * foreign key's key-share lock) and the deletion is started meanwhile. Before the fix the deletion held the row lock and its DELETE waited for the
+     * key-share holder while the ingestion then asked for the row lock: PostgreSQL aborted one with SQLSTATE 40P01. Now the ingestion takes the row lock
+     * BEFORE the claim, so the deletion waits at its first lock; both complete, the ingestion first, and nothing deadlocks, retries or is swallowed.
+     */
+    @Test
+    void aDeletionStartedWhileAnIdentifiedIngestionIsInFlightWaitsForItAndNeverDeadlocks() throws Exception {
+        Space space = space();
+        Device d = new Device(UUID.randomUUID(), space, "F3", DeviceType.CUSTOM, "NEXUS", "TEST", "P45-F3-" + UUID.randomUUID(), null, DeviceMode.SIMULATED);
+        d.update("F3", DeviceStatus.ACTIVE, null);
+        UUID device = devices.save(d).getId();
+        CountDownLatch claimed = new CountDownLatch(1), release = new CountDownLatch(1);
+        new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                org.mockito.Mockito.doAnswer(invocation -> {
+                    Object result = invocation.callRealMethod();
+                    claimed.countDown();
+                    release.await(30, TimeUnit.SECONDS);
+                    return result;
+                }).when(dedupeSpy).claim(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()));
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> ingest = pool.submit(() -> telemetry.processTelemetry(
+                    new TelemetryRequest(device, SAMPLE_TIME, "TEMPERATURE", 21.5, "CELSIUS", null, null, "f3-deterministic"), TelemetrySource.MQTT));
+            assertTrue(claimed.await(30, TimeUnit.SECONDS));
+            Future<?> delete = pool.submit(() -> deviceService.deleteDevice(device));
+            Thread.sleep(800);                       // the deletion has had ample time to take its first lock and block
+            assertTrue(!delete.isDone(), "the deletion must be waiting for the in-flight ingestion, not racing it");
+            release.countDown();
+            ingest.get(30, TimeUnit.SECONDS);        // no SQLSTATE 40P01 for either side
+            delete.get(30, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+            org.mockito.Mockito.reset(dedupeSpy);
+        }
+        assertEquals(0, count("SELECT COUNT(*) FROM devices WHERE id = ?", device));
+        assertEquals(0, count("SELECT COUNT(*) FROM inbound_message_dedupe WHERE device_id = ?", device));
+        assertEquals(0, count("SELECT COUNT(*) FROM telemetry_history WHERE device_id = ?", device));
+        assertEquals(0, count("SELECT COUNT(*) FROM digital_twins WHERE device_id = ?", device));
+        // twin_state_transitions is append-only history without a device cascade (unchanged behaviour), so it is not asserted here
     }
 }
