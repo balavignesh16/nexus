@@ -254,12 +254,15 @@ describe('ActionsPage - real action history, no fabrication', () => {
 
   // ---------- Honest stubs ----------
 
-  it('Retry Queue and Scheduled remain clearly labeled as not implemented, never implying real functionality', () => {
+  it('Retry Queue states backend retry behavior without implying a UI list, and Scheduled stays not implemented', () => {
     mockUsePolling.mockReturnValue({ data: [], isLoading: false, error: null });
 
     renderPage();
 
-    expect(screen.getAllByText('Not yet implemented.').length).toBe(2);
+    expect(screen.getByText('No retry view yet.')).toBeInTheDocument();
+    expect(screen.getByText(/proven not to have been sent/)).toBeInTheDocument();
+    expect(screen.queryByText(/retries are not currently part of NEXUS/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Not yet implemented.').length).toBe(1);
   });
 
   // ---------- Real KPI summary ----------

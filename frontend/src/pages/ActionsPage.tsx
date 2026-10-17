@@ -238,7 +238,7 @@ export default function ActionsPage() {
           {/* Side Panel - honest, clearly-labeled unavailable capabilities */}
           <div className="w-full lg:w-[280px] shrink-0 flex flex-col gap-4">
             <Card level="glass" padding="lg" icon={<RotateCw size={16} />} title="Retry Queue">
-              <EmptyState icon={<CheckCircle2 size={24} />} title="Not yet implemented." description="Automatic action retries are not currently part of NEXUS." />
+              <EmptyState icon={<CheckCircle2 size={24} />} title="No retry view yet." description="With the command outbox enabled, the backend retries commands proven not to have been sent (bounded, then dead-lettered). This page does not list retries yet." />
             </Card>
             <Card level="glass" padding="lg" icon={<Clock size={16} />} title="Scheduled">
               <EmptyState icon={<Clock size={24} />} title="Not yet implemented." description="Action scheduling is not currently part of NEXUS." />
