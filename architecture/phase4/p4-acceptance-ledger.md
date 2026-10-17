@@ -2,7 +2,7 @@
 
 Date: 2026-10-15.
 
-Status: **P4.0 FINALIZED; P4.1 IMPLEMENTED (uncommitted). 142 scenario IDs defined; 124 PLANNED, 17 COVERED, 1 DEFERRED. P4.1 is implemented; only scenarios fully proven by P4.1 tests are COVERED.**
+Status: **P4.0 FINALIZED; P4.1 COMMITTED; P4.2 IMPLEMENTED (uncommitted). 152 scenario IDs defined; 89 PLANNED, 62 COVERED, 1 DEFERRED. Only scenarios fully proven by P4.1 and P4.2 tests are COVERED.**
 
 Normative requirements: [reliability-contract.md](reliability-contract.md). Execution and dependency plan: [p4-implementation-ticket.md](p4-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract.
 
@@ -18,57 +18,57 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Status | Count |
 |---|---|
-| PLANNED | 124 |
-| COVERED | 17 |
+| PLANNED | 89 |
+| COVERED | 62 |
 | DEFERRED | 1 |
-| **Total** | **142** |
+| **Total** | **152** |
 
 
 ## A. Atomic acceptance and persistence
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-001 | Acceptance and outbox commit atomically | PostgreSQL integration | One transaction commits ActionHistory ACCEPTED_FOR_DISPATCH, desired state, desired transition, verification initialisation, outbox row QUEUED and state-history ACCEPTED and QUEUED; all exist after commit. | R07, R08 | P4.2 | PLANNED | not yet written |
-| P4-002 | Rollback after outbox insert leaves nothing | PostgreSQL integration | Failure injected after the outbox insert: no ActionHistory, desired state, transition, outbox or state-history row survives and nothing is published. | R07, R08 | P4.2 | PLANNED | not yet written |
-| P4-003 | Outbox insert failure aborts acceptance | PostgreSQL integration | A constraint violation on the outbox insert fails the whole acceptance; the caller receives a rejection and no desired intent is stored. | R08 | P4.2 | PLANNED | not yet written |
-| P4-004 | Acceptance performs no MQTT I/O | PostgreSQL + Mosquitto integration | With the broker stopped, acceptance still commits and the command is QUEUED; publication is never attempted inside the acceptance transaction. | R07, R08 | P4.2 | PLANNED | not yet written |
-| P4-005 | Payload is frozen at enqueue | PostgreSQL integration | The stored payload text and timestamp equal the bytes later published; the timestamp is the acceptance-time epoch second, not the publish time. | R11 | P4.2 | PLANNED | not yet written |
-| P4-006 | Payload hash integrity enforced | PostgreSQL integration | A stored SHA-256 must match the payload; a mismatch is a permanent failure recorded as PAYLOAD_INTEGRITY and never published. | R11, R12 | P4.2 | PLANNED | partial (P4.1): the database rejects a wrong or malformed hash (CommandOutboxSchemaTest.aCorrectPayloadHashIsAcceptedAndAWrongOneIsRejected, ...aHashThatIsNotLowercaseHexIsRejected) and OutboxModelTest.aTamperedPayloadFailsVerification; the dispatcher refusal as PAYLOAD_INTEGRITY is not implemented |
+| P4-001 | Acceptance and outbox commit atomically | PostgreSQL integration | One transaction commits ActionHistory ACCEPTED_FOR_DISPATCH, desired state, desired transition, verification initialisation, outbox row QUEUED and state-history ACCEPTED and QUEUED; all exist after commit. | R07, R08 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.aManualCommandIsAcceptedAtomicallyAndQueuedNeverReportedAsSuccessUntilPublished (ActionHistory, desired state, desired transition, verification, outbox QUEUED, history ACCEPTED and QUEUED); RuleOriginOutboxIntegrationTest.anActiveRuleMatchIsAcceptedThroughTheOutboxAndDeliveredByTheDispatcher |
+| P4-002 | Rollback after outbox insert leaves nothing | PostgreSQL integration | Failure injected after the outbox insert: no ActionHistory, desired state, transition, outbox or state-history row survives and nothing is published. | R07, R08 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.aFailureAfterTheDesiredStateWasWrittenRollsBackTheWholeAcceptanceUnit (no ActionHistory, desired state, transition, verification, outbox or history row; nothing published); mutation check "outbox failure swallowed" failed it, restored |
+| P4-003 | Outbox insert failure aborts acceptance | PostgreSQL integration | A constraint violation on the outbox insert fails the whole acceptance; the caller receives a rejection and no desired intent is stored. | R08 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.aConstraintThatRefusesTheOutboxRowRejectsTheWholeAcceptanceAndStoresNoIntent (a database constraint refuses the outbox row: the caller receives a rejection, no desired intent, no outbox or verification row) |
+| P4-004 | Acceptance performs no MQTT I/O | PostgreSQL + Mosquitto integration | Acceptance commits and returns without any MQTT publish or wait: the command is QUEUED while the publisher is held, publication is attempted only later by the dispatcher outside any transaction, and a disconnected backend client is still rejected at acceptance before any durable write (unchanged by design, R08.4). Amended in P4.2: the original wording "with the broker stopped, acceptance still commits" contradicted R08.4. | R07, R08 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.aManualCommandIsAcceptedAtomicallyAndQueuedNeverReportedAsSuccessUntilPublished (returns while the publisher is held); OutboxArchitectureTest.onlyTheLegacyExecutorAndTheBoundedPublisherCanPutAMessageOnTheBroker; CommandOutboxMqttWireIntegrationTest.aDisconnectedBackendClientIsRejectedAtAcceptanceWithNoDurableWriteAndRecoversAfterReconnect. Scenario wording amended, see "Findings" 4 |
+| P4-005 | Payload is frozen at enqueue | PostgreSQL integration | The stored payload text and timestamp equal the bytes later published; the timestamp is the acceptance-time epoch second, not the publish time. | R11 | P4.2 | COVERED | CommandOutboxDispatcherTest.theTimestampAndBytesAreIdenticalToAcceptanceAndNeverRefreshedAtPublishTime; CommandOutboxMqttWireIntegrationTest.theBrokerReceivesExactlyOneQos1NonRetainedMessageWithTheAcceptedBytesAndAcceptanceTimestamp (byte-identical on a real broker); CommandOutboxAcceptanceIntegrationTest.aManualCommandIsAcceptedAtomicallyAndQueuedNeverReportedAsSuccessUntilPublished |
+| P4-006 | Payload hash integrity enforced | PostgreSQL integration | A stored SHA-256 must match the payload; a mismatch is a permanent failure recorded as PAYLOAD_INTEGRITY and never published. | R11, R12 | P4.2 | COVERED | CommandOutboxDispatcherTest.aPayloadWhoseHashNoLongerMatchesIsNeverPublished (dispatcher refusal, PAYLOAD_INTEGRITY, nothing sent); OutboxDeliveryOperationsTest.aPayloadIntegrityFailureIsRecordedAndNeverLooksLikeAPublish; P4.1: CommandOutboxSchemaTest.aCorrectPayloadHashIsAcceptedAndAWrongOneIsRejected, OutboxModelTest.aTamperedPayloadFailsVerification; mutation check "hash not verified" failed it, restored |
 | P4-007 | One outbox row per command | PostgreSQL integration | The command id is the primary key; a second row for the same command is rejected by the database. | R04 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSchemaTest.thereIsExactlyOneOutboxRowPerCommand; ...anOutboxRowMustReferenceAnExistingActionHistoryCommand |
 | P4-008 | Outbox constraints enforce a coherent state | PostgreSQL integration | Check constraints reject unknown states, attempts above the maximum, lease fields inconsistent with state and a terminal state without a terminal reason. | R04, R05 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSchemaTest.anUnknownStateIsRejected; ...leaseMetadataExistsIfAndOnlyIfTheRowIsInFlight; ...terminalRowsRecordTheirOutcomeCoherently; ...attemptLimitsAreBoundedByTheDatabase; ...aQueuedRowNeedsItsEligibilityTime |
-| P4-009 | State history is append-only | PostgreSQL integration | An UPDATE of a state-history row is rejected by the database; the repository exposes no update. | R06 | P4.2 | PLANNED | not yet written |
-| P4-010 | State-history sequence is gapless under concurrency | Concurrency (multiple connections / instances) | Concurrent appends for one command receive unique, increasing sequence numbers with no gaps and no duplicates. | R06 | P4.2 | PLANNED | not yet written |
-| P4-011 | Rule-origin commands keep their gates | PostgreSQL integration | A paused rule, stale version or stale epoch produces no outbox row and no accepted command; the Phase 3 guard order is unchanged. | R08, R24 | P4.2 | PLANNED | not yet written |
-| P4-012 | Outbox timestamp is generated at acceptance only in outbox mode | PostgreSQL integration | With the flag ON the payload timestamp is fixed at acceptance; with the flag OFF it is generated at publish exactly as today. | R11, R22 | P4.2 | PLANNED | not yet written |
+| P4-009 | State history is append-only | PostgreSQL integration | An UPDATE of a state-history row is rejected by the database; the repository exposes no update. | R06 | P4.2 | COVERED | CommandStateHistorySchemaTest.historyIsAppendOnlyNoUpdateIsEverAllowed; ...aDirectDeleteIsRefusedWhileTheActionHistoryRowExists; the writer CommandStateHistory exposes append only |
+| P4-010 | State-history sequence is gapless under concurrency | Concurrency (multiple connections / instances) | Concurrent appends for one command receive unique, increasing sequence numbers with no gaps and no duplicates. | R06 | P4.2 | COVERED | OutboxDispatchConcurrencyTest.concurrentWritersOfOneCommandReceiveUniqueIncreasingGaplessSequenceNumbers (8 threads x 10 appends, sequence 1 to 80); twoInstancesPublishEveryCommand... asserts sequence [1, 2] for every command |
+| P4-011 | Rule-origin commands keep their gates | PostgreSQL integration | A paused rule, stale version or stale epoch produces no outbox row and no accepted command; the Phase 3 guard order is unchanged, with the outbox both OFF and ON. | R08, R24 | P4.2 | COVERED | RuleCommandAuthorizationOutboxModeIntegrationTest runs the whole 43-test Phase 3 class (pause, version, epoch and ABA races, target validity, unit safety, real MQTT) with the outbox ENABLED; RuleCommandAuthorizationIntegrationTest still passes unchanged with the flag OFF; RuleOriginOutboxIntegrationTest.aPausedRuleStillCreatesNeitherAnAcceptedCommandNorAnOutboxRow, ...aCommandAcceptedBeforeItsRuleWasPausedStillFinishesDelivery |
+| P4-012 | Outbox timestamp is generated at acceptance only in outbox mode | PostgreSQL integration | With the flag ON the payload timestamp is fixed at acceptance; with the flag OFF it is generated at publish exactly as today. | R11, R22 | P4.2 | COVERED | flag ON: CommandOutboxDispatcherTest.theTimestampAndBytesAreIdenticalToAcceptanceAndNeverRefreshedAtPublishTime, CommandOutboxMqttWireIntegrationTest...; flag OFF: CommandOutboxFlagOffIntegrationTest.aCommandIsPublishedDirectlyWithThePublishTimeTimestampAndNoOutboxOrHistoryRowIsWritten |
 
 ## B. Claim, lease and concurrency
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-013 | Concurrent workers claim disjoint rows | Concurrency (multiple connections / instances) | With 2 to 4 workers and 50 queued commands each command is claimed once per attempt; no row is claimed by two workers. | R09 | P4.2 | PLANNED | not yet written |
-| P4-014 | No double IN_FLIGHT across instances | Concurrency (multiple connections / instances) | Two application instances with in-process caches and locks disabled never hold the same command IN_FLIGHT at the same time. | R09 | P4.2 | PLANNED | not yet written |
-| P4-015 | Claim records lease owner, expiry and attempt | PostgreSQL integration | A claim sets IN_FLIGHT, lease owner, lease expiry from the database clock and increments the attempt counter in a short committed transaction before any MQTT I/O. | R07, R09 | P4.2 | PLANNED | not yet written |
-| P4-016 | Stale worker is fenced out | Concurrency (multiple connections / instances) | A worker whose lease expired or was reassigned cannot write an outcome; the conditional update affects zero rows and state does not regress. | R09 | P4.2 | PLANNED | not yet written |
-| P4-017 | Expired lease is recovered as an uncertain attempt | Fault injection | An IN_FLIGHT row with an expired lease is recorded as ATTEMPT_UNCERTAIN and moves to RETRY_WAIT or DEAD_LETTER according to attempts and expiry remaining. | R09, R10, R15 | P4.2 | PLANNED | not yet written |
-| P4-018 | Older unresolved commands are not overtaken (FIFO claimed only if proven) | Concurrency (multiple connections / instances) | Only one command per device is IN_FLIGHT (V37 unique index) and an older unresolved command of a device is claimed before a newer one under concurrent workers. Strict per-device FIFO is stated as a guarantee only if this scenario is COVERED; otherwise it remains a requirement. | R09 | P4.2 | PLANNED | not yet written |
-| P4-019 | Other devices are not blocked | Concurrency (multiple connections / instances) | A slow or failing command for device A does not delay delivery for device B. | R09, R18 | P4.2 | PLANNED | not yet written |
-| P4-020 | Database clock governs claims | Fault injection | An instance with a skewed application clock claims, leases and expires rows consistently because comparisons use the database clock. | R09 | P4.2 | PLANNED | not yet written |
-| P4-021 | Claim batch size is bounded | PostgreSQL integration | A worker never claims more rows than the configured batch size. | R09, R18 | P4.2 | PLANNED | not yet written |
-| P4-022 | In-process nudge does not bypass claiming | PostgreSQL integration | The post-commit nudge only triggers the normal claim query; it cannot publish a command that is not leased. | R09 | P4.2 | PLANNED | not yet written |
-| P4-023 | Graceful shutdown loses no state | Fault injection | Stopping the dispatcher during an attempt either completes the outcome or leaves a lease that expires and is recovered; no row is stranded. | R09, R15 | P4.2 | PLANNED | not yet written |
+| P4-013 | Concurrent workers claim disjoint rows | Concurrency (multiple connections / instances) | With 2 to 4 workers and 50 queued commands each command is claimed once per attempt; no row is claimed by two workers. | R09 | P4.2 | COVERED | OutboxDispatchConcurrencyTest.manyThreadsRacingForOneRowProduceExactlyOneClaim; ...twoInstancesPublishEveryCommandExactlyOnceSingleInFlightPerDeviceAndInAcceptanceOrder (50 commands, two dispatchers x 4 workers, each sent once; the name states the observation in this test, not a delivery guarantee) |
+| P4-014 | No double IN_FLIGHT across instances | Concurrency (multiple connections / instances) | Two application instances with in-process caches and locks disabled never hold the same command IN_FLIGHT at the same time. | R09 | P4.2 | COVERED | OutboxDispatchConcurrencyTest.twoInstancesPublishEveryCommand... (never two sends in flight for one device); ...theSingleInFlightRaceOnTheUniqueIndexIsANormalOutcomeNotAnError (15 rounds); P4.1 CommandOutboxSafetySchemaTest concurrent claims |
+| P4-015 | Claim records lease owner, expiry and attempt | PostgreSQL integration | A claim sets IN_FLIGHT, lease owner, lease expiry from the database clock and increments the attempt counter in a short committed transaction before any MQTT I/O. | R07, R09 | P4.2 | COVERED | OutboxDeliveryOperationsTest.aClaimSetsTheLeaseIncrementsTheAttemptAndRecordsTheAttemptStart (lease about 6 s on the database clock, attempt 1, ATTEMPT_STARTED, committed before any I/O) |
+| P4-016 | Stale worker is fenced out | Concurrency (multiple connections / instances) | A worker whose lease expired or was reassigned cannot write an outcome; the conditional update affects zero rows and state does not regress. | R09 | P4.2 | COVERED | OutboxDeliveryOperationsTest.aStaleWorkerWhoseLeaseWasRecoveredWritesNothing; ...aWorkerWithTheWrongLeaseOwnerOrAttemptIsFencedOutAndTheRowIsUntouched; CommandOutboxDispatcherTest.aStaleWorkersLateResultIsFencedAndTriggersNoReaction; mutation check "no fence" failed it, restored |
+| P4-017 | Expired lease is recovered as an uncertain attempt | Fault injection | An IN_FLIGHT row with an expired lease is recorded as ATTEMPT_UNCERTAIN and moves to RETRY_WAIT or DEAD_LETTER according to attempts and expiry remaining. | R09, R10, R15 | P4.2 | PLANNED | partial (P4.2): the DEAD_LETTER UNCERTAIN_EXPIRED branch is proven (OutboxDeliveryOperationsTest.anExpiredLeaseIsRecoveredAsAnUncertainDeadLetterAndIsNeverClaimedAgain, CommandOutboxDispatcherTest.aCrashingWorkerLeavesTheRowInFlightWhichIsNeverReclaimedAndLeaseRecoveryResolvesIt); the RETRY_WAIT branch needs retries (P4.3) |
+| P4-018 | Older unresolved commands are not overtaken (FIFO claimed only if proven) | Concurrency (multiple connections / instances) | Only one command per device is IN_FLIGHT (V37 unique index) and an older unresolved command of a device is claimed before a newer one under concurrent workers. Strict per-device FIFO is stated as a guarantee only if this scenario is COVERED; otherwise it remains a requirement. | R09 | P4.2 | COVERED | CLAIM ORDER per device, including after an uncertain outcome: OutboxDeliveryOperationsTest.anOlderUnresolvedCommandOfTheSameDeviceBlocksNewerOnes...; OutboxDispatchConcurrencyTest.twoInstancesPublish... (two instances), ...aStalledOlderAttemptNeverLetsANewerCommandOvertakeAndTheHoldThatFollowsItsLossIsEnforced; UncertainDeliveryBarrierTest.aRealUncertainAttemptHoldsTheNextCommandEndToEndThroughTheDispatcher; CommandOutboxAcceptanceIntegrationTest.commandsOfOneDeviceAreOrderedByAStrictlyIncreasingCreationKeyInAcceptanceOrder; mutation checks "no ordering guard" and "no hold" failed tests. SCOPE: the order this backend claims and sends, with an uncertain predecessor held for its freshness horizon (R32). NOT a claim about the order a device receives or acknowledges commands and NOT protection against duplicates of a CONFIRMED publish (needs device-side deduplication). Re-verified with retries in P4.3 |
+| P4-019 | Other devices are not blocked | Concurrency (multiple connections / instances) | A slow or failing command for device A does not delay delivery for device B. | R09, R18 | P4.2 | COVERED | OutboxDispatchConcurrencyTest.aSlowOrFailingCommandOfOneDeviceDoesNotDelayAnotherDevice; OutboxDeliveryOperationsTest.anOlderUnresolvedCommandOfTheSameDeviceBlocksNewerOnesAndDifferentDevicesAreIndependent |
+| P4-020 | Database clock governs claims | Fault injection | An instance with a skewed application clock claims, leases and expires rows consistently because comparisons use the database clock. | R09 | P4.2 | COVERED | OutboxDeliveryOperationsTest.anApplicationClockOneHourAheadOrBehindChangesNoClaimExpiryOrLeaseDecision (claim, lease, expiry, recovery); CommandOutboxClockSkewIntegrationTest (acceptance with the application clock +1 h and -1 h: database-time wire timestamp, creation, scheduling and expiry, claimable and delivered inside the window); mutation check "application clock at acceptance" failed it |
+| P4-021 | Claim batch size is bounded | PostgreSQL integration | A worker never claims more rows than the configured batch size. | R09, R18 | P4.2 | COVERED | CommandOutboxDispatcherTest.aPassNeverClaimsMoreThanTheConfiguredBatch (batch 3 with 8 free workers claims 3); ...workersAreBoundedAndAClaimIsNeverLeasedWithoutAFreeWorker |
+| P4-022 | In-process nudge does not bypass claiming | PostgreSQL integration | The post-commit nudge only triggers the normal claim query; it cannot publish a command that is not leased. | R09 | P4.2 | COVERED | CommandOutboxDispatcherTest.theNudgeOnlyTriggersTheNormalClaimAndCannotPublishAnythingNotEligible (a newer command behind an in-flight one and an expired command are not published); ...theAfterCommitNudgeTriggersTheNormalClaimPass |
+| P4-023 | Graceful shutdown loses no state | Fault injection | Stopping the dispatcher during an attempt either completes the outcome or leaves a lease that expires and is recovered; no row is stranded. | R09, R15 | P4.2 | COVERED | CommandOutboxDispatcherTest.stoppingTheDispatcherDuringAnAttemptLeavesNoStrandedRow (the worker is interrupted: the row ends PUBLISHED or, after lease expiry and recovery by a successor, DEAD_LETTER; one publish only) |
 
 ## C. Publication, duplicates and uncertain outcomes
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-024 | Confirmed publication is recorded atomically | PostgreSQL + Mosquitto integration | After the broker completes a QoS 1 publish, one transaction sets the outbox row PUBLISHED, records PUBLISHED in state history and conditionally updates ActionHistory to SUCCESS with published_at and the ACK deadline. | R07, R10 | P4.2 | PLANNED | not yet written |
-| P4-025 | ACK that arrives before the publish record is preserved | PostgreSQL + Mosquitto integration | An ACK processed before the publish outcome transaction is kept; the later outcome does not erase it. | R13 | P4.2 | PLANNED | not yet written |
+| P4-024 | Confirmed publication is recorded atomically | PostgreSQL + Mosquitto integration | After the broker completes a QoS 1 publish, one transaction sets the outbox row PUBLISHED, records PUBLISHED in state history and conditionally updates ActionHistory to SUCCESS with published_at and the ACK deadline. | R07, R10 | P4.2 | COVERED | OutboxDeliveryOperationsTest.aConfirmedPublishInsideTheWindowIsPublishedAndOnlyThenReportedAsSuccess; ...aFailureWhileWritingTheOutcomeRollsBackTheWholeOutcomeTransaction; CommandOutboxMqttWireIntegrationTest.theBrokerReceivesExactlyOneQos1NonRetainedMessage... (real Mosquitto: PUBLISHED, SUCCESS, published_at) |
+| P4-025 | ACK that arrives before the publish record is preserved | PostgreSQL + Mosquitto integration | An ACK processed before the publish outcome transaction is kept; the later outcome does not erase it. | R13 | P4.2 | COVERED | With the ACTUAL DeviceCommandAckMessageHandler: CommandOutboxAckHandlerIntegrationTest.anAckWhileTheAttemptIsInFlightSurvivesThePublishOutcomeAndNothingIsOverwritten; ...anAckRacingTheOutcomeTransactionNeverLosesEitherWrite (15 concurrent rounds, neither write lost); SQL-level OutboxDeliveryOperationsTest.anAcknowledgementRecordedBeforeThePublishOutcomeIsNotErased |
 | P4-026 | Transient publish failure schedules a retry | PostgreSQL + Mosquitto integration | A broker disconnect yields ATTEMPT_FAILED_TRANSIENT and RETRY_WAIT with the same command id and payload. | R10, R12 | P4.3 | PLANNED | not yet written |
 | P4-027 | Uncertain publish outcome is recorded honestly | Fault injection | A timeout or connection loss during publish is recorded as ATTEMPT_UNCERTAIN, never as a definite failure, and a retry may duplicate the message. | R10 | P4.3 | PLANNED | not yet written |
 | P4-028 | Duplicate publication is visible and safe | PostgreSQL + Mosquitto integration | Republishing a command yields two broker messages with identical bytes; the backend records exactly one first-ACK fact and one lifecycle. | R03, R10, R13 | P4.3 | PLANNED | not yet written |
 | P4-029 | Simulator tolerates a duplicate command | Simulator (pytest) | The simulator applies an absolute-state command twice with the same final state and ACKs each receipt; evidence is simulator-only, not firmware. | R26 | P4.3 | PLANNED | not yet written |
 | P4-030 | Every attempt publishes identical bytes | PostgreSQL + Mosquitto integration | A broker capture of all attempts shows identical payload bytes including commandId and timestamp. | R11, R12 | P4.3 | PLANNED | not yet written |
-| P4-031 | Delivery does not re-check connectivity or authorisation | PostgreSQL integration | The dispatcher does not re-evaluate device connectivity, rule lifecycle or any acceptance guard; it only delivers the frozen payload within its window. | R08, R24 | P4.2 | PLANNED | not yet written |
+| P4-031 | Delivery does not re-check connectivity or authorisation | PostgreSQL integration | The dispatcher does not re-evaluate device connectivity, rule lifecycle or any acceptance guard; it only delivers the frozen payload within its window. | R08, R24 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.deliveryDoesNotReevaluateConnectivityAfterAcceptance; RuleOriginOutboxIntegrationTest.aCommandAcceptedBeforeItsRuleWasPausedStillFinishesDelivery; OutboxArchitectureTest.deliveryNeverReauthorisesRevalidatesOrReevaluatesConnectivity |
 | P4-032 | Each attempt outcome is recorded once | Concurrency (multiple connections / instances) | Duplicate or late completion callbacks for one attempt create one state-history outcome and do not double-count attempts. | R06, R10 | P4.3 | PLANNED | not yet written |
 | P4-033 | PUBLISHED means broker publication only | API (MockMvc) | The API and labels describe PUBLISHED as broker publication; no field or text claims device receipt, convergence or physical effect. | R02, R21 | P4.7 | PLANNED | not yet written |
 
@@ -78,7 +78,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 |---|---|---|---|---|---|---|---|
 | P4-034 | Backoff schedule is deterministic and bounded | Unit | With an injected clock and random source the delays follow the configured initial, multiplier, cap and jitter bounds. | R12 | P4.3 | PLANNED | not yet written |
 | P4-035 | Maximum attempts is enforced | PostgreSQL integration | After the configured maximum attempts the command becomes DEAD_LETTER RETRY_EXHAUSTED and no further attempt is made. | R12 | P4.3 | PLANNED | not yet written |
-| P4-036 | Expiry stops attempts | PostgreSQL integration | No attempt starts at or after expires_at; the sweep moves the row to DEAD_LETTER EXPIRED. | R11, R12 | P4.3 | PLANNED | not yet written |
+| P4-036 | Expiry stops attempts | PostgreSQL integration | No attempt starts at or after expires_at; the sweep moves the row to DEAD_LETTER EXPIRED. | R11, R12 | P4.2 | COVERED | OutboxDeliveryOperationsTest.anExpiredCommandIsNeverACandidateNeverClaimableAndIsDeadLetteredWithoutBlockingNewerOnes (not a candidate, claim refuses it, the sweep moves it to DEAD_LETTER EXPIRED with zero attempts); CommandOutboxDispatcherTest.anExpiredCommandIsNeverPublishedAndTheNewerOneIsReleased; mutation check "claim ignores the window" failed it, restored. The firmware-model boundary test remains P4.3 |
 | P4-037 | Window above the firmware-compatible ceiling is refused | Unit | Configuration with a delivery window greater than the ceiling derived from the 30 second firmware freshness bound minus the clock-uncertainty margin fails application startup. | R11 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSettingsTest.theWindowAboveTheFirmwareDerivedCeilingIsRejected; ...anInvalidConfigurationStopsApplicationStartup; CommandOutboxSchemaTest.theDeliveryWindowIsPositiveAndNeverExceedsTwentySeconds; OutboxModelTest.firmwareFreshnessLimitsDeriveTheTwentySecondCeiling |
 | P4-038 | Schedule must fit the window | Unit | Configuration whose worst-case retry schedule exceeds the window is rejected. | R11, R12 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSettingsTest.theRetryScheduleMustFitTheWindow; ...theDefaultWorstCaseScheduleFitsInsideTheWindow |
 | P4-039 | Permanent failures are not retried | Unit | Serialisation or payload-integrity errors go straight to DEAD_LETTER PERMANENT_FAILURE. | R12 | P4.3 | PLANNED | not yet written |
@@ -125,7 +125,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P4-068 | Migration marks pre-V37 accepted commands DELIVERY_UNKNOWN | Migration on populated database | ACCEPTED_FOR_DISPATCH commands present when V39 runs receive a DELIVERY_UNKNOWN history fact and no outbox row. | R16, R23 | P4.2 | PLANNED | not yet written |
+| P4-068 | Migration marks pre-V37 accepted commands DELIVERY_UNKNOWN | Migration on populated database | ACCEPTED_FOR_DISPATCH commands present when V39 runs receive a DELIVERY_UNKNOWN history fact and no outbox row. | R16, R23 | P4.2 | COVERED | CommandStateHistoryBackfillMigrationTest.onlyDemonstrablyStrandedLegacyCommandsReceiveAnUnknownFactAndNothingElseChanges (conservative: only SEND_COMMAND rows still ACCEPTED_FOR_DISPATCH with no publication, no ACK, no outbox row and older than 5 minutes; no outbox row created, no ActionHistory row changed) |
 | P4-069 | Reconciler never publishes | PostgreSQL + Mosquitto integration | A spy on the MQTT client shows zero publications for DELIVERY_UNKNOWN commands across restarts and with the flag ON. | R16 | P4.4 | PLANNED | not yet written |
 | P4-070 | Runtime reconciler is idempotent and conservative | PostgreSQL integration | Stranded flag-OFF-era ACCEPTED_FOR_DISPATCH rows older than the grace period are marked once; rows with an outbox row are never touched. | R16 | P4.4 | PLANNED | not yet written |
 | P4-071 | Commands mid-dispatch are not falsely marked | PostgreSQL integration | A legacy-path command inside the grace period is not marked DELIVERY_UNKNOWN. | R16 | P4.4 | PLANNED | not yet written |
@@ -170,8 +170,8 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-095 | Pipeline trace steps exist per transition | PostgreSQL integration | Transitions create pipeline trace steps through the existing trace mechanism. | R20 | P4.7 | PLANNED | not yet written |
 | P4-096 | One correlation id joins acceptance to ACK | PostgreSQL integration | Rows from acceptance, attempts, publication and ACK share the same correlation id. | R20 | P4.7 | PLANNED | not yet written |
 | P4-097 | Lifecycle read API is additive | API (MockMvc) | GET lifecycle returns state history and deliveryState; existing action and command endpoints keep their schema and values. | R21 | P4.7 | PLANNED | not yet written |
-| P4-098 | No mutating requeue endpoint exists | API (MockMvc) | POST, PUT and DELETE on any requeue or dead-letter path return 404 or 405; no HTTP or MQTT route can resend a command. | R21 | P4.7 | PLANNED | not yet written |
-| P4-099 | No internal requeue is reachable | Validation gate / audit | An architecture test shows no controller, listener or scheduler depends on a requeue operation; the operation is absent or disabled. | R21 | P4.7 | PLANNED | not yet written |
+| P4-098 | No mutating requeue endpoint exists | API (MockMvc) | POST, PUT and DELETE on any requeue or dead-letter path return 404 or 405; no HTTP or MQTT route can resend a command. | R21 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.noHttpRouteCanRequeueResendOrReviveACommand (POST, PUT, PATCH and DELETE on 13 requeue, resend, retry, outbox and dead-letter paths answer 404 or 405, and nothing is sent); OutboxArchitectureTest.noRequeueResendOrRedriveOperationExistsAnywhereInTheBackend |
+| P4-099 | No internal requeue is reachable | Validation gate / audit | An architecture test shows no controller, listener or scheduler depends on a requeue operation; the operation is absent or disabled. | R21 | P4.2 | COVERED | OutboxArchitectureTest.noRequeueResendOrRedriveOperationExistsAnywhereInTheBackend (no class, method or mapping named requeue, resend or redrive); ...noOutboxStateIsMutableThroughAnyWebLayerClass; ...onlyTheDispatcherAndItsReactionsTouchTheClaimAndOutcomeOperations; the dispatcher never moves a DEAD_LETTER row (the V37 trigger forbids it) |
 | P4-100 | Metrics use fixed low-cardinality tags | Unit | Tag values come only from fixed reason and state codes, never identifiers. | R20 | P4.7 | PLANNED | not yet written |
 | P4-101 | API does not widen payload exposure | API (MockMvc) | Responses expose no more command parameters than the existing ActionHistory views. | R21 | P4.7 | PLANNED | not yet written |
 | P4-102 | Frontend labels facts separately | Frontend (Vitest) | The UI shows queued, published, acknowledged and verified as separate labels and never states physical actuation. | R02, R21 | P4.7 | PLANNED | not yet written |
@@ -183,10 +183,10 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
 | P4-105 | Outbox flag defaults to OFF | Unit | The default configuration and the shipped application.yml have the outbox disabled. | R22 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSettingsTest.theShippedApplicationYmlLeavesTheOutboxDisabledWithTheDocumentedDefaults; CommandOutboxPersistenceIntegrationTest.theOutboxFeatureFlagIsOffInTheRunningApplication |
-| P4-106 | Flag OFF is byte-for-byte legacy behaviour | PostgreSQL integration | With the flag OFF no outbox or state-history rows are created for commands and the legacy publish path is unchanged. | R22, R24 | P4.2 | PLANNED | not yet written |
+| P4-106 | Flag OFF is byte-for-byte legacy behaviour | PostgreSQL integration | With the flag OFF no outbox or state-history rows are created for commands and the legacy publish path is unchanged. | R22, R24 | P4.2 | COVERED | CommandOutboxFlagOffIntegrationTest (no dispatcher bean, direct publish, publish-time timestamp, SUCCESS, no outbox or history row, API JSON unchanged); the unchanged legacy suites pass in the full gate (174 classes, 1,387 tests) |
 | P4-107 | Rollback drains the queue | Fault injection | Turning the flag OFF with queued rows lets the dispatcher drain them to a terminal state or expiry; none is stranded. | R22 | P4.8 | PLANNED | not yet written |
 | P4-108 | Migrations are forward-only and checksum-safe | Migration on populated database | V37 to V40 apply on a populated disposable database; V1 to V36 checksums are asserted unchanged. | R23 | P4.5 | PLANNED | partial (P4.1): V37 proven by CommandOutboxUpgradeMigrationTest (V1 to V36 checksums unchanged, populated upgrade); V39 and V40 outstanding |
-| P4-109 | Mixed historical rows migrate correctly | Migration on populated database | A database containing ACCEPTED_FOR_DISPATCH, PUBLISHED, acknowledged and failed commands migrates with the expected outcome for each. | R16, R23 | P4.2 | PLANNED | partial (P4.1): CommandOutboxUpgradeMigrationTest shows mixed rows unchanged and no outbox row created by V37; the V39 backfill is not implemented |
+| P4-109 | Mixed historical rows migrate correctly | Migration on populated database | A database containing ACCEPTED_FOR_DISPATCH, PUBLISHED, acknowledged and failed commands migrates with the expected outcome for each. | R16, R23 | P4.2 | COVERED | CommandStateHistoryBackfillMigrationTest (accepted, recent, published, acknowledged, successful, failed, outbox-owned and non-command rows each get the expected outcome); P4.1 CommandOutboxUpgradeMigrationTest (V36 to latest) |
 | P4-110 | Phase 3 regression with the flag OFF | Validation gate / audit | The complete Phase 3 backend suite passes unchanged with no weakened assertion. | R24, R29 | P4.8 | PLANNED | not yet written |
 | P4-111 | Phase 3 regression with the flag ON | Validation gate / audit | The Phase 3 rule dispatch, arbitration and plan outcome suites pass with outbox delivery; candidate outcomes are not rewritten by retries. | R24, R29 | P4.8 | PLANNED | not yet written |
 | P4-112 | Two instances deliver once per command | Concurrency (multiple connections / instances) | Two backend instances with the flag ON produce one confirmed publication path per command. | R09 | P4.8 | PLANNED | not yet written |
@@ -205,7 +205,7 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-120 | Legacy payloads without messageId stay accepted | PostgreSQL integration | A telemetry payload exactly as the committed firmware sends it is accepted and stored unchanged. | R17, R25 | P4.5 | PLANNED | not yet written |
 | P4-121 | Firmware freshness semantics are modelled without changing the simulator | Unit | A test-side helper models the firmware check (absolute difference above 30 seconds is STALE) and the delivery window is verified against it; simulator behaviour, including its 300 second default, is unchanged. | R11, R25 | P4.3 | PLANNED | not yet written |
 | P4-122 | Window arithmetic at the freshness boundary | Unit | With an injected clock a command published at the window edge is accepted by a 30 second device check allowing the margin, and one past the ceiling is never produced. | R11 | P4.3 | PLANNED | partial (P4.1): OutboxModelTest.firmwareFreshnessLimitsDeriveTheTwentySecondCeiling proves the ceiling arithmetic; the boundary test against the firmware model is P4.3 |
-| P4-123 | Documents never claim exactly-once physical actuation | Validation gate / audit | A documentation audit over Phase 4 documents, API descriptions and UI strings finds no exactly-once or physical-actuation guarantee. | R03, R29 | P4.8 | PLANNED | not yet written |
+| P4-123 | Documents never claim exactly-once physical actuation | Validation gate / audit | A documentation audit over Phase 4 documents, API descriptions and UI strings finds no exactly-once or physical-actuation guarantee. | R03, R29 | P4.8 | PLANNED | partial (P4.2): OutboxArchitectureTest.noExactlyOnceDeliveryOrPublicationIsEverClaimedWithoutANegation audits backend source, yaml, SQL and frontend source; the documentation and API-description audit over all Phase 4 documents is P4.8 |
 
 ## M. Deferred by decision D5
 
@@ -229,12 +229,27 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | P4-134 | A non-ASCII payload hashes identically in Java and PostgreSQL | PostgreSQL integration | A payload with accents, the euro sign and an emoji is accepted by the database hash check with the Java-computed hash and round-trips byte for byte; a fixed UTF-8 vector is verified independently. | R11, R04 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSafetySchemaTest.aNonAsciiPayloadHashesIdenticallyInJavaAndPostgreSql; OutboxModelTest.aNonAsciiPayloadHasTheIndependentlyVerifiedUtf8Hash |
 | P4-135 | Attempt exhaustion cannot be parked or claimed again | PostgreSQL integration | The database refuses RETRY_WAIT for a row with no attempt left (it must become DEAD_LETTER), refuses a claim beyond max_attempts and never claims a dead letter. | R12, R04 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSafetySchemaTest.attemptExhaustionCannotBeParkedOrClaimedAgainAndMustBecomeADeadLetter |
 | P4-136 | The database refuses to claim an expired row | PostgreSQL integration | A claim at or after expires_at is rejected; the row can still be dead-lettered. This is a backstop: expiry is not claimed to be enforced by a dispatcher, which does not exist yet. | R11, R12 | P4.1 | COVERED | com.nexus.action.outbox.CommandOutboxSafetySchemaTest.anExpiredRowCannotBeClaimedButCanStillBeDeadLettered |
-| P4-137 | No direct command-publication path exists when the outbox flag is enabled | Validation gate / audit | With the flag on, every SEND_COMMAND passes acceptance and the outbox; CommandExecutor.execute and publishPrepared cannot be reached to publish, the engine cannot run without the coordinator, and an architecture test shows the MQTT client is reachable only from the dispatcher. | R31, R08 | P4.2 | PLANNED | not yet written |
-| P4-138 | A merely queued command never reports SUCCESS | API (MockMvc) | The engine result, executed events, pipeline trace, realtime broadcast and the manual-command API response report ACCEPTED_FOR_DISPATCH with a delivery state for a queued command; SUCCESS only after broker publication. | R31, R02 | P4.2 | PLANNED | not yet written |
-| P4-139 | State-history purge cannot block action-history retention | PostgreSQL integration | With V39 history rows (including DELIVERY_UNKNOWN rows that have no outbox row) the retention action_history category still deletes eligible rows and fails in no category. | R19, R06, R31 | P4.2 | PLANNED | not yet written |
-| P4-140 | A completion after expiry is recorded as late and uncertain | PostgreSQL integration | An attempt that completes after expires_at is not recorded as a normal publish; it is recorded as late or uncertain and never extends the deadline or the window. | R11, R10, R31 | P4.3 | PLANNED | not yet written |
-| P4-141 | Dispatcher, ACK handler and device removal cannot deadlock | Concurrency (multiple connections / instances) | Concurrent claim, outcome, ACK and device-deletion attempts never produce a lock-order deadlock: the dispatcher locks the outbox row then the action_history row and never the device row. | R31, R07 | P4.2 | PLANNED | not yet written |
-| P4-142 | Payload completeness is validated before persistence | Unit | The builder guarantees capability, command, value and an integer timestamp before the row is written; the database proves only commandId, timestamp, topic and hash. | R31, R11 | P4.2 | PLANNED | not yet written |
+| P4-137 | No direct command-publication path exists when the outbox flag is enabled | Validation gate / audit | With the flag on, every SEND_COMMAND passes acceptance and the outbox; CommandExecutor.execute and publishPrepared cannot be reached to publish, the engine cannot run without the coordinator, and an architecture test shows the MQTT client is reachable only from the dispatcher. | R31, R08 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.noDirectPublicationPathExistsWhileTheOutboxIsEnabled (execute, publishPrepared and the coordinator-less engine); CommandOutboxMqttWireIntegrationTest.directPublicationIsRefusedSoNothingBypassesTheOutboxOnTheRealBroker; OutboxArchitectureTest.onlyTheLegacyExecutorAndTheBoundedPublisherCanPutAMessageOnTheBroker, ...theLegacyExecutorRefusesToPublishWhenTheOutboxIsEnabledOnBothEntryPoints, ...onlyTheDispatcherUsesTheBoundedPublisher; mutation check "direct publish allowed" failed 2 tests, restored |
+| P4-138 | A merely queued command never reports SUCCESS | API (MockMvc) | The engine result, executed events, pipeline trace, realtime broadcast and the manual-command API response report ACCEPTED_FOR_DISPATCH with a delivery state for a queued command; SUCCESS only after broker publication. | R31, R02 | P4.2 | COVERED | CommandOutboxAcceptanceIntegrationTest.theHttpApiReportsAcceptedForDispatchWithADeliveryStateAndTheRealtimeBroadcastNeverSaysSuccessBeforePublication (MockMvc: status, commandStatus, deliveryState; realtime captor); ...aManualCommandIsAcceptedAtomically... (no ActionExecuted event, pipeline trace status ACCEPTED) |
+| P4-139 | State-history purge cannot block action-history retention | PostgreSQL integration | With V39 history rows (including DELIVERY_UNKNOWN rows that have no outbox row) the retention action_history category still deletes eligible rows and fails in no category. | R19, R06, R31 | P4.2 | COVERED | CommandStateHistoryRetentionIntegrationTest.historyNeverBlocksRetentionAndLeavesOnlyWithItsActionRow (real RetentionManager); CommandStateHistorySchemaTest.historyLeavesWithItsActionHistoryRowSoItCanNeverBlockRetention |
+| P4-140 | A completion after expiry is recorded as late and uncertain | PostgreSQL integration | An attempt that completes after expires_at is not recorded as a normal publish; it is recorded as late or uncertain and never extends the deadline or the window. | R11, R10, R31 | P4.2 | COVERED | OutboxDeliveryOperationsTest.aPublishThatCompletesAfterTheWindowIsLateAndUncertainNeverANormalPublish; UncertainDeliveryBarrierTest.everyUncertainPathCreatesTheHold_timeoutLateCompletionAndLeaseLoss (a late completion also holds the device); mutation check failed it. NOTE: lateness is judged when the outcome is RECORDED, not when the broker confirmed, so a confirmation recorded just after the window is conservatively uncertain |
+| P4-141 | Dispatcher, ACK handler and device removal cannot deadlock | Concurrency (multiple connections / instances) | Concurrent claim, outcome, ACK and device-deletion attempts never produce a lock-order deadlock: the dispatcher locks the outbox row then the action_history row and never the device row. | R31, R07 | P4.2 | COVERED | ACTUAL handler and acceptance: CommandOutboxAckHandlerIntegrationTest.anAckRacingTheAcceptanceOfAnotherCommandNeitherDeadlocksNorLosesAnything, ...anAckRacingTheOutcomeTransactionNeverLosesEitherWrite, ...aRejectedAckRacingAnUncertainOutcomeProducesExactlyOneFailureSignal (includes the dispatcher post-commit device lock); SQL interleaving OutboxDispatchConcurrencyTest.dispatcherAcceptanceAckAndDeviceRemovalNeverDeadlock (device removal, sweeps); OutboxDeliveryOperationsTest.anOutcomeNeverTouchesTheDeviceRow |
+| P4-142 | Payload completeness is validated before persistence | Unit | The builder guarantees capability, command, value and an integer timestamp before the row is written; the database proves only commandId, timestamp, topic and hash. | R31, R11 | P4.2 | COVERED | OutboxPayloadValidatorTest (capability, command, value, positive integer timestamp equal to the acceptance time, commandId, size, no extra fields); the validator runs in acceptance before the outbox insert |
+
+## O. P4.2 forensic corrections (findings H1 flag/rollback, H2 uncertain overtaking, M1 classification, M2 failure signals, M3 database time, real ACK handler)
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P4-143 | One validated flag decides acceptance, the executor guard and the dispatcher alike | Unit | Only the exact words true and false are accepted for nexus.command.outbox.enabled (any other spelling, including 1, on and yes, stops startup); the flag is parsed in exactly one place and every consumer asks that one setting; the dispatcher never reads it. | R22, R31 | P4.2 | COVERED | CommandOutboxSettingsTest.onlyTheExactWordsTrueAndFalseAreAcceptedForTheFlag, ...everyOtherSpellingStopsStartupInsteadOfBeingGuessed (1, 0, on, off, yes, no, enabled, t, y, 2, tru, null), ...parseEnabledIsTheSingleParser; OutboxArchitectureTest.theFlagIsReadInExactlyOnePlaceAndEveryConsumerAsksThatOneSetting, ...theDispatcherIsUnconditionalAndNeverReadsTheFlagSoItCanNeverDisagreeWithAcceptance |
+| P4-144 | Enabling the outbox without a dispatcher is impossible and rollback drains existing obligations | PostgreSQL + Mosquitto integration | The dispatcher is an unconditional bean; startup fails if the outbox is enabled without one or with the dispatcher switched off; with the flag OFF queued commands are delivered, lost leases recovered and expired commands dead-lettered, also after a restart. | R22, R12 | P4.2 | COVERED | CommandOutboxRollbackDrainIntegrationTest.withTheFlagOffExistingObligationsAreDeliveredRecoveredAndExpiredNotStranded (Spring, flag OFF); CommandOutboxDispatcherTest.anInstanceStartedAfterARestartDrainsWhatADeadOneLeftEvenWithTheFlagOff; CommandDispatchCoordinatorWiringTest; CommandOutboxSettingsTest.theDispatcherCannotBeSwitchedOffWhileTheOutboxIsEnabledButMayBeWhileItIsNot; CommandOutboxFlagOffIntegrationTest.theFlagIsOffAndTheDispatcherIsPresentButHasNothingToDo; mutation check "dispatcher only while the flag is on" failed 2 tests |
+| P4-145 | An uncertain outcome holds later commands of the device until the firmware freshness horizon | PostgreSQL integration | After an UNCERTAIN_EXPIRED predecessor (timeout, late completion or lease loss) a later command of the same device is not a candidate and cannot be claimed until payload timestamp + 40 s on the database clock; other devices, expired, failed-unsent and published predecessors do not hold; an ACK does not shorten the hold; the firmware model rejects a late copy after the release. | R32, R10, R11, R26 | P4.2 | COVERED | UncertainDeliveryBarrierTest.aLaterCommandIsNeitherACandidateNorClaimable..., ...theHoldEndsAtTheFreshnessHorizonPlusMarginAndNotBefore (boundary, with a test-side model of the firmware freshness check), ...theHoldCoversEveryClockErrorAndNetworkDelay..., ...anAckNeverShortensTheHold..., ...onlyAnUncertainOutcomeHoldsTheDevice..., ...anExpiredCommandFollowedByANewOneIsNotHeld, ...everyUncertainPathCreatesTheHold...; mutation check "hold removed" failed 8 tests |
+| P4-146 | The hold is durable, identical for two instances and bounded against a wrong clock | Concurrency (multiple connections / instances) | The hold survives a restart, two dispatcher instances agree, a payload timestamp an hour ahead cannot hold longer than creation + 60 s, and one an hour behind holds nothing. | R32, R09 | P4.2 | COVERED | UncertainDeliveryBarrierTest.theHoldIsDurableAcrossARestartAndIdenticalForTwoInstances, ...aWrongClockCannotHoldADeviceLongerThanTheCapOrReleaseItEarly (timestamp +1 h and -1 h) |
+| P4-147 | A held command is reported accurately and expires visibly | PostgreSQL integration | A held command stays QUEUED and accepted, with one history fact, an ActionHistory message, a trace and a listener callback; if its window ends during the hold it is dead-lettered EXPIRED with HELD_BY_UNCERTAIN_PREDECESSOR and never sent. | R32, R20 | P4.2 | COVERED | UncertainDeliveryBarrierTest.aHeldCommandIsReportedOnceInHistoryAndInTheActionHistoryMessage, ...aCommandWhoseWindowEndsDuringTheHoldExpiresVisiblyAndNeverSent, ...theDispatcherNeverSendsAHeldCommandAndReportsTheHoldToItsListener; OutboxOutcomeReactionsTest.aHeldCommandIsTracedAsHeldWithItsHoldEnd; OutboxDispatchConcurrencyTest.aStalledOlderAttempt... (c2 and c3 expire unsent) |
+| P4-148 | Only proven pre-handover refusals are classified NOT_SENT | Unit | Not connected, message or topic preparation failure, the listed pre-handover reason codes and a persistence refusal are NOT_SENT; a delivery-token timeout, a connection loss, any unlisted reason code and any unexpected runtime exception from the hand-over are UNCERTAIN; the bytes are never resent. | R10 | P4.2 | COVERED | PahoBrokerCommandPublisherTest.everyListedPreHandoverRefusalIsADefiniteNonPublication, ...anUnlistedReasonCodeFromTheHandOverCallIsUncertain, ...anUnexpectedRuntimeErrorFromTheHandOverCallIsUncertainBecauseTheMessageMayAlreadyBeStored, ...aPersistenceFailureWhileStoringTheMessageIsAProvenNonPublication, ...aFailureBuildingTheMessageOrResolvingTheTopicObject..., ...aDeliveryTokenTimeoutAndAConnectionLossAfterTheHandOverAreUncertain...; mutation check failed it |
+| P4-149 | An uncertain outcome emits no definitive failure signal | PostgreSQL integration | No COMMAND_PUBLICATION_FAILED rule fact and no Twin commandFailed for an UNCERTAIN outcome or for a command the device already acknowledged; the pipeline trace and realtime message say UNCERTAIN; a proven non-publication still tells the twin once. | R10, R12, R24 | P4.2 | COVERED | OutboxOutcomeReactionsTest.anUncertainDeadLetterIsNeverReportedAsADefinitePublicationFailure, ...aDeviceThatAlreadyAcknowledgedTheCommandSuppressesEveryFailureSignal; CommandOutboxAcceptanceIntegrationTest.anUncertainPublishIsNeverReportedAsPublishedOrAsAPlainFailure (Twin not told), ...aNonPublicationIsReportedAsAFailure... (Twin told once, MQTT_PUBLICATION_FAILED); CommandOutboxAckHandlerIntegrationTest (no publicationFailed fact or MQTT_ commandFailed in any ordering); mutation check failed 4 tests |
+| P4-150 | Database time is authoritative for the whole outbox lifecycle | PostgreSQL integration | With the application clock one hour ahead or behind, an accepted command gets a database-time wire timestamp, creation, scheduling and expiry, is claimable, and is delivered inside its window; claim, lease, expiry and recovery follow the database clock. | R09, R11 | P4.2 | COVERED | CommandOutboxClockSkewIntegrationTest (application clock +1 h and -1 h through the real acceptance path); OutboxDeliveryOperationsTest.anApplicationClockOneHourAheadOrBehind... ; mutation check failed it |
+| P4-151 | The real ACK handler cannot corrupt delivery records in any ordering | Concurrency (multiple connections / instances) | Using the actual DeviceCommandAckMessageHandler: an ACK before, during and after the outcome is stored without being lost or overwritten and without any history fact; a REJECTED ACK racing an uncertain outcome yields one failure signal; an ACK racing the acceptance of another command neither deadlocks nor loses anything; a stale worker completing after the ACK and lease recovery changes nothing. | R13, R07 | P4.2 | COVERED | CommandOutboxAckHandlerIntegrationTest (7 tests with the actual DeviceCommandAckMessageHandler): ACK in flight, ACK racing the outcome (15 rounds), ACK after an uncertain outcome, ACK after an unsent expiry, REJECTED ACK racing an uncertain outcome (10 rounds), ACK racing the acceptance of another command, stale worker completing after ACK and lease recovery |
+| P4-152 | The Phase 3 command suite and the dispatch suite pass with the outbox enabled | PostgreSQL + Mosquitto integration | RuleCommandAuthorizationIntegrationTest (43 tests, every authorization gate and race) and CommandDispatchMqttIntegrationTest (11 tests) pass with the outbox ENABLED against a real broker, with isolated per-test devices that respect the V38 deletion guard and queued-to-published assertions where the legacy test assumed synchronous publication; they still pass unchanged with the flag OFF. | R24, R22 | P4.2 | COVERED | RuleCommandAuthorizationOutboxModeIntegrationTest (43 tests) and CommandDispatchMqttOutboxModeIntegrationTest (11 tests) with the flag ON; the unchanged-assertion flag-OFF originals RuleCommandAuthorizationIntegrationTest (43) and CommandDispatchMqttIntegrationTest (11) still pass; six legacy-mechanics assertions and the fixture are dual-mode, nothing skipped |
 
 ## Coverage mapping
 
@@ -243,12 +258,12 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | Slice | Scenario count | Scenario IDs |
 |---|---|---|
 | P4.1 | 17 | P4-007, P4-008, P4-037, P4-038, P4-105, P4-125, P4-126, P4-127, P4-128, P4-129, P4-130, P4-131, P4-132, P4-133, P4-134, P4-135, P4-136 |
-| P4.2 | 32 | P4-001, P4-002, P4-003, P4-004, P4-005, P4-006, P4-009, P4-010, P4-011, P4-012, P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-024, P4-025, P4-031, P4-068, P4-106, P4-109, P4-137, P4-138, P4-139, P4-141, P4-142 |
-| P4.3 | 19 | P4-026, P4-027, P4-028, P4-029, P4-030, P4-032, P4-034, P4-035, P4-036, P4-039, P4-040, P4-041, P4-042, P4-043, P4-044, P4-045, P4-121, P4-122, P4-140 |
+| P4.2 | 46 | P4-001, P4-002, P4-003, P4-004, P4-005, P4-006, P4-009, P4-010, P4-011, P4-012, P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-024, P4-025, P4-031, P4-036, P4-068, P4-098, P4-099, P4-106, P4-109, P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143, P4-144, P4-145, P4-146, P4-147, P4-148, P4-149, P4-150, P4-151, P4-152 |
+| P4.3 | 17 | P4-026, P4-027, P4-028, P4-029, P4-030, P4-032, P4-034, P4-035, P4-039, P4-040, P4-041, P4-042, P4-043, P4-044, P4-045, P4-121, P4-122 |
 | P4.4 | 14 | P4-047, P4-048, P4-049, P4-050, P4-051, P4-052, P4-053, P4-054, P4-055, P4-056, P4-069, P4-070, P4-071, P4-074 |
 | P4.5 | 17 | P4-072, P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-108, P4-117, P4-118, P4-120 |
 | P4.6 | 6 | P4-087, P4-088, P4-089, P4-090, P4-091, P4-092 |
-| P4.7 | 16 | P4-033, P4-057, P4-058, P4-073, P4-094, P4-095, P4-096, P4-097, P4-098, P4-099, P4-100, P4-101, P4-102, P4-103, P4-104, P4-114 |
+| P4.7 | 14 | P4-033, P4-057, P4-058, P4-073, P4-094, P4-095, P4-096, P4-097, P4-100, P4-101, P4-102, P4-103, P4-104, P4-114 |
 | P4.8 | 20 | P4-046, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-067, P4-093, P4-107, P4-110, P4-111, P4-112, P4-113, P4-115, P4-116, P4-119, P4-123 |
 | none | 1 | P4-124 |
 
@@ -256,11 +271,11 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 
 | Layer | Count |
 |---|---|
-| PostgreSQL integration | 61 |
+| PostgreSQL integration | 65 |
 | Fault injection | 17 |
-| Concurrency (multiple connections / instances) | 14 |
-| PostgreSQL + Mosquitto integration | 10 |
-| Unit | 10 |
+| Concurrency (multiple connections / instances) | 16 |
+| PostgreSQL + Mosquitto integration | 12 |
+| Unit | 12 |
 | API (MockMvc) | 9 |
 | Validation gate / audit | 9 |
 | Migration on populated database | 5 |
@@ -274,14 +289,14 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | # | Requirement | Scenario count | Scenario IDs |
 |---|---|---|---|
 | M1 | MQTT QoS 1 plus outbox can duplicate publications (stated, tested, not hidden) | 8 | P4-013, P4-014, P4-027, P4-028, P4-049, P4-050, P4-061, P4-112 |
-| M2 | No exactly-once physical actuation promised | 4 | P4-029, P4-121, P4-122, P4-123 |
-| M3 | Same commandId, timestamp and payload on every retry | 11 | P4-005, P4-006, P4-007, P4-012, P4-026, P4-028, P4-030, P4-036, P4-037, P4-134, P4-142 |
-| M4 | Acceptance, queue, publication, ACK, convergence and actuation kept distinct | 30 | P4-001, P4-004, P4-009, P4-024, P4-025, P4-033, P4-041, P4-045, P4-047, P4-048, P4-052, P4-053, P4-054, P4-055, P4-057, P4-058, P4-065, P4-067, P4-073, P4-074, P4-094, P4-095, P4-096, P4-097, P4-102, P4-103, P4-114, P4-123, P4-137, P4-138 |
+| M2 | No exactly-once physical actuation promised | 5 | P4-029, P4-121, P4-122, P4-123, P4-145 |
+| M3 | Same commandId, timestamp and payload on every retry | 12 | P4-005, P4-006, P4-007, P4-012, P4-026, P4-028, P4-030, P4-036, P4-037, P4-134, P4-142, P4-150 |
+| M4 | Acceptance, queue, publication, ACK, convergence and actuation kept distinct | 33 | P4-001, P4-004, P4-009, P4-024, P4-025, P4-033, P4-041, P4-045, P4-047, P4-048, P4-052, P4-053, P4-054, P4-055, P4-057, P4-058, P4-065, P4-067, P4-073, P4-074, P4-094, P4-095, P4-096, P4-097, P4-102, P4-103, P4-114, P4-123, P4-137, P4-138, P4-147, P4-149, P4-151 |
 | M5 | No automatic replay of pre-migration accepted commands | 9 | P4-043, P4-068, P4-069, P4-070, P4-071, P4-072, P4-073, P4-074, P4-109 |
-| M6 | Acceptance and outbox persistence are atomic | 11 | P4-001, P4-002, P4-003, P4-004, P4-059, P4-087, P4-088, P4-089, P4-091, P4-125, P4-137 |
-| M7 | Retries bounded, observable and restart-safe | 32 | P4-008, P4-010, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-026, P4-032, P4-034, P4-035, P4-036, P4-038, P4-039, P4-046, P4-059, P4-060, P4-062, P4-063, P4-064, P4-066, P4-067, P4-090, P4-092, P4-093, P4-107, P4-135, P4-136 |
-| M8 | Uncertain publication results treated honestly | 11 | P4-006, P4-017, P4-027, P4-040, P4-041, P4-045, P4-050, P4-054, P4-055, P4-061, P4-140 |
-| M9 | No reauthorisation during delivery retries | 6 | P4-011, P4-031, P4-042, P4-044, P4-089, P4-111 |
+| M6 | Acceptance and outbox persistence are atomic | 13 | P4-001, P4-002, P4-003, P4-004, P4-059, P4-087, P4-088, P4-089, P4-091, P4-125, P4-137, P4-143, P4-144 |
+| M7 | Retries bounded, observable and restart-safe | 34 | P4-008, P4-010, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-026, P4-032, P4-034, P4-035, P4-036, P4-038, P4-039, P4-046, P4-059, P4-060, P4-062, P4-063, P4-064, P4-066, P4-067, P4-090, P4-092, P4-093, P4-107, P4-135, P4-136, P4-144, P4-146 |
+| M8 | Uncertain publication results treated honestly | 17 | P4-006, P4-017, P4-027, P4-040, P4-041, P4-045, P4-050, P4-054, P4-055, P4-061, P4-140, P4-145, P4-146, P4-147, P4-148, P4-149, P4-151 |
+| M9 | No reauthorisation during delivery retries | 7 | P4-011, P4-031, P4-042, P4-044, P4-089, P4-111, P4-152 |
 | M10 | No unauthenticated manual requeue path | 3 | P4-043, P4-098, P4-099 |
 | M11 | Unresolved delivery obligations are never deleted (device deletion, retention, any path) | 5 | P4-125, P4-126, P4-127, P4-128, P4-130 |
 
@@ -290,10 +305,10 @@ Normative requirements: [reliability-contract.md](reliability-contract.md). Exec
 | # | Exit criterion | Scenario count | Scenario IDs |
 |---|---|---|---|
 | E1 | MQTT QoS redelivery cannot duplicate an action | 16 | P4-007, P4-013, P4-014, P4-016, P4-028, P4-029, P4-030, P4-049, P4-061, P4-075, P4-076, P4-081, P4-083, P4-085, P4-112, P4-118 |
-| E2 | Restarting the backend cannot lose a pending command | 14 | P4-002, P4-004, P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-066, P4-076, P4-081, P4-107, P4-112 |
-| E3 | Timed-out commands are visible | 9 | P4-036, P4-041, P4-043, P4-052, P4-063, P4-065, P4-067, P4-093, P4-103 |
+| E2 | Restarting the backend cannot lose a pending command | 16 | P4-002, P4-004, P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-066, P4-076, P4-081, P4-107, P4-112, P4-144, P4-146 |
+| E3 | Timed-out commands are visible | 10 | P4-036, P4-041, P4-043, P4-052, P4-063, P4-065, P4-067, P4-093, P4-103, P4-147 |
 | E4 | ACK and convergence latency use backend timestamps | 3 | P4-047, P4-057, P4-058 |
-| E5 | Every pipeline step is traceable | 6 | P4-009, P4-010, P4-015, P4-094, P4-095, P4-096 |
+| E5 | Every pipeline step is traceable | 7 | P4-009, P4-010, P4-015, P4-094, P4-095, P4-096, P4-147 |
 
 An exit criterion is satisfied only when every scenario listed for it is COVERED. Criterion E3 includes the visibility scenario P4-103 in group J.
 
@@ -306,37 +321,38 @@ An exit criterion is satisfied only when every scenario listed for it is COVERED
 | R04 | 8 | P4-007, P4-008, P4-125, P4-127, P4-130, P4-133, P4-134, P4-135 |
 | R05 | 1 | P4-008 |
 | R06 | 5 | P4-009, P4-010, P4-032, P4-094, P4-139 |
-| R07 | 8 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141 |
+| R07 | 9 | P4-001, P4-002, P4-004, P4-015, P4-024, P4-062, P4-076, P4-141, P4-151 |
 | R08 | 8 | P4-001, P4-002, P4-003, P4-004, P4-011, P4-031, P4-044, P4-137 |
-| R09 | 16 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133 |
-| R10 | 10 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140 |
-| R11 | 15 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142 |
-| R12 | 19 | P4-006, P4-026, P4-030, P4-034, P4-035, P4-036, P4-038, P4-039, P4-040, P4-041, P4-042, P4-043, P4-045, P4-046, P4-064, P4-067, P4-093, P4-135, P4-136 |
-| R13 | 12 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074 |
+| R09 | 18 | P4-013, P4-014, P4-015, P4-016, P4-017, P4-018, P4-019, P4-020, P4-021, P4-022, P4-023, P4-060, P4-066, P4-112, P4-128, P4-133, P4-146, P4-150 |
+| R10 | 13 | P4-017, P4-024, P4-026, P4-027, P4-028, P4-032, P4-040, P4-045, P4-061, P4-140, P4-145, P4-148, P4-149 |
+| R11 | 17 | P4-005, P4-006, P4-012, P4-030, P4-036, P4-037, P4-038, P4-063, P4-067, P4-121, P4-122, P4-134, P4-136, P4-140, P4-142, P4-145, P4-150 |
+| R12 | 21 | P4-006, P4-026, P4-030, P4-034, P4-035, P4-036, P4-038, P4-039, P4-040, P4-041, P4-042, P4-043, P4-045, P4-046, P4-064, P4-067, P4-093, P4-135, P4-136, P4-144, P4-149 |
+| R13 | 13 | P4-025, P4-028, P4-045, P4-047, P4-048, P4-049, P4-050, P4-051, P4-054, P4-055, P4-057, P4-074, P4-151 |
 | R14 | 6 | P4-052, P4-053, P4-054, P4-056, P4-065, P4-103 |
 | R15 | 11 | P4-017, P4-023, P4-059, P4-060, P4-061, P4-062, P4-063, P4-064, P4-065, P4-066, P4-132 |
 | R16 | 6 | P4-068, P4-069, P4-070, P4-071, P4-074, P4-109 |
 | R17 | 13 | P4-075, P4-076, P4-077, P4-078, P4-079, P4-080, P4-081, P4-082, P4-083, P4-084, P4-085, P4-086, P4-120 |
 | R18 | 9 | P4-019, P4-021, P4-087, P4-088, P4-089, P4-090, P4-091, P4-092, P4-093 |
 | R19 | 8 | P4-082, P4-125, P4-126, P4-129, P4-130, P4-131, P4-132, P4-139 |
-| R20 | 7 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103 |
+| R20 | 8 | P4-057, P4-058, P4-094, P4-095, P4-096, P4-100, P4-103, P4-147 |
 | R21 | 11 | P4-033, P4-043, P4-073, P4-083, P4-097, P4-098, P4-099, P4-101, P4-102, P4-103, P4-104 |
-| R22 | 5 | P4-012, P4-105, P4-106, P4-107, P4-115 |
+| R22 | 8 | P4-012, P4-105, P4-106, P4-107, P4-115, P4-143, P4-144, P4-152 |
 | R23 | 5 | P4-068, P4-072, P4-086, P4-108, P4-109 |
-| R24 | 15 | P4-011, P4-031, P4-041, P4-042, P4-044, P4-048, P4-051, P4-056, P4-084, P4-089, P4-106, P4-110, P4-111, P4-113, P4-114 |
+| R24 | 17 | P4-011, P4-031, P4-041, P4-042, P4-044, P4-048, P4-051, P4-056, P4-084, P4-089, P4-106, P4-110, P4-111, P4-113, P4-114, P4-149, P4-152 |
 | R25 | 5 | P4-117, P4-118, P4-119, P4-120, P4-121 |
-| R26 | 1 | P4-029 |
+| R26 | 2 | P4-029, P4-145 |
 | R27 | 1 | P4-116 |
 | R28 | 1 | P4-124 |
 | R29 | 6 | P4-046, P4-110, P4-111, P4-116, P4-123, P4-131 |
 | R30 | 4 | P4-125, P4-126, P4-127, P4-128 |
-| R31 | 6 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142 |
+| R31 | 7 | P4-137, P4-138, P4-139, P4-140, P4-141, P4-142, P4-143 |
+| R32 | 3 | P4-145, P4-146, P4-147 |
 
 Clauses with no scenario of their own (definitional or covered through other clauses): R01.
 
 ## Evidence not yet produced
 
-Everything except the five COVERED scenarios and the P4.1 evidence recorded below. In particular there is no recorded evidence yet for crash recovery, duplicate publication, retry bounds, legacy reconciliation, telemetry deduplication, backpressure or the enablement procedure.
+Everything except the COVERED scenarios and the P4.1 and P4.2 evidence recorded below. In particular there is no recorded evidence yet for crash recovery, duplicate publication, retry bounds, legacy reconciliation, telemetry deduplication, backpressure or the enablement procedure.
 
 ## P4.1 evidence (2026-10-15, including the safety corrections)
 
@@ -386,3 +402,133 @@ One focused run was interrupted by me after exceeding the time limit (a test of 
 ### Not implemented by P4.1
 
 Atomic acceptance, the dispatcher, claim and lease queries, retries, expiry sweeps by a dispatcher, the command state history table (V39), dead-letter handling, ACK and timeout facts, telemetry deduplication (V40), backpressure and observability. The mandatory P4.2 safety requirements are in contract R31 and ledger P4-137 to P4-142.
+
+
+## P4.2 evidence (2026-10-15)
+
+Only the scenarios marked COVERED in the tables above are proven. Nothing here claims retries, a retry schedule, ACK facts, an ACK timeout, telemetry deduplication, backpressure, observability or any physical result: those are later slices. Every result below was produced against disposable PostgreSQL (TimescaleDB) and Mosquitto containers; the development database was never touched.
+
+### P4.2 tests (101 new tests: 100 in 14 new classes, plus one test added to an existing class)
+
+| Test class | Tests | Layer | What it establishes |
+|---|---|---|---|
+| `com.nexus.action.outbox.CommandStateHistorySchemaTest` | 7 | PostgreSQL (V1 to V39) | V39 constraints; append-only (UPDATE and direct DELETE refused); history leaves only with its action_history row, so it cannot block the retention statement; an outbox obligation still protects its action row; idempotent backfill statement |
+| `com.nexus.action.outbox.CommandStateHistoryBackfillMigrationTest` | 1 | Migration on populated database | V38 to V39 with stranded, recent, published-at-set, acknowledged, successful, failed, outbox-owned and non-command rows: only the two demonstrably stranded commands receive DELIVERY_UNKNOWN; no ActionHistory row changes; no outbox row is created; V1 to V38 checksums unchanged |
+| `com.nexus.action.outbox.CommandStateHistoryRetentionIntegrationTest` | 1 | Spring + PostgreSQL | The real RetentionManager with history present (including a legacy DELIVERY_UNKNOWN command with no outbox row): no category fails, history leaves with its action row, obligations keep theirs |
+| `com.nexus.action.outbox.OutboxDeliveryOperationsTest` | 18 | PostgreSQL (real SQL, real connections) | Claim, lease on the database clock, attempt increment, ordering guard, expiry, every outcome, late completion, fencing, lease recovery, transaction rollback of a failed outcome, no device-row lock, skewed application clock |
+| `com.nexus.action.outbox.CommandOutboxDispatcherTest` | 15 | PostgreSQL + scripted broker | Verbatim bytes and acceptance timestamp, exactly one attempt per command, no endless claiming, integrity refusal, bounded workers, bounded batch, nudge cannot bypass the claim, shutdown leaves no stranded row, fenced result produces no reaction |
+| `com.nexus.action.outbox.OutboxDispatchConcurrencyTest` | 7 | Concurrency (multiple connections / two instances) | Eight threads racing for one row; the 23505 race as a normal outcome; two instances, 50 commands over 10 devices, each sent once, never two in flight per device, per-device order; stalled older attempt blocks newer ones; concurrent history writers; no cross-device blocking; no deadlock between dispatcher, acceptance, ACK pattern and device removal |
+| `com.nexus.action.outbox.CommandOutboxAcceptanceIntegrationTest` | 13 | Spring + PostgreSQL + Mosquitto + MockMvc | Atomic acceptance and its rollback, constraint refusal, queued never SUCCESS (API, events, trace, realtime), failure reasons, per-device order key, no direct publication path, no HTTP requeue/resend route, delivery does not re-evaluate connectivity |
+| `com.nexus.action.outbox.CommandOutboxMqttWireIntegrationTest` | 3 | Spring + PostgreSQL + real Mosquitto | One QoS 1 non-retained message, byte-identical to the stored payload with the acceptance timestamp; direct publication puts nothing on the broker; a disconnected client is rejected at acceptance with no durable write |
+| `com.nexus.action.outbox.CommandOutboxFlagOffIntegrationTest` | 3 | Spring + PostgreSQL + Mosquitto | Flag OFF: no dispatcher bean, legacy direct publication with publish-time timestamp and SUCCESS, no outbox or history rows, API JSON unchanged |
+| `com.nexus.rule.application.RuleOriginOutboxIntegrationTest` | 3 | Spring + PostgreSQL + Mosquitto | Rule-originated commands: delivered through the outbox, a paused rule creates nothing, a command accepted before the pause still finishes delivery |
+| `com.nexus.action.outbox.OutboxArchitectureTest` | 10 | Source audit | Only the legacy executor (guarded) and the bounded publisher reach the MQTT client; the dispatcher bean is conditional on the flag; no requeue/resend/redrive operation or endpoint; no controller reaches the dispatcher; no unqualified exactly-once claim; delivery code never reauthorises |
+| `com.nexus.action.outbox.OutboxPayloadValidatorTest` | 6 | Unit | Wire contract completeness before persistence |
+| `com.nexus.infrastructure.mqtt.PahoBrokerCommandPublisherTest` | 8 | Unit (mocked client) | Bounded publish classification table; the blocking client publish is never used |
+| `com.nexus.action.application.OutboxOutcomeReactionsTest` | 5 | Unit | Twin told once, rule fact once and only when ActionHistory changed, no failure reaction for a publication, reaction failures contained |
+| `com.nexus.action.outbox.CommandOutboxSettingsTest` (extended) | +1 | Unit | The new `workers` setting is bounded 1 to 16 |
+
+### Mutation checks (each temporary, each reverted, restoration verified byte for byte with `cmp`)
+
+| Mutation | Result |
+|---|---|
+| Outcome without the lease-owner and attempt fence | `aWorkerWithTheWrongLeaseOwnerOrAttemptIsFencedOutAndTheRowIsUntouched` failed |
+| Claim and candidate query ignore the delivery window | `anExpiredCommandIsNeverACandidateNeverClaimableAndIsDeadLetteredWithoutBlockingNewerOnes` failed |
+| Claim ignores older unresolved commands of the device | 5 failures across `OutboxDeliveryOperationsTest` and `OutboxDispatchConcurrencyTest` |
+| The 23505 single-in-flight race propagated instead of handled | `OutboxDispatchConcurrencyTest` errored |
+| A completion after the window recorded as a normal publish | `aPublishThatCompletesAfterTheWindowIsLateAndUncertainNeverANormalPublish` failed |
+| Dispatcher publishes without verifying the stored hash | `aPayloadWhoseHashNoLongerMatchesIsNeverPublished` failed |
+| `CommandExecutor.publishPrepared` publishes directly while the outbox is enabled | `directPublicationIsRefusedSoNothingBypassesTheOutboxOnTheRealBroker` and `theLegacyExecutorRefusesToPublishWhenTheOutboxIsEnabledOnBothEntryPoints` failed |
+| An outbox failure swallowed during acceptance (a committed command with no delivery obligation) | `aFailureAfterTheDesiredStateWasWrittenRollsBackTheWholeAcceptanceUnit` failed |
+
+### Findings and deviations recorded while implementing P4.2
+
+1. **Firmware and simulator duplicate behaviour (inspected, not assumed).** `firmware/src/main.cpp` `onMqttMessage` (lines 161 to 220) keeps no record of seen commandIds: a duplicate delivery of an in-window LED SET_STATE command is applied again and acknowledged again. The simulator (`command_handler.py`) does keep a bounded commandId LRU and replays the first result. Therefore duplicate suppression exists only in the simulator. P4.2 does not rely on either: it sends a command at most once (no retries), and an uncertain outcome is never resent. Exactly-once is neither implemented nor claimed.
+2. **Interim failure handling before P4.3 (no retries).** Every attempt ends in a terminal state with an honest reason: confirmed in window to PUBLISHED; definite non-publication to DEAD_LETTER PERMANENT_FAILURE with last_error_code `NOT_SENT_<code>`; uncertain, late completion and lease recovery to DEAD_LETTER UNCERTAIN_EXPIRED with the ActionHistory message `DELIVERY_UNCONFIRMED`; expiry to DEAD_LETTER EXPIRED; integrity mismatch to DEAD_LETTER PAYLOAD_INTEGRITY. P4.3 replaces the transient and uncertain branches with RETRY_WAIT while attempts and time remain.
+3. **Scope note.** Expiry handling and lease recovery were implemented in P4.2 (minimal, terminal-only) because without them an expired or lost command would block its device queue forever; P4.3 adds the scheduler, backoff and retry on top.
+4. **Ledger wording amended (P4-004).** The original text ("with the broker stopped, acceptance still commits") contradicts contract R08.4 (a disconnected client is rejected at acceptance before any write). The scenario now states what is true and proven.
+5. **Legacy backfill is conservative.** Rows younger than 5 minutes, rows with a recorded publication or ACK, rows with an outbox row and non-command rows are never classified, so a recently accepted or concurrently publishing legacy command cannot be mislabelled.
+6. **Per-device order key.** Acceptance stamps `created_at` strictly after every earlier outbox row of the device (the device row lock serialises acceptances), so claim order cannot be inverted by equal timestamps.
+7. **Legacy fixtures that bulk-delete devices cannot run with the flag ON.** `CommandDispatchMqttIntegrationTest` run with `nexus.command.outbox.enabled=true`: 1 of 11 passed; the other 10 errored in `@BeforeEach deviceRepository.deleteAll()` with `DEVICE_HAS_COMMAND_DELIVERY_EVIDENCE` (the V38 fail-closed guard working as designed). `ActionIntegrationTest` and `CommandAcceptanceRollbackIntegrationTest` pass with the flag ON.
+8. **Phase 3 rule-command suite with the flag ON (observation, not a gate).** `RuleCommandAuthorizationIntegrationTest` (43 tests) with the flag ON: 37 pass, including every gate-denial, version, pause and ABA race test; 6 fail because they encode legacy mechanics (an immediate SUCCESS from the synchronous publish, a spy on `CommandExecutor.publishPrepared`, or a direct `publishPrepared` call after `accept`, which is exactly the bypass this slice closes). With the flag OFF (default) all 43 pass unchanged. The rule-originated flow with the flag ON is covered by `RuleOriginOutboxIntegrationTest`.
+
+### Validation results
+
+| Run | Result |
+|---|---|
+| `python validate_nexus.py --fast` | PASS 8 of 8 |
+| `python validate_nexus.py --full` | **PASS 11 of 11**: backend and integration suite 802 s; frontend lint, unit tests and build; simulator; whitespace; simulated loop smoke 18.5 s; MQTT command and ACK smoke 25.3 s; database restart smoke 53.2 s |
+
+Actual counts: backend **174 test classes, 1,387 tests, 0 failures, 0 errors, 0 skipped** (surefire reports; the previous checkpoint was 160 classes and 1,286 tests; +14 classes, +101 tests); frontend **63 files, 533 tests**; simulator **56 passed, 3 skipped** (the skips are pre-existing and unchanged). Two earlier full-gate launches were discarded by me: one because a stale wrapper had started a second concurrent run (both were killed), and one because a test and documentation were added afterwards. The result above is from the final single clean run on the final working tree.
+
+### Not implemented by P4.2
+
+Retries, backoff and the retry scheduler; RETRY_WAIT use; dead-letter requeue (none exists by design); ACK facts in state history (ACK_ACCEPTED and later), the persisted ACK timeout and the runtime legacy reconciler (P4.4); telemetry deduplication, V40 (P4.5); queue caps and the publish rate limit (P4.6); read API, metrics and UI for the delivery state (P4.7); crash/fault campaign and enablement documentation (P4.8). The flag remains OFF by default and was not enabled anywhere outside tests.
+
+## P4.2 forensic corrections (independent review findings H1, H2, M1, M2, M3 and the real ACK handler)
+
+The earlier validation numbers above were produced before these corrections; the numbers in this section supersede them. Nothing here claims retries, an ACK fact in the state history, a persisted ACK timeout, telemetry deduplication, backpressure, observability, a firmware change or any physical ordering guarantee.
+
+### What was wrong and what was changed
+
+| Finding | Defect | Correction |
+|---|---|---|
+| H1 | The dispatcher bean existed only when the property was exactly `true`, while `CommandOutboxSettings` converted the same property with Spring's boolean rules (also `1`, `on`, `yes`): acceptance could enqueue with no dispatcher, and turning the flag OFF stranded obligations | `CommandOutboxSettings` parses the flag strictly (only `true` or `false`, anything else stops startup) and is the only decision; `CommandOutboxDispatcher` is unconditional and never reads the flag, so rollback drains; the coordinator fails startup if the outbox is enabled without a dispatcher; `nexus.command.outbox.dispatcher-enabled=false` (a test-context switch) is refused while the outbox is enabled; an idle system costs one indexed EXISTS probe per poll |
+| H2 | A timed-out publish may still be delivered later (the Paho client resends on reconnect) and the firmware has no commandId deduplication, so a later command could be overtaken: A = ON delayed past B = OFF leaves the LED ON | Per-device hold (contract R32): while an earlier command of the device ended UNCERTAIN_EXPIRED, later commands are not claimed until payload timestamp + 40 s on the database clock (never beyond creation + 60 s); persisted in the outbox rows, restart-safe, identical for every instance, not shortened by an ACK; visible as a state-history fact, an ActionHistory message, a trace and a listener callback; a held command whose own window ends is dead-lettered EXPIRED with HELD_BY_UNCERTAIN_PREDECESSOR |
+| M1 | Any RuntimeException from the hand-over was classified NOT_SENT | Only explicit pre-handover evidence is NOT_SENT (not connected, message or topic preparation failure, four listed pre-handover reason codes, persistence refusal); everything else, including unexpected runtime errors and unlisted reason codes, is UNCERTAIN |
+| M2 | An uncertain outcome raised COMMAND_PUBLICATION_FAILED and told the Twin the command failed, even after the device had acknowledged it | No definitive failure signal for an UNCERTAIN outcome or an acknowledged command; the trace and realtime message say UNCERTAIN; a proven non-publication still tells the Twin once; the manual response carries `deliveryState` and `deliveryReason` |
+| M3 | `created_at` and `next_attempt_at` (and the wire timestamp) came from the application clock but were compared with the database clock at claim | In outbox mode the wire timestamp, creation, scheduling and therefore expiry come from the database clock inside the acceptance transaction (contract R11 amended) |
+| ACK | Only SQL imitations of the ACK handler existed | Seven tests use the actual `DeviceCommandAckMessageHandler` |
+| Flag ON | 6 of 43 and 10 of 11 legacy tests failed with the flag ON | Per-test isolated devices (no bulk deletion, respecting V38); six legacy-mechanics assertions are dual-mode (identical with the flag OFF); subclasses run both whole suites with the flag ON |
+
+### New and changed tests
+
+| Test class | Tests | What it establishes |
+|---|---|---|
+| `UncertainDeliveryBarrierTest` | 13 | The hold: not a candidate and not claimable; boundary against a model of the firmware freshness check; no early release by an ACK; only uncertain outcomes hold; every uncertain path (timeout, late completion, lease loss); one report; expiry during the hold; restart and two instances; wrong clocks; end to end through the dispatcher |
+| `CommandOutboxAckHandlerIntegrationTest` | 7 | The actual ACK handler in every ordering (before, during, after, rejected, with a concurrent acceptance, stale worker) |
+| `CommandOutboxRollbackDrainIntegrationTest` | 1 | With the flag OFF, a queued command is delivered, a lost lease recovered and an expired command dead-lettered |
+| `CommandOutboxClockSkewIntegrationTest` | 1 | The application clock +1 h and -1 h through the real acceptance path |
+| `CommandDispatchCoordinatorWiringTest` | 2 | Enabled outbox without a dispatcher fails startup |
+| `CommandDispatchMqttOutboxModeIntegrationTest` | 11 | The whole dispatch suite with the outbox enabled (real broker) |
+| `RuleCommandAuthorizationOutboxModeIntegrationTest` | 43 | The whole Phase 3 command-authorization suite with the outbox enabled |
+| `CommandOutboxSettingsTest` (extended) | +4 | Exact flag spellings, the single parser, the dispatcher switch |
+| `PahoBrokerCommandPublisherTest` (extended) | +5 | The conservative classification table |
+| `OutboxOutcomeReactionsTest` (extended) | +2 | No failure signal for uncertainty or an acknowledged command; the hold trace |
+| `OutboxArchitectureTest` (extended) | +1 | One authoritative flag, an unconditional dispatcher |
+| `CommandOutboxDispatcherTest` (extended) | +1 | A restarted instance drains leftovers with the flag OFF |
+
+Existing tests whose expectations legitimately changed with the corrected behaviour: the dispatcher-is-conditional architecture test, the flag-OFF "no dispatcher bean" test, the "unexpected error is NOT_SENT" Paho test, the "uncertain tells the Twin" reaction test, the ordering test that expected a newer command to be sent right after an uncertain one, and the lease-recovery candidate expectation. Four P4.1/P4.2 Spring tests that fabricate unresolved obligations in a flag-OFF context now set `nexus.command.outbox.dispatcher-enabled=false` so the (now always present) dispatcher does not service their fixtures.
+
+A latent race in my own earlier deadlock test was found and fixed: its device had no delivery evidence at the start, so the very first removal attempt could legitimately delete it. The device is now seeded with a resolved outbox row.
+
+### Mutation checks for the corrections (each temporary, each reverted, restoration verified with `cmp`)
+
+| Mutation | Result |
+|---|---|
+| The uncertain-predecessor hold removed from the claim guards | 8 failures in `UncertainDeliveryBarrierTest` |
+| An unexpected runtime error from the hand-over classified NOT_SENT again | `anUnexpectedRuntimeErrorFromTheHandOverCallIsUncertain...` failed |
+| An uncertain outcome emits the definitive failure signals again | 1 reaction test and 3 real-ACK-handler tests failed |
+| Acceptance takes the wire and creation time from the application clock | `CommandOutboxClockSkewIntegrationTest` failed |
+| The dispatcher services obligations only while the flag is on | the Spring rollback-drain test and an architecture test failed |
+| The dispatcher may be switched off while the outbox is enabled | the settings test failed |
+
+### Flag-ON and flag-OFF results
+
+| Suite | Flag OFF | Flag ON |
+|---|---|---|
+| `RuleCommandAuthorizationIntegrationTest` / `...OutboxModeIntegrationTest` | 43 of 43 | 43 of 43 |
+| `CommandDispatchMqttIntegrationTest` / `...OutboxModeIntegrationTest` | 11 of 11 | 11 of 11 |
+
+### Preserved failure of the first full run of the corrected tree
+
+The first full-gate run failed: 1,478 tests, 0 failures, 2 errors, both in `RuleRetentionIntegrationTest` (the application context failed to load: `relation "device_connectivity" does not exist`). The surefire report was overwritten by an isolated rerun of that class, which passed (2 of 2), so the root cause was NOT proven. The most plausible contributor is new background activity: the now-unconditional dispatcher polls from every cached application context, including those of finished classes whose database containers were already stopped (the suite already silences the rule and twin scanners in cached contexts for the same reason, see `TypedTriggerSupport`). Correction applied: a TEST default `nexus.command.outbox.dispatcher-enabled=false` in `src/test/resources/application.properties`, with every class that exercises the dispatcher opting in explicitly; the production default stays true and startup fails if it is false while the outbox is enabled. The full gate then passed. Because the cause is not proven, the reviewer should repeat the full gate.
+
+### Validation results (final working tree)
+
+| Run | Result |
+|---|---|
+| `python validate_nexus.py --fast` | PASS 8 of 8 |
+| `python validate_nexus.py --full` | **PASS 11 of 11**: backend and integration suite 972 s; frontend lint, unit tests and build; simulator; whitespace; simulated loop smoke 26.0 s; MQTT command and ACK smoke 60.1 s; database restart smoke 60.3 s |
+
+Actual counts: backend **181 test classes, 1,479 tests, 0 failures, 0 errors, 0 skipped**; frontend **63 files, 533 tests**; simulator **56 passed, 3 skipped (existing)**.

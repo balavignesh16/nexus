@@ -133,6 +133,23 @@ public class CommandExecutor implements ActionExecutor {
         this.bindingConstraints = bindingConstraints;
     }
 
+    /**
+     * Phase 4 (P4.2). When the command outbox is enabled the dispatcher is the ONLY publisher: this class must not publish
+     * directly, whatever path reaches it (an engine built without the coordinator, a rule non-command route, a test
+     * double). {@code prepare} stays available because acceptance uses it for validation. With the flag off (the default)
+     * this is the unchanged legacy publisher.
+     */
+    public static final String DIRECT_PUBLICATION_DISABLED =
+            "Direct command publication is disabled while the command outbox is enabled; the command must be accepted through the outbox";
+    private com.nexus.action.outbox.CommandOutboxSettings outboxSettings;
+    @Autowired(required = false)
+    void setOutboxSettings(com.nexus.action.outbox.CommandOutboxSettings outboxSettings) {
+        this.outboxSettings = outboxSettings;
+    }
+    private boolean directPublicationDisabled() {
+        return outboxSettings != null && outboxSettings.enabled();
+    }
+
     @Override
     public boolean supports(ActionType type) {
         return type == ActionType.SEND_COMMAND;
@@ -140,6 +157,7 @@ public class CommandExecutor implements ActionExecutor {
 
     @Override
     public ActionExecutionResult execute(ActionExecutionRequest request, ActionContext context) {
+        if (directPublicationDisabled()) return failure(request, DIRECT_PUBLICATION_DISABLED);
         try {
             return publishPrepared(request, prepare(request));
         } catch (CommandRejectedException e) {
@@ -249,6 +267,7 @@ public class CommandExecutor implements ActionExecutor {
     }
 
     public ActionExecutionResult publishPrepared(ActionExecutionRequest request, PreparedCommand prepared) {
+        if (directPublicationDisabled()) return failure(request, DIRECT_PUBLICATION_DISABLED);
         try {
             String topic = String.format(COMMAND_TOPIC_TEMPLATE, prepared.deviceId());
             String payload = buildPayload(request.requestId(), prepared.wireCapability(), prepared.command(), prepared.value());

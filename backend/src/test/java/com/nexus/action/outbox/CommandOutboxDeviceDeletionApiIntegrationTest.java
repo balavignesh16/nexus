@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * The application side of F1: deleting a device through the service and through the REST API is refused with a typed 409
  * while the device has delivery obligations or unpurged delivery records, and nothing is changed by the refusal.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nexus.command.outbox.dispatcher-enabled=false")
 @AutoConfigureMockMvc
 @Testcontainers
 class CommandOutboxDeviceDeletionApiIntegrationTest {

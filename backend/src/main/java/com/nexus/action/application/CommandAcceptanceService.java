@@ -51,6 +51,18 @@ public class CommandAcceptanceService {
     @Autowired
     void setVerification(VerificationService verification){this.verification=verification;}
 
+    // Phase 4 (P4.2): present only as optional collaborators; with the outbox flag OFF (default) none of them is used and
+    // acceptance is exactly the pre-Phase-4 behaviour.
+    private com.nexus.action.outbox.CommandOutboxSettings outboxSettings;
+    private com.nexus.action.outbox.CommandOutboxRepository outbox;
+    private com.nexus.action.outbox.CommandStateHistory stateHistory;
+    private com.fasterxml.jackson.databind.ObjectMapper mapper;
+    @Autowired(required = false)
+    void setOutbox(com.nexus.action.outbox.CommandOutboxSettings settings, com.nexus.action.outbox.CommandOutboxRepository outbox,
+            com.nexus.action.outbox.CommandStateHistory stateHistory, com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        this.outboxSettings=settings; this.outbox=outbox; this.stateHistory=stateHistory; this.mapper=mapper;
+    }
+
     // Rule actions can run inside the telemetry transaction. A separate commit
     // is required before the caller is permitted to publish MQTT.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -94,6 +106,51 @@ public class CommandAcceptanceService {
         desired.saveAndFlush(next);
         if(transitions!=null)transitions.save(TwinStateTransition.desired(previous,next,clock.instant(),correlationId));
         if(verification!=null)verification.accepted(next,correlationId);
+        if(outboxSettings!=null&&outboxSettings.enabled())enqueue(request,target,deviceId,acceptedAt,correlationId,ruleOrigin);
         return target;
+    }
+
+    /**
+     * Outbox mode (contract R07/R08): the delivery obligation is written in THIS acceptance transaction, after ActionHistory,
+     * desired state, desired transition and verification, so either everything commits or nothing does. The payload is built
+     * once here, with the acceptance-time epoch-second timestamp, and is never rebuilt or refreshed. A payload that is not a
+     * complete wire command is refused here, before any row is committed.
+     */
+    private void enqueue(ActionExecutionRequest request,CommandExecutor.PreparedCommand target,java.util.UUID deviceId,
+            Instant acceptedAt,String correlationId,boolean ruleOrigin) {
+        // DATABASE time is the single authority for the whole delivery lifecycle in outbox mode: the payload timestamp (still an
+        // integer of epoch seconds, exactly what the firmware compares with its own NTP clock), the creation and scheduling
+        // timestamps and the expiry all come from the database clock at acceptance, so an application clock that is wrong in
+        // either direction cannot make a command unclaimable, immortal or stale. (With the flag OFF the legacy publish-time
+        // application clock is unchanged.)
+        Instant databaseNow=contractLocks.queryForObject("SELECT clock_timestamp()",java.sql.Timestamp.class).toInstant();
+        com.nexus.action.outbox.OutboxPayload payload;
+        try {
+            payload=com.nexus.action.outbox.OutboxPayload.create(request.requestId(),target.wireCapability(),target.command(),
+                    target.value(),databaseNow.getEpochSecond(),mapper);
+            com.nexus.action.outbox.OutboxPayloadValidator.validate(request.requestId(),payload,mapper);
+        } catch (IllegalArgumentException invalid) {
+            if(ruleOrigin)throw new com.nexus.rule.application.RuleExecutionSuppressedException("INVALID_ACTION_TARGET: "+invalid.getMessage());
+            throw new CommandExecutor.CommandRejectedException(invalid.getMessage());
+        }
+        // Per-device order key: strictly later than every earlier row of this device (the device row lock serialises
+        // acceptances), so created_at order is the acceptance order even when two commands fall in the same microsecond.
+        Instant createdAt=databaseNow.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        java.sql.Timestamp latest=contractLocks==null?null:contractLocks.queryForObject(
+                "SELECT max(created_at) FROM command_outbox WHERE device_id = ?",java.sql.Timestamp.class,deviceId);
+        if(latest!=null&&!latest.toInstant().isBefore(createdAt))createdAt=latest.toInstant().plus(1,java.time.temporal.ChronoUnit.MICROS);
+        try {
+            outbox.saveAndFlush(com.nexus.action.outbox.CommandOutboxEntity.queued(request.requestId(),deviceId,payload,
+                    outboxSettings.deliveryWindow(),outboxSettings.maxAttempts(),correlationId,createdAt));
+        } catch (org.springframework.dao.DataIntegrityViolationException refused) {
+            // A constraint refused the delivery obligation: the whole acceptance fails (this transaction rolls back) and the
+            // caller is told the command was rejected. Nothing is published and no desired intent is stored.
+            if(ruleOrigin)throw new com.nexus.rule.application.RuleExecutionSuppressedException("INVALID_ACTION_TARGET: delivery obligation refused");
+            throw new CommandExecutor.CommandRejectedException("Command could not be queued for delivery");
+        }
+        stateHistory.append(request.requestId(),com.nexus.action.outbox.CommandStateHistory.Fact.ACCEPTED,null,null,0,"ACCEPTED",
+                com.nexus.action.outbox.CommandStateHistory.Source.ACCEPTANCE,correlationId,createdAt,null);
+        stateHistory.record(new com.nexus.action.outbox.OutboxTransitionRecord(request.requestId(),null,
+                com.nexus.action.outbox.OutboxState.QUEUED,0,"QUEUED",correlationId,createdAt));
     }
 }

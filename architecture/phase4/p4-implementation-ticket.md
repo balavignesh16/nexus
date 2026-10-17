@@ -2,7 +2,7 @@
 
 Date: 2026-10-15.
 
-Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED AND TESTED, UNCOMMITTED, INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
+Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED, TESTED AND COMMITTED (1936c2b), INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 IMPLEMENTED AND TESTED, UNCOMMITTED (V39, atomic acceptance, bounded dispatcher, status separation, R31 safety requirements). P4.3 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
 
 Normative authority: [reliability-contract.md](reliability-contract.md). This ticket owns rollout, source ownership, dependencies and verification gates. It does not override contract clauses. Acceptance authority: [p4-acceptance-ledger.md](p4-acceptance-ledger.md); a planned test is not proof.
 
@@ -64,7 +64,7 @@ Deliverables are exactly the three Phase 4 documents. No source, test, migration
 
 ## Slice P4.1: durable outbox schema (V37), configuration and retention protection
 
-Authority: R04, R05, R11, R12, R19, R22, R23. Ledger scenarios: 5 original plus 12 added by the safety corrections (P4-125 to P4-136), all 17 COVERED. Status: **implemented and tested, uncommitted.** Ledger evidence is in the "P4.1 evidence" section of the acceptance ledger.
+Authority: R04, R05, R11, R12, R19, R22, R23. Ledger scenarios: 5 original plus 12 added by the safety corrections (P4-125 to P4-136), all 17 COVERED. Status: **implemented, tested and committed (1936c2b).** Ledger evidence is in the "P4.1 evidence" section of the acceptance ledger.
 
 Delivered:
 
@@ -80,7 +80,7 @@ Verification: unit, schema, safety schema (device deletion, races, concurrent cl
 
 ## Slice P4.2: atomic acceptance and dispatcher
 
-Authority: R05, R07 to R11, R24, R31. Ledger scenarios: 32.
+Authority: R05, R07 to R11, R24, R31, R32. Ledger scenarios: 46 (the 32 originally planned, P4-036, P4-098, P4-099 and P4-140 which contract R31 items 4 and 7 make P4.2 requirements, and 10 added by the forensic corrections, P4-143 to P4-152). Status: **implemented and tested, uncommitted; 45 of the 46 are COVERED, P4-017 is partial (its RETRY_WAIT branch needs retries, P4.3).**
 
 Added to this slice on approval: **V39** (`command_state_history`, append-only trigger and the legacy DELIVERY_UNKNOWN backfill, R06 and R16) because the history is first written here. Design constraints carried from P4.1: the dispatcher must bound every publish with the delivery-token wait and the attempt timeout (the shared client's blocking publish waits up to 15 seconds, R12); the mandatory safety requirements of contract R31 (no direct publication bypass when the flag is on, atomic acceptance, no SUCCESS for a queued command, no dispatch of expired commands, lock order outbox then action_history and never the device row, payload completeness, handling of the 23505 claim race, no requeue path, no deletion of unresolved obligations); it must respect the V37 single IN_FLIGHT index and may claim strict per-device FIFO only after proving it under concurrent workers (R09); it decides whether removing a device records an explicit terminal outcome before the cascade (R04).
 
@@ -91,13 +91,22 @@ Deliverables:
 - `CommandDispatchCoordinator` branches on the flag; the legacy branch is not modified.
 - The dispatcher never calls `RuleExecutionAuthorization`, the acceptance service or any validation (R08).
 
-Not in P4.2: retries beyond recording an uncertain or transient failure, dead-letter handling, expiry sweeps (P4.3).
+Not in P4.2: retries beyond recording an uncertain or transient failure, dead-letter recovery, the retry scheduler (P4.3). Scope note: minimal terminal-only expiry handling and lease recovery are included in P4.2 because without them an expired or lost command would block its device queue forever.
+
+Delivered (2026-10-15):
+
+- `V39__command_state_history.sql`: append-only history (UPDATE refused, DELETE only with the parent row via ON DELETE CASCADE so history can never block retention) and the conservative legacy DELIVERY_UNKNOWN backfill (5 minute grace; no outbox row, no replay, no ActionHistory change).
+- Package `com.nexus.action.outbox`: `CommandStateHistory` (gapless sequence under a per-command advisory lock, also the `OutboxTransitionRecorder` implementation), `OutboxDeliveryOperations` (candidates, claim with `FOR UPDATE SKIP LOCKED`, fenced outcome, expiry sweep, lease recovery; database clock; 23505 handled), `CommandOutboxDispatcher` (bean only when the flag is `true`; bounded workers; publish outside any transaction; after-commit nudge), `BrokerCommandPublisher` port, `OutboxPayloadValidator`, `OutboxOutcomeListener`; `PahoBrokerCommandPublisher` (delivery-token wait bounded by the attempt timeout, classification confirmed / not sent / uncertain); `OutboxOutcomeReactions` (twin told once, rule fact once, realtime and trace after commit).
+- `CommandAcceptanceService.accept` writes the outbox row and the ACCEPTED and QUEUED history facts inside the existing acceptance transaction (flag ON only), builds the payload once with the acceptance-time integer timestamp, validates its completeness, stamps a strictly increasing per-device order key and turns a refused obligation into a rejection. `CommandDispatchCoordinator` branches on the flag and returns ACCEPTED_FOR_DISPATCH; the legacy branch is unchanged. `CommandExecutor.execute` and `publishPrepared` refuse to publish while the flag is ON. `ActionExecutionEngine` records an ACCEPTED trace for a queued command. `ActionHistoryResponse` gains an additive `deliveryState` (omitted from JSON when absent). New setting `nexus.command.outbox.workers` (1 to 16, default 4).
+- **Forensic corrections (2026-10-15):** H1 one strictly parsed authoritative flag and an unconditional dispatcher (rollback drains, startup fails if enabled without a dispatcher); H2 the per-device hold after an uncertain outcome (contract R32); M1 conservative NOT_SENT classification; M2 no definitive failure signal for an uncertain or acknowledged command; M3 database time for the wire timestamp, creation, scheduling and expiry; seven tests with the actual ACK handler; the whole dispatch and Phase 3 command-authorization suites also run with the outbox enabled (dual-mode legacy assertions, isolated per-test devices). Details, mutation checks and results are in the ledger evidence section.
+- Deviations and findings (also in the ledger evidence section): the ledger wording of P4-004 contradicted contract R08.4 and was amended; the committed firmware has no commandId deduplication while the simulator does (inspected, contract R26 updated); legacy fixtures that bulk-delete devices cannot run with the flag ON because the V38 guard fails closed.
+
 
 Verification: transaction atomicity and rollback tests; two-worker and two-instance concurrency tests with in-process locks disabled; fencing and lease tests with an injected clock; broker-stopped acceptance test; Phase 3 command and rule dispatch regressions with the flag OFF and ON.
 
 ## Slice P4.3: retries, expiry, dead letter, duplicate behaviour
 
-Authority: R10 to R12, R24, R26. Ledger scenarios: 19.
+Authority: R10 to R12, R24, R26. Ledger scenarios: 17 (P4-036 and P4-140 moved to P4.2). P4.3 dependencies carried from P4.2: retry ONLY outcomes proven as not sent (contract R10 classification) with backoff inside the window, and NEVER automatically retry an UNCERTAIN outcome without a proven device-side idempotency mechanism (keep the R32 hold); replace the terminal-only transient branch with RETRY_WAIT while attempts and window remain; classify exhaustion as RETRY_EXHAUSTED; extend the ordering proof to RETRY_WAIT; keep the bounded publish, the uncertain-never-success rule, zero reauthorisation and the 23505 handling; model the 30 second firmware freshness check for the window-boundary test.
 
 Deliverables:
 
@@ -135,7 +144,7 @@ Verification: cap and race tests, rate-limit test on real Mosquitto, architectur
 
 ## Slice P4.7: observability, read API and frontend
 
-Authority: R20, R21, R24. Ledger scenarios: 16.
+Authority: R20, R21, R24. Ledger scenarios: 14 (P4-098 and P4-099 moved to P4.2).
 
 Deliverables: pipeline trace steps per transition; Micrometer metrics with fixed tags; additive read-only lifecycle and dead-letter listing endpoints and a `deliveryState` field; explanation truthfulness for queued, dead-lettered and unknown commands; frontend lifecycle display with separate labels and tolerance for unknown states. **No mutating endpoint and no internal requeue.**
 

@@ -131,19 +131,42 @@ class CommandDispatchMqttIntegrationTest {
     private MqttClient observer;
     private UUID deviceId;
 
+    // Phase 4 dual mode: with the outbox flag OFF (default) these are the legacy synchronous behaviour; with it ON
+    // (CommandDispatchMqttOutboxModeIntegrationTest) a command is ACCEPTED_FOR_DISPATCH first and the dispatcher publishes it.
+    @Autowired
+    private com.nexus.action.outbox.CommandOutboxSettings outboxSettings;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    protected boolean outboxMode() {
+        return outboxSettings.enabled();
+    }
+
+    /** No-op with the flag OFF; with it ON waits until the dispatcher has resolved every queued command. */
+    protected void awaitDelivery() {
+        if (!outboxMode()) return;
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        try {
+            while (jdbcTemplate.queryForObject("SELECT count(*) FROM command_outbox WHERE state IN ('QUEUED','IN_FLIGHT','RETRY_WAIT')", Integer.class) > 0) {
+                if (System.nanoTime() > end) fail("the dispatcher did not deliver every queued command");
+                Thread.sleep(25);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("interrupted while waiting for delivery");
+        }
+    }
+
     @BeforeEach
     void setUp() throws Exception {
-        deviceCapabilityRepository.deleteAll();
-        deviceConnectivityRepository.deleteAll();
-        deviceRepository.deleteAll();
-        spaceRepository.deleteAll();
-        buildingRepository.deleteAll();
-        siteRepository.deleteAll();
-
+        // Every test gets its OWN site, building, space and device and nothing is bulk-deleted: a device that has command delivery
+        // evidence cannot be deleted (migration V38 fails closed until retention purges the evidence), so a delete-everything
+        // fixture cannot work once the outbox is in use. Assertions are all scoped to this test's deviceId.
         Instant now = Instant.now();
-        Site site = siteRepository.save(new Site(UUID.randomUUID(), "Site", "desc", now, now));
-        Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "Building", "desc", now, now));
-        Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "Space", "desc", now, now));
+        String unique = UUID.randomUUID().toString();
+        Site site = siteRepository.save(new Site(UUID.randomUUID(), "Site-" + unique, "desc", now, now));
+        Building building = buildingRepository.save(new Building(UUID.randomUUID(), site, "Building-" + unique, "desc", now, now));
+        Space space = spaceRepository.save(new Space(UUID.randomUUID(), building, "Space-" + unique, "desc", now, now));
         Device device = deviceRepository.save(new Device(UUID.randomUUID(), space, "ESP-Test", DeviceType.CUSTOM,
                 "Acme", "T1", "SN-CMD-" + UUID.randomUUID(), "desc", com.nexus.device.domain.DeviceMode.SIMULATED));
         deviceId = device.getId();
@@ -186,8 +209,18 @@ class CommandDispatchMqttIntegrationTest {
                 UUID.randomUUID(), null, ActionType.SEND_COMMAND,
                 Map.of("deviceId", deviceId.toString(), "capability", "LED", "command", "SET_STATE", "value", true));
 
-        ActionExecutionResult result = commandExecutor.execute(request, new ActionContext(null, null));
-        assertEquals(ExecutionStatus.SUCCESS, result.status());
+        UUID expectedCommandId = request.requestId();
+        if (outboxMode()) {
+            // the outbox is the only publisher: the direct executor path is refused and the dispatcher delivers the SAME contract
+            ActionExecutionResult direct = commandExecutor.execute(request, new ActionContext(null, null));
+            assertEquals(ExecutionStatus.FAILURE, direct.status());
+            assertEquals(CommandExecutor.DIRECT_PUBLICATION_DISABLED, direct.message());
+            expectedCommandId = deviceCommandService.dispatchCommand(deviceId,
+                    new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(CapabilityType.LED, "SET_STATE", true)).requestId();
+        } else {
+            ActionExecutionResult result = commandExecutor.execute(request, new ActionContext(null, null));
+            assertEquals(ExecutionStatus.SUCCESS, result.status());
+        }
 
         MqttMessage message = received.poll(15, TimeUnit.SECONDS);
         assertNotNull(message, "the real broker must have delivered the published command to the subscriber");
@@ -196,7 +229,7 @@ class CommandDispatchMqttIntegrationTest {
 
         ObjectMapper mapper = new ObjectMapper();
         JsonNode payload = mapper.readTree(message.getPayload());
-        assertEquals(request.requestId().toString(), payload.get("commandId").asText());
+        assertEquals(expectedCommandId.toString(), payload.get("commandId").asText());
         assertEquals("LED", payload.get("capability").asText());
         assertEquals("SET_STATE", payload.get("command").asText());
         assertTrue(payload.get("value").asBoolean());
@@ -219,6 +252,7 @@ class CommandDispatchMqttIntegrationTest {
         assertEquals("legacy:LED", desired.getFirst().getTargetKey());
         assertEquals(response.requestId(), desired.getFirst().getCommandId());
         assertEquals(true, desired.getFirst().typedValue());
+        awaitDelivery();
         var twin = twinController.getTwin(deviceId).getBody();
         assertNotNull(twin);
         assertTrue(twin.reportedState().isEmpty(), "command must not fabricate reported telemetry");
@@ -320,7 +354,13 @@ class CommandDispatchMqttIntegrationTest {
         var request = new com.nexus.device.command.api.dto.CreateDeviceCommandRequest(null, "SET_STATE",
                 Map.of("channel", 2, "state", true), "relay");
         var response = deviceCommandService.dispatchCommand(deviceId, request);
-        assertEquals(ExecutionStatus.SUCCESS, response.status());
+        if (outboxMode()) {
+            assertEquals(ExecutionStatus.ACCEPTED_FOR_DISPATCH, response.status(), "queued, not yet published");
+            awaitDelivery();
+            assertEquals(ExecutionStatus.SUCCESS, actionHistoryRepository.findById(response.requestId()).orElseThrow().getStatus());
+        } else {
+            assertEquals(ExecutionStatus.SUCCESS, response.status());
+        }
         var desired = desiredRepository.findByDeviceId(deviceId);
         assertEquals(1, desired.size());
         assertEquals("binding:" + bindingId, desired.getFirst().getTargetKey());

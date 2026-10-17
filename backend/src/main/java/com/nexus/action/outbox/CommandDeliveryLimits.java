@@ -35,4 +35,21 @@ public final class CommandDeliveryLimits {
     public static final int MAX_ATTEMPTS_CEILING = 5;
     /** The lease must outlast one attempt by at least this much so a slow but live attempt is not stolen. */
     public static final Duration LEASE_MARGIN = Duration.ofSeconds(2);
+
+    /**
+     * After a delivery outcome that is UNCERTAIN (the bytes may already be on the wire, or still in the MQTT client's
+     * in-flight state and resent on reconnect), later commands of the same device are held for this long, counted from the
+     * uncertain command's payload timestamp. The committed firmware applies any command whose timestamp differs from its own
+     * clock by at most {@link #FIRMWARE_FRESHNESS_WINDOW} (in both directions) and has no commandId deduplication, so a late
+     * copy can still be applied until the timestamp is older than that window; the margin covers timestamp truncation,
+     * clock error between backend and device, and network delay. Afterwards the firmware rejects the message as STALE.
+     * An ACK does NOT shorten the hold: a duplicate delivery of the same message would still be applied.
+     */
+    public static final Duration UNCERTAIN_DELIVERY_HOLD = FIRMWARE_FRESHNESS_WINDOW.plus(CLOCK_UNCERTAINTY_MARGIN);
+
+    /**
+     * Upper bound of the hold measured on the DATABASE clock from the uncertain command's creation, so a payload timestamp
+     * produced by a wrong clock can never hold a device queue for longer than this.
+     */
+    public static final Duration UNCERTAIN_DELIVERY_HOLD_CAP = UNCERTAIN_DELIVERY_HOLD.plus(MAX_DELIVERY_WINDOW);
 }

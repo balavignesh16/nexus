@@ -44,9 +44,25 @@ public class CommandOutboxSettings {
     private final int claimBatchSize;
     private final Duration pollInterval;
     private final Duration expiryScanInterval;
+    private final int workers;
 
+    /** Same as the full constructor with the default of four dispatcher workers. */
+    public CommandOutboxSettings(boolean enabled, Duration deliveryWindow, int maxAttempts, Duration attemptTimeout,
+            Duration initialBackoff, double backoffMultiplier, Duration maxBackoff, double jitterFraction,
+            Duration leaseDuration, int claimBatchSize, Duration pollInterval, Duration expiryScanInterval) {
+        this(enabled, deliveryWindow, maxAttempts, attemptTimeout, initialBackoff, backoffMultiplier, maxBackoff,
+                jitterFraction, leaseDuration, claimBatchSize, pollInterval, expiryScanInterval, 4);
+    }
+
+    /**
+     * The Spring constructor. The flag is read as TEXT and parsed strictly by {@link #parseEnabled}, so the single
+     * authoritative decision "is the outbox enabled" can never differ between components: every consumer (acceptance,
+     * coordinator, executor guard, dispatcher) asks this bean, and a value that is not exactly true or false stops startup
+     * instead of being guessed (Spring's own boolean conversion would also accept 1, on and yes).
+     */
+    @org.springframework.beans.factory.annotation.Autowired
     public CommandOutboxSettings(
-            @Value("${nexus.command.outbox.enabled:false}") boolean enabled,
+            @Value("${nexus.command.outbox.enabled:false}") String enabledText,
             @Value("${nexus.command.outbox.delivery-window:PT15S}") Duration deliveryWindow,
             @Value("${nexus.command.outbox.max-attempts:3}") int maxAttempts,
             @Value("${nexus.command.outbox.attempt-timeout:PT3S}") Duration attemptTimeout,
@@ -57,7 +73,34 @@ public class CommandOutboxSettings {
             @Value("${nexus.command.outbox.lease-duration:PT6S}") Duration leaseDuration,
             @Value("${nexus.command.outbox.claim-batch-size:10}") int claimBatchSize,
             @Value("${nexus.command.outbox.poll-interval:PT0.25S}") Duration pollInterval,
-            @Value("${nexus.command.outbox.expiry-scan-interval:PT1S}") Duration expiryScanInterval) {
+            @Value("${nexus.command.outbox.expiry-scan-interval:PT1S}") Duration expiryScanInterval,
+            @Value("${nexus.command.outbox.workers:4}") int workers) {
+        this(parseEnabled(enabledText), deliveryWindow, maxAttempts, attemptTimeout, initialBackoff, backoffMultiplier, maxBackoff,
+                jitterFraction, leaseDuration, claimBatchSize, pollInterval, expiryScanInterval, workers);
+    }
+
+    /** Only the exact words true and false (any case, surrounding blanks ignored) are accepted; anything else is a startup error. */
+    public static boolean parseEnabled(String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.equalsIgnoreCase("true")) return true;
+        if (t.equalsIgnoreCase("false")) return false;
+        throw new IllegalStateException("Invalid nexus.command.outbox.enabled value '" + t + "': it must be exactly true or false");
+    }
+
+    public CommandOutboxSettings(
+            boolean enabled,
+            Duration deliveryWindow,
+            int maxAttempts,
+            Duration attemptTimeout,
+            Duration initialBackoff,
+            double backoffMultiplier,
+            Duration maxBackoff,
+            double jitterFraction,
+            Duration leaseDuration,
+            int claimBatchSize,
+            Duration pollInterval,
+            Duration expiryScanInterval,
+            int workers) {
         this.enabled = enabled;
         this.deliveryWindow = deliveryWindow;
         this.maxAttempts = maxAttempts;
@@ -70,6 +113,7 @@ public class CommandOutboxSettings {
         this.claimBatchSize = claimBatchSize;
         this.pollInterval = pollInterval;
         this.expiryScanInterval = expiryScanInterval;
+        this.workers = workers;
         List<String> problems = problems();
         if (!problems.isEmpty())
             throw new IllegalStateException("Invalid nexus.command.outbox configuration: " + String.join("; ", problems));
@@ -102,6 +146,7 @@ public class CommandOutboxSettings {
         if (leaseDuration.compareTo(attemptTimeout.plus(CommandDeliveryLimits.LEASE_MARGIN)) < 0)
             p.add("lease-duration must be at least attempt-timeout plus " + CommandDeliveryLimits.LEASE_MARGIN);
         if (claimBatchSize < 1 || claimBatchSize > 100) p.add("claim-batch-size must be between 1 and 100");
+        if (workers < 1 || workers > 16) p.add("workers must be between 1 and 16");
         if (pollInterval.compareTo(Duration.ofMillis(50)) < 0 || pollInterval.compareTo(Duration.ofSeconds(5)) > 0)
             p.add("poll-interval must be between 50 ms and 5 s");
         if (expiryScanInterval.compareTo(Duration.ofMillis(100)) < 0 || expiryScanInterval.compareTo(Duration.ofSeconds(10)) > 0)
@@ -146,4 +191,5 @@ public class CommandOutboxSettings {
     public int claimBatchSize() { return claimBatchSize; }
     public Duration pollInterval() { return pollInterval; }
     public Duration expiryScanInterval() { return expiryScanInterval; }
+    public int workers() { return workers; }
 }

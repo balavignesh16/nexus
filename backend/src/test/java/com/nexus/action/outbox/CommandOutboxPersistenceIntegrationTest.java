@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the real RetentionManager against disposable TimescaleDB/PostgreSQL. Nothing here switches dispatch to the outbox:
  * the legacy path must still create no outbox row.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nexus.command.outbox.dispatcher-enabled=false")
 @Testcontainers
 class CommandOutboxPersistenceIntegrationTest {
 

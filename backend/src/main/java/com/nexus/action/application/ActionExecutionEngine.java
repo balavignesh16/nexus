@@ -75,7 +75,8 @@ public class ActionExecutionEngine {
 
             pipelineService.recordTrace(
                     PipelineTrace.of(correlationId, deviceIdFromRequest(request), PipelineStage.ACTION, stageStart,
-                            result.status() != ExecutionStatus.FAILURE ? "SUCCESS" : "FAILURE", result.status().name(), null));
+                            result.status() == ExecutionStatus.ACCEPTED_FOR_DISPATCH ? "ACCEPTED"
+                                    : result.status() != ExecutionStatus.FAILURE ? "SUCCESS" : "FAILURE", result.status().name(), null));
 
             // Persist action history (synchronous listener) before broadcasting,
             // so the realtime message is only sent once the result is durable.

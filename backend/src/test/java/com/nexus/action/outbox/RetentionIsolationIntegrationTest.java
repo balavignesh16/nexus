@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * cannot roll back the others, failures are logged and surfaced, repeated runs are idempotent and the records survive a context
  * (backend) restart. Execution is ordered because step 2 deliberately runs in a fresh application context.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nexus.command.outbox.dispatcher-enabled=false")
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class RetentionIsolationIntegrationTest {

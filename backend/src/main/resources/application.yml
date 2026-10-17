@@ -59,6 +59,8 @@ nexus:
       claim-batch-size: ${NEXUS_COMMAND_OUTBOX_CLAIM_BATCH_SIZE:10}
       poll-interval: ${NEXUS_COMMAND_OUTBOX_POLL_INTERVAL:PT0.25S}
       expiry-scan-interval: ${NEXUS_COMMAND_OUTBOX_EXPIRY_SCAN_INTERVAL:PT1S}
+      workers: ${NEXUS_COMMAND_OUTBOX_WORKERS:4}                         # concurrent publishes; 1..16 (P4.2)
+      dispatcher-enabled: ${NEXUS_COMMAND_OUTBOX_DISPATCHER_ENABLED:true}   # scheduled loops; must stay true while enabled=true (startup fails otherwise). Only test contexts that never use the outbox set false
   ai:
     enabled: ${AI_ENABLED:false}
     provider: ${AI_PROVIDER:openai}

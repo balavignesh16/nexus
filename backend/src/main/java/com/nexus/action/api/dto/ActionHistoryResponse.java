@@ -30,8 +30,41 @@ public record ActionHistoryResponse(
     Instant publishedAt,
     Instant ackBackendReceivedAt,
     Instant ackDeviceTimestamp,
-    Instant ackDeadlineAt
+    Instant ackDeadlineAt,
+    /** Additive (Phase 4): outbox delivery state (QUEUED, IN_FLIGHT, PUBLISHED, DEAD_LETTER) when the command has an outbox row; omitted otherwise. */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String deliveryState,
+    /** Additive (Phase 4): why a dead-lettered command ended (for example UNCERTAIN_EXPIRED); omitted otherwise. */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String deliveryReason
 ) {
+    public ActionHistoryResponse(UUID executionId, UUID requestId, UUID matchId, UUID deviceId,
+            ActionType actionType, Map<String,Object> parameters, ExecutionStatus status, Instant timestamp,
+            String message, AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage,
+            ExecutionStatus executionStatus, CommandStatus commandStatus, Instant publishedAt,
+            Instant ackBackendReceivedAt, Instant ackDeviceTimestamp, Instant ackDeadlineAt, String deliveryState) {
+        this(executionId,requestId,matchId,deviceId,actionType,parameters,status,timestamp,message,ackStatus,ackReceivedAt,
+                ackMessage,executionStatus,commandStatus,publishedAt,ackBackendReceivedAt,ackDeviceTimestamp,ackDeadlineAt,deliveryState,null);
+    }
+
+    public ActionHistoryResponse(UUID executionId, UUID requestId, UUID matchId, UUID deviceId,
+            ActionType actionType, Map<String,Object> parameters, ExecutionStatus status, Instant timestamp,
+            String message, AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage,
+            ExecutionStatus executionStatus, CommandStatus commandStatus, Instant publishedAt,
+            Instant ackBackendReceivedAt, Instant ackDeviceTimestamp, Instant ackDeadlineAt) {
+        this(executionId,requestId,matchId,deviceId,actionType,parameters,status,timestamp,message,ackStatus,ackReceivedAt,
+                ackMessage,executionStatus,commandStatus,publishedAt,ackBackendReceivedAt,ackDeviceTimestamp,ackDeadlineAt,null);
+    }
+
+    /** The same response carrying the outbox delivery state (null leaves it omitted). */
+    public ActionHistoryResponse withDeliveryState(String state) {
+        return withDelivery(state, null);
+    }
+
+    /** The same response carrying the outbox delivery state and, for a dead letter, its reason (null leaves each omitted). */
+    public ActionHistoryResponse withDelivery(String state, String reason) {
+        return new ActionHistoryResponse(executionId,requestId,matchId,deviceId,actionType,parameters,status,timestamp,message,
+                ackStatus,ackReceivedAt,ackMessage,executionStatus,commandStatus,publishedAt,ackBackendReceivedAt,
+                ackDeviceTimestamp,ackDeadlineAt,state,reason);
+    }
     public ActionHistoryResponse(UUID executionId, UUID requestId, UUID matchId, UUID deviceId,
             ActionType actionType, Map<String,Object> parameters, ExecutionStatus status, Instant timestamp,
             String message, AcknowledgementStatus ackStatus, Instant ackReceivedAt, String ackMessage) {

@@ -65,6 +65,40 @@ class RuleCommandAuthorizationIntegrationTest {
     @Autowired com.nexus.device.capability.definition.CapabilityDefinitionRepository definitionRows;
     @Autowired com.nexus.device.connectivity.DeviceConnectivityRegistry connectivity;
     record Fixture(UUID device,UUID capability,Rule rule,DomainEvent event,UUID match){}
+
+    // ---- Phase 4 dual-mode support. With the outbox flag OFF (the default and the shipped behaviour) every helper below is exactly
+    // the legacy synchronous assertion. With the flag ON (RuleCommandAuthorizationOutboxModeIntegrationTest) a command is first
+    // ACCEPTED_FOR_DISPATCH and the dispatcher publishes it afterwards, so the same assertions wait for delivery, and "publishPrepared
+    // was called" becomes "publishPrepared was NEVER called (no direct publication) and the outbox delivered it".
+    @Autowired com.nexus.action.outbox.CommandOutboxSettings outboxSettings;
+    @org.springframework.boot.test.mock.mockito.SpyBean com.nexus.action.outbox.BrokerCommandPublisher brokerPublisher;
+    private boolean outboxMode(){return outboxSettings.enabled();}
+    private void awaitDelivery(){
+        if(!outboxMode())return;
+        long end=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        try{
+            while(sql.queryForObject("SELECT count(*) FROM command_outbox WHERE state IN ('QUEUED','IN_FLIGHT','RETRY_WAIT')",Integer.class)>0){
+                if(System.nanoTime()>end)fail("the dispatcher did not deliver every queued command");
+                Thread.sleep(25);
+            }
+        }catch(InterruptedException e){Thread.currentThread().interrupt();fail("interrupted while waiting for delivery");}
+    }
+    private void assertDirectOrOutbox(){
+        if(!outboxMode()){org.mockito.Mockito.verify(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());return;}
+        org.mockito.Mockito.verify(executor,org.mockito.Mockito.never()).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        awaitDelivery();
+        assertTrue(sql.queryForObject("SELECT count(*) FROM command_outbox WHERE state='PUBLISHED'",Integer.class)>=1,"the outbox delivered the command");
+    }
+    private void holdPublication(org.mockito.stubbing.Answer<?> answer){
+        if(!outboxMode())org.mockito.Mockito.doAnswer(answer).when(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        else org.mockito.Mockito.doAnswer(answer).when(brokerPublisher).publish(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+    }
+    private void publishAcceptedAfterPause(ActionExecutionRequest request,CommandExecutor.PreparedCommand prepared){
+        if(!outboxMode()){assertEquals(ExecutionStatus.SUCCESS,executor.publishPrepared(request,prepared).status(),"Real disposable Mosquitto publication, not physical actuation");return;}
+        awaitDelivery();
+        assertEquals("SUCCESS",sql.queryForObject("SELECT status FROM action_history WHERE request_id=?",String.class,request.requestId()),"Real disposable Mosquitto publication by the dispatcher, not physical actuation");
+        org.mockito.Mockito.verify(executor,org.mockito.Mockito.never()).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+    }
     private UUID device(){
         UUID site=UUID.randomUUID(),building=UUID.randomUUID(),space=UUID.randomUUID(),device=UUID.randomUUID();
         sql.update("INSERT INTO sites(id,name) VALUES(?,'P31')",site);
@@ -268,7 +302,7 @@ class RuleCommandAuthorizationIntegrationTest {
                 UUID match=sql.queryForObject("SELECT match_id FROM rule_matches WHERE rule_id=? AND event_id=?",UUID.class,active.ruleId(),source.eventId());
                 @SuppressWarnings("unchecked") var evidence=(List<Map<String,Object>>)matchHistory.findById(match).orElseThrow().getEvaluationEvidence().get("evaluatedConditions");
                 assertEquals(f.binding().toString(),evidence.get(1).get("bindingId").toString());assertEquals(f.definition().getId().toString(),evidence.get(1).get("definitionId").toString());assertEquals(unit,evidence.get(1).get("unit"));
-                assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND device_id=? AND status='SUCCESS'",Integer.class,match,f.command().device()));
+                awaitDelivery();assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND device_id=? AND status='SUCCESS'",Integer.class,match,f.command().device()));
                 UUID command=sql.queryForObject("SELECT request_id FROM action_history WHERE match_id=? AND device_id=?",UUID.class,match,f.command().device());
                 assertEquals(command,sql.queryForObject("SELECT command_id FROM current_desired_twin_state WHERE device_id=?",UUID.class,f.command().device()));
                 assertEquals(command,sql.queryForObject("SELECT desired_command_id FROM current_twin_verification_state WHERE device_id=?",UUID.class,f.command().device()));
@@ -314,8 +348,8 @@ class RuleCommandAuthorizationIntegrationTest {
         var match=sql.queryForObject("SELECT match_id FROM rule_matches WHERE rule_id=? AND event_id=?",UUID.class,active.ruleId(),source.eventId());
         @SuppressWarnings("unchecked") var evidence=(List<Map<String,Object>>)matchHistory.findById(match).orElseThrow().getEvaluationEvidence().get("evaluatedConditions");
         assertEquals(f.binding().toString(),evidence.get(1).get("bindingId").toString());assertEquals(f.definition().getId().toString(),evidence.get(1).get("definitionId").toString());assertEquals("temperature",evidence.get(1).get("capabilityKey"));assertEquals("CELSIUS",evidence.get(1).get("unit"));assertEquals(40.0,((Number)evidence.get(1).get("actualValue")).doubleValue());
-        assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND device_id=? AND status='SUCCESS'",Integer.class,match,f.command().device()));assertEquals(1,count("current_desired_twin_state",f.command().device()));assertEquals(1,count("current_twin_verification_state",f.command().device()));
-        org.mockito.Mockito.verify(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        awaitDelivery();assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND device_id=? AND status='SUCCESS'",Integer.class,match,f.command().device()));assertEquals(1,count("current_desired_twin_state",f.command().device()));assertEquals(1,count("current_twin_verification_state",f.command().device()));
+        assertDirectOrOutbox();
         assertEquals(retainedBefore,sql.queryForObject("SELECT row_to_json(t)::text FROM digital_twins t WHERE device_id=? AND state_key=?",String.class,retained.deviceId(),retained.stateKey()),"Historical alias row is preserved exactly");
     }
     @Test void legacyCanonicalEvaluationIgnoresOtherDeviceAndInactiveWorkingDraft(){
@@ -356,8 +390,8 @@ class RuleCommandAuthorizationIntegrationTest {
         }
         legacyReported(f,"30","CELSIUS","TEMPERATURE_SENSOR",Instant.now());assertFalse(evaluator.evaluate(active,f.command().event()).matched());var below=legacyTrigger(f);matcher.onEvent(below);noLegacyEffects(f,below);
         legacyReported(f,"40","CELSIUS","TEMPERATURE_SENSOR",Instant.now());assertTrue(evaluator.evaluate(active,f.command().event()).matched());var source=legacyTrigger(f);matcher.onEvent(source);
-        UUID match=sql.queryForObject("SELECT match_id FROM rule_matches WHERE rule_id=? AND event_id=?",UUID.class,active.ruleId(),source.eventId());assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND status='SUCCESS'",Integer.class,match));
-        @SuppressWarnings("unchecked") var evidence=(List<Map<String,Object>>)matchHistory.findById(match).orElseThrow().getEvaluationEvidence().get("evaluatedConditions");assertNull(evidence.get(1).get("bindingId"));assertEquals("temperature",evidence.get(1).get("capabilityKey"));assertEquals("CELSIUS",evidence.get(1).get("unit"));org.mockito.Mockito.verify(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        UUID match=sql.queryForObject("SELECT match_id FROM rule_matches WHERE rule_id=? AND event_id=?",UUID.class,active.ruleId(),source.eventId());awaitDelivery();assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE match_id=? AND status='SUCCESS'",Integer.class,match));
+        @SuppressWarnings("unchecked") var evidence=(List<Map<String,Object>>)matchHistory.findById(match).orElseThrow().getEvaluationEvidence().get("evaluatedConditions");assertNull(evidence.get(1).get("bindingId"));assertEquals("temperature",evidence.get(1).get("capabilityKey"));assertEquals("CELSIUS",evidence.get(1).get("unit"));assertDirectOrOutbox();
     }
     @Test void effectiveUnitMismatchCannotActivateOrReachAnySideEffect(){
         var f=fixture();var d=readDefinition();var binding=bindings.create(f.device(),new BindingMutationRequest(d.getId(),true,"CELSIUS",Map.of(),Map.of("telemetryKey","TemperatureAlias")));
@@ -412,9 +446,9 @@ class RuleCommandAuthorizationIntegrationTest {
         }
         UUID source=UUID.randomUUID();matcher.onEvent(new DomainEvent(source,EventType.TWIN_UPDATED,scope,Instant.now(),"cross-device",Map.of(),"INFO","cross-device"));
         assertTrue(ruleController.listRules(scope.toString()).getBody().stream().anyMatch(r->r.ruleId().equals(f.rule().ruleId())),"Device filter must use the same canonical UUID as validation and execution");
-        assertEquals(1,count("action_history",f.device()));assertEquals("SUCCESS",sql.queryForObject("SELECT status FROM action_history WHERE device_id=?",String.class,f.device()));
+        assertEquals(1,count("action_history",f.device()));awaitDelivery();assertEquals("SUCCESS",sql.queryForObject("SELECT status FROM action_history WHERE device_id=?",String.class,f.device()));
         assertEquals("binding:"+binding.id(),sql.queryForObject("SELECT target_key FROM current_desired_twin_state WHERE device_id=?",String.class,f.device()));assertEquals(0,count("current_desired_twin_state",scope));
-        assertEquals(1,sql.queryForObject("SELECT count(*) FROM rule_matches WHERE rule_id=? AND event_id=?",Integer.class,f.rule().ruleId(),source));org.mockito.Mockito.verify(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        assertEquals(1,sql.queryForObject("SELECT count(*) FROM rule_matches WHERE rule_id=? AND event_id=?",Integer.class,f.rule().ruleId(),source));assertDirectOrOutbox();
     }
     @Test void actualEvaluatorPlannerEngineDenyVersionPauseAndABARaces() throws Exception {
         for(String change:List.of("version","pause","aba","stub")){
@@ -440,12 +474,12 @@ class RuleCommandAuthorizationIntegrationTest {
     }
     @Test void actualPipelineAcceptedBeforePauseMayFinishRealPublication() throws Exception {
         var f=fixture();var publishing=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
-        org.mockito.Mockito.doAnswer(inv->{publishing.countDown();assertTrue(release.await(15,java.util.concurrent.TimeUnit.SECONDS));return inv.callRealMethod();}).when(executor).publishPrepared(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        holdPublication(inv->{publishing.countDown();assertTrue(release.await(15,java.util.concurrent.TimeUnit.SECONDS));return inv.callRealMethod();});
         var pool=java.util.concurrent.Executors.newSingleThreadExecutor();
         try{var task=pool.submit(()->matcher.onEvent(new DomainEvent(UUID.randomUUID(),EventType.TWIN_UPDATED,f.device(),Instant.now(),"accepted-before-pause",Map.of(),"INFO","before-pause")));
             assertTrue(publishing.await(15,java.util.concurrent.TimeUnit.SECONDS));assertEquals(1,count("action_history",f.device()));assertEquals("ACCEPTED_FOR_DISPATCH",sql.queryForObject("SELECT status FROM action_history WHERE device_id=?",String.class,f.device()));
             lifecycle.transition(f.rule().ruleId(),"pause",null);release.countDown();task.get(15,java.util.concurrent.TimeUnit.SECONDS);
-            assertEquals("SUCCESS",sql.queryForObject("SELECT status FROM action_history WHERE device_id=?",String.class,f.device()));assertEquals(1,count("current_desired_twin_state",f.device()));assertEquals(1,count("current_twin_verification_state",f.device()));
+            awaitDelivery();assertEquals("SUCCESS",sql.queryForObject("SELECT status FROM action_history WHERE device_id=?",String.class,f.device()));assertEquals(1,count("current_desired_twin_state",f.device()));assertEquals(1,count("current_twin_verification_state",f.device()));
         }finally{release.countDown();pool.shutdownNow();}
     }
     @Test void positiveStubPipelineRequiresCommittedSourceAndMatch(){
@@ -532,7 +566,7 @@ class RuleCommandAuthorizationIntegrationTest {
     @Test void alreadyDurablyAcceptedCommandMayPublishAfterPause(){
         var f=fixture();var request=request(f);var prepared=acceptance.accept(request,new ActionContext(f.event(),f.rule()),Instant.now());
         lifecycle.transition(f.rule().ruleId(),"pause",null);
-        assertEquals(ExecutionStatus.SUCCESS,executor.publishPrepared(request,prepared).status(),"Real disposable Mosquitto publication, not physical actuation");
+        publishAcceptedAfterPause(request,prepared);
         assertEquals(1,sql.queryForObject("SELECT count(*) FROM action_history WHERE request_id=?",Integer.class,request.requestId()));
         assertEquals(1,sql.queryForObject("SELECT count(*) FROM current_desired_twin_state WHERE command_id=?",Integer.class,request.requestId()));
     }

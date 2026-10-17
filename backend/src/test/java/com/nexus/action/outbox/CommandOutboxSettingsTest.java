@@ -35,6 +35,21 @@ class CommandOutboxSettingsTest {
     }
 
     @Test
+    void theDispatcherWorkerCountDefaultsToFourAndIsBoundedBetweenOneAndSixteen() {
+        assertEquals(4, Config.defaults().build().workers());
+        for (int ok : new int[]{1, 4, 16}) assertEquals(ok, build(ok).workers());
+        for (int bad : new int[]{0, -1, 17}) {
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> build(bad));
+            assertTrue(e.getMessage().contains("workers must be between 1 and 16"), e.getMessage());
+        }
+    }
+
+    private static CommandOutboxSettings build(int workers) {
+        return new CommandOutboxSettings(false, Duration.ofSeconds(15), 3, Duration.ofSeconds(3), Duration.ofMillis(500), 2.0,
+                Duration.ofSeconds(4), 0.2, Duration.ofSeconds(6), 10, Duration.ofMillis(250), Duration.ofSeconds(1), workers);
+    }
+
+    @Test
     void defaultsAreValidAndTheFlagIsOff() {
         CommandOutboxSettings s = Config.defaults().build();
         assertFalse(s.enabled());
@@ -173,5 +188,50 @@ class CommandOutboxSettingsTest {
     private static String rootMessage(Throwable t) {
         while (t.getCause() != null) t = t.getCause();
         return String.valueOf(t.getMessage());
+    }
+
+    @Test
+    void onlyTheExactWordsTrueAndFalseAreAcceptedForTheFlag() {
+        for (String on : new String[]{"true", "TRUE", "True", " true "})
+            runner().withPropertyValues("nexus.command.outbox.enabled=" + on)
+                    .run(context -> assertTrue(context.getBean(CommandOutboxSettings.class).enabled(), "[" + on + "]"));
+        for (String off : new String[]{"false", "FALSE", " false "})
+            runner().withPropertyValues("nexus.command.outbox.enabled=" + off)
+                    .run(context -> assertFalse(context.getBean(CommandOutboxSettings.class).enabled(), "[" + off + "]"));
+    }
+
+    @Test
+    void everyOtherSpellingStopsStartupInsteadOfBeingGuessed() {
+        // Spring's own boolean conversion would silently accept 1, on and yes; the outbox flag must not be interpreted two ways.
+        for (String bad : new String[]{"1", "0", "on", "off", "yes", "no", "enabled", "t", "y", "2", "tru", "null"}) {
+            runner().withPropertyValues("nexus.command.outbox.enabled=" + bad).run(context -> {
+                assertThat(context).as("[" + bad + "]").hasFailed();
+                assertThat(context.getStartupFailure().getMessage() + rootMessage(context.getStartupFailure()))
+                        .contains("must be exactly true or false");
+            });
+        }
+    }
+
+    @Test
+    void parseEnabledIsTheSingleParser() {
+        assertTrue(CommandOutboxSettings.parseEnabled("true"));
+        assertFalse(CommandOutboxSettings.parseEnabled("FALSE"));
+        for (String bad : new String[]{null, "", " ", "1", "on", "yes"})
+            assertThrows(IllegalStateException.class, () -> CommandOutboxSettings.parseEnabled(bad), String.valueOf(bad));
+    }
+
+    @Test
+    void theDispatcherCannotBeSwitchedOffWhileTheOutboxIsEnabledButMayBeWhileItIsNot() {
+        var providers = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+        CommandOutboxSettings enabled = new CommandOutboxSettings(true, Duration.ofSeconds(15), 3, Duration.ofSeconds(3), Duration.ofMillis(500), 2.0,
+                Duration.ofSeconds(4), 0.2, Duration.ofSeconds(6), 10, Duration.ofMillis(250), Duration.ofSeconds(1));
+        CommandOutboxSettings disabled = new CommandOutboxSettings(false, Duration.ofSeconds(15), 3, Duration.ofSeconds(3), Duration.ofMillis(500), 2.0,
+                Duration.ofSeconds(4), 0.2, Duration.ofSeconds(6), 10, Duration.ofMillis(250), Duration.ofSeconds(1));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> new CommandOutboxDispatcher(null, null, enabled,
+                providers.getBeanProvider(OutboxOutcomeListener.class), providers.getBeanProvider(io.micrometer.core.instrument.MeterRegistry.class), false));
+        assertTrue(e.getMessage().contains("not allowed while nexus.command.outbox.enabled=true"), e.getMessage());
+        CommandOutboxDispatcher idle = new CommandOutboxDispatcher(null, null, disabled,
+                providers.getBeanProvider(OutboxOutcomeListener.class), providers.getBeanProvider(io.micrometer.core.instrument.MeterRegistry.class), false);
+        idle.shutdown();
     }
 }

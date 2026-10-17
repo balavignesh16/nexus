@@ -34,6 +34,10 @@ public class DeviceCommandService {
     private final DeviceRepository deviceRepository;
     private final ActionExecutionEngine actionExecutionEngine;
     private final ActionHistoryRepository actionHistoryRepository;
+    private com.nexus.action.outbox.CommandOutboxRepository outbox;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setOutbox(com.nexus.action.outbox.CommandOutboxRepository outbox) { this.outbox = outbox; }
 
     public DeviceCommandService(DeviceRepository deviceRepository,
                                  ActionExecutionEngine actionExecutionEngine,
@@ -72,6 +76,10 @@ public class DeviceCommandService {
         ActionHistoryRecord record = actionHistoryRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Action history record missing immediately after synchronous processing: " + requestId));
-        return ActionHistoryResponse.from(record);
+        // Additive (Phase 4): a command accepted through the outbox is QUEUED/IN_FLIGHT/PUBLISHED/DEAD_LETTER; a queued
+        // command reports ACCEPTED_FOR_DISPATCH with that delivery state, never SUCCESS.
+        var row = outbox == null ? java.util.Optional.<com.nexus.action.outbox.CommandOutboxEntity>empty() : outbox.findById(requestId);
+        return ActionHistoryResponse.from(record).withDelivery(row.map(o -> o.getState().name()).orElse(null),
+                row.map(o -> o.getTerminalReason() == null ? null : o.getTerminalReason().name()).orElse(null));
     }
 }
