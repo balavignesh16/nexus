@@ -100,6 +100,48 @@ class OutboxArchitectureTest {
     }
 
     @Test
+    void theAckTimeoutWorkerTheReconcilerAndTheAckFactsCanNeverPublishRequeueOrTouchVerificationOrDesiredState() {
+        // P4.4 / S2, S8: these classes only read and append history facts. They have no publisher, no MQTT client, no executor, no
+        // dispatcher, no verification service, and their SQL never writes the outbox, the desired state or the verification.
+        for (String name : List.of("CommandAckTimeoutScanner.java", "LegacyDeliveryReconciler.java", "CommandAckFacts.java")) {
+            String text = read(MAIN.resolve("com/nexus/action/outbox/" + name));
+            for (String forbidden : List.of("MqttClient", "BrokerCommandPublisher", "CommandExecutor", "CommandOutboxDispatcher", "VerificationService",
+                    "CommandAcceptanceService", "OutboxDeliveryOperations", "current_desired_twin_state", "current_twin_verification_state",
+                    "UPDATE command_outbox", "INSERT INTO command_outbox", "DELETE FROM command_outbox", "UPDATE action_history", "INSERT INTO action_history",
+                    "FOR UPDATE OF o", "next_attempt_at"))
+                assertTrue(!text.contains(forbidden), name + " must not reference " + forbidden);
+        }
+    }
+
+    @Test
+    void onlyTheOwningClassesAppendTheTimeoutAndTheDeliveryUnknownFacts() throws IOException {
+        assertEquals(Set.of("CommandAckTimeoutScanner.java"), namesOfFilesMatching(Pattern.compile("Fact\\.ACK_TIMED_OUT")),
+                "ACK_TIMED_OUT as a history fact has one owner (the rule scanner owns only the rule trigger fact of the same name)");
+        assertEquals(Set.of("LegacyDeliveryReconciler.java"), namesOfFilesMatching(Pattern.compile("Fact\\.DELIVERY_UNKNOWN")),
+                "DELIVERY_UNKNOWN is appended only by the reconciler");
+    }
+
+    @Test
+    void theAckPathTakesNoLockOnTheOutboxRowSoItCannotCloseALockCycleWithTheDispatcher() {
+        // R31.9 lock order: the ACK path locks the device row, then the action_history row; the dispatcher locks the outbox row, then
+        // action_history. The ACK path must therefore only READ the outbox, never lock or write it.
+        String handler = read(MAIN.resolve("com/nexus/device/command/DeviceCommandAckMessageHandler.java"));
+        assertTrue(!handler.contains("command_outbox") && !handler.contains("OutboxDeliveryOperations") && !handler.contains("CommandOutboxRepository"),
+                "the ACK handler never touches the outbox directly");
+        String facts = read(MAIN.resolve("com/nexus/action/outbox/CommandAckFacts.java"));
+        assertTrue(!facts.toUpperCase().contains("FOR UPDATE"), "the ACK fact reads take no lock at all");
+        assertTrue(facts.contains("clock_timestamp()"), "the receipt time comes from the database clock");
+    }
+
+    @Test
+    void theLegacyAckHandlerBehaviourIsPreservedNoValidationWasRemoved() {
+        String handler = read(MAIN.resolve("com/nexus/device/command/DeviceCommandAckMessageHandler.java"));
+        for (String guard : List.of("parseDeviceIdOrNull(topic)", "parseCommandIdOrNull(node)", "parseStatusOrNull(node)", "parseTimestampOrNull(node)",
+                "devices.findByIdForUpdate(topicDeviceId)", "!topicDeviceId.equals(record.getDeviceId())", "updateAcknowledgement(commandId, topicDeviceId"))
+            assertTrue(handler.contains(guard), "ACK validation step kept: " + guard);
+    }
+
+    @Test
     void theLegacyExecutorRefusesToPublishWhenTheOutboxIsEnabledOnBothEntryPoints() {
         String text = read(MAIN.resolve("com/nexus/action/application/executor/CommandExecutor.java"));
         Matcher guards = new Matcher(text, "if \\(directPublicationDisabled\\(\\)\\) return failure\\(request, DIRECT_PUBLICATION_DISABLED\\);");

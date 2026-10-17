@@ -310,7 +310,9 @@ class OutboxDispatchConcurrencyTest {
                 c.setAutoCommit(false);
                 try (var s = c.createStatement()) {
                     s.execute("SELECT id FROM devices WHERE id = '" + device + "' FOR UPDATE");
-                    s.executeUpdate("UPDATE action_history SET ack_status = 'ACCEPTED', ack_received_at = now() WHERE device_id = '" + device + "' AND ack_status IS NULL AND request_id IN (SELECT request_id FROM action_history WHERE device_id = '" + device + "' LIMIT 3)");
+                    // P4.4: an acknowledged command is never claimed, so this synthetic ACK writer acknowledges only commands whose publication is already recorded (as a
+                    // real device does); it still takes the device row and then updates action_history rows the dispatcher outcome writes contend for.
+                    s.executeUpdate("UPDATE action_history SET ack_status = 'ACCEPTED', ack_received_at = now() WHERE device_id = '" + device + "' AND ack_status IS NULL AND request_id IN (SELECT command_id FROM command_outbox WHERE device_id = '" + device + "' AND state = 'PUBLISHED' LIMIT 3)");
                     c.commit();
                 } catch (SQLException e) { c.rollback(); throw e; }
             } catch (Throwable t) { record(t, failures, deadlocks); }

@@ -185,6 +185,7 @@ public class CommandOutboxDispatcher {
         int resolved = 0;
         try {
             for (Resolution r : operations.recoverExpiredLeases(SWEEP_BATCH)) { resolved++; react(r); }
+            for (Resolution r : operations.resolveAcknowledgedUnpublished(SWEEP_BATCH)) { resolved++; react(r); }
             for (Resolution r : operations.expireDue(SWEEP_BATCH)) { resolved++; react(r); }
             for (OutboxDeliveryOperations.Held h : operations.markHeld(SWEEP_BATCH)) listeners.stream().forEach(l -> {
                 try { l.held(h); } catch (RuntimeException e) { log.error("Post-commit hold reaction for command {} failed", h.commandId(), e); }

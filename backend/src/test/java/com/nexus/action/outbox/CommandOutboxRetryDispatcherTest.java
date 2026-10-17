@@ -206,7 +206,9 @@ class CommandOutboxRetryDispatcherTest {
         // the outcome is too recent: recovery must not race the normal reaction
         assertEquals(0, d.recoverReactions());
         // simulate "the process died after the commit, before the reaction": age the outcome and leave the rule fact missing
-        Thread.sleep(5300);   // terminal rows are immutable (V37), so the outcome is simply allowed to settle past the five second guard
+        // terminal rows are immutable (V37), so the outcome is simply allowed to settle past the five second guard, judged by the DATABASE clock (the
+        // container clock can differ from this JVM's by a second or more, so a fixed sleep is not reliable)
+        await(() -> Boolean.TRUE.equals(kit.jdbc.queryForObject("SELECT terminal_at < now() - INTERVAL '5 seconds' FROM command_outbox WHERE command_id = ?", Boolean.class, command)), "the outcome to settle past the guard");
         assertEquals(1, d.recoverReactions(), "the lost failure signal is found");
         assertEquals(command, listener.recovered.get(0).commandId());
         assertEquals(OutboxTerminalReason.RETRY_EXHAUSTED, listener.recovered.get(0).reason());

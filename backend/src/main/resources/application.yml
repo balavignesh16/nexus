@@ -45,6 +45,12 @@ nexus:
     events-days: 90
     actions-days: 90
   command:
+    # Phase 4 P4.4 command lifecycle scanners (persisted ACK timeout, legacy delivery reconciliation). Always beans; they never publish
+    # and do not consult the outbox flag. Only test contexts that never use them switch the scheduled loops off.
+    lifecycle-scanners-enabled: ${NEXUS_COMMAND_LIFECYCLE_SCANNERS_ENABLED:true}
+    ack-timeout-scan-interval: ${NEXUS_COMMAND_ACK_TIMEOUT_SCAN_INTERVAL:PT5S}
+    legacy-reconcile-interval: ${NEXUS_COMMAND_LEGACY_RECONCILE_INTERVAL:PT60S}
+    legacy-reconcile-grace: ${NEXUS_COMMAND_LEGACY_RECONCILE_GRACE:PT5M}   # at least 5 minutes: must exceed any legitimate legacy dispatch
     outbox:
       # Phase 4 reliable command delivery. OFF by default (decision D7); P4.1 only reads and validates these values.
       enabled: ${NEXUS_COMMAND_OUTBOX_ENABLED:false}

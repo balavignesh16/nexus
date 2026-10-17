@@ -126,9 +126,15 @@ public class OutboxDeliveryOperations {
     public List<UUID> candidates(int limit) {
         return jdbc.queryForList("SELECT o.command_id FROM command_outbox o"
                 + " WHERE o.state IN ('QUEUED', 'RETRY_WAIT') AND o.next_attempt_at <= now() AND now() < o.expires_at"
-                + " AND " + DEVICE_GUARDS
+                + " AND " + NOT_ACKNOWLEDGED + " AND " + DEVICE_GUARDS
                 + " ORDER BY o.created_at, o.command_id LIMIT ?", UUID.class, limit);
     }
+
+    /**
+     * A command that a device has already acknowledged is never published (again): the ACK is authoritative evidence that the device holds the
+     * command, whatever the delivery record says. The sweep resolves such a row ({@link #resolveAcknowledgedUnpublished}).
+     */
+    private static final String NOT_ACKNOWLEDGED = "NOT EXISTS (SELECT 1 FROM action_history ak WHERE ak.request_id = o.command_id AND ak.ack_status IS NOT NULL)";
 
     private static final String NO_OLDER_UNRESOLVED = "NOT EXISTS (SELECT 1 FROM command_outbox x WHERE x.device_id = o.device_id"
             + " AND x.command_id <> o.command_id AND (x.state IN ('IN_FLIGHT', 'RETRY_WAIT')"
@@ -204,7 +210,7 @@ public class OutboxDeliveryOperations {
                 List<Claimed> rows = jdbc.query("UPDATE command_outbox SET state = 'IN_FLIGHT', attempt_count = attempt_count + 1,"
                                 + " next_attempt_at = NULL, lease_owner = ?, lease_expires_at = now() + make_interval(secs => ?), updated_at = ?"
                                 + " WHERE command_id = (SELECT o.command_id FROM command_outbox o WHERE o.command_id = ?"
-                                + " AND o.state IN ('QUEUED', 'RETRY_WAIT') AND o.next_attempt_at <= now() AND now() < o.expires_at AND " + DEVICE_GUARDS
+                                + " AND o.state IN ('QUEUED', 'RETRY_WAIT') AND o.next_attempt_at <= now() AND now() < o.expires_at AND " + NOT_ACKNOWLEDGED + " AND " + DEVICE_GUARDS
                                 + " FOR UPDATE SKIP LOCKED)"
                                 + " RETURNING device_id, topic, payload_text, payload_sha256, payload_epoch_seconds, attempt_count, max_attempts, correlation_id",
                         (rs, i) -> new Claimed(commandId, rs.getObject("device_id", UUID.class), rs.getString("topic"),
@@ -299,7 +305,11 @@ public class OutboxDeliveryOperations {
                         + " was not sent (" + safe(code) + "); the command was never sent");
     }
 
-    private Resolution publish(Claimed c, Instant at) {
+    private Resolution publish(Claimed c, Instant appClockAt) {
+        // The publication instant, and with it the persisted ACK deadline, come from the DATABASE clock (contract R14, ticket P4.4): the
+        // timeout scanner and the ACK handler judge against the same clock, so a skewed application clock can neither make a command time
+        // out before the device had its time nor hide a real timeout. The application-clock instant stays on the Resolution only.
+        Instant at = jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class).toInstant();
         jdbc.update("UPDATE command_outbox SET state = 'PUBLISHED', lease_owner = NULL, lease_expires_at = NULL,"
                         + " first_publish_confirmed_at = ?, terminal_at = ?, last_error_code = NULL, updated_at = ? WHERE command_id = ?",
                 Timestamp.from(at), Timestamp.from(at), Timestamp.from(at), c.commandId());
@@ -308,7 +318,7 @@ public class OutboxDeliveryOperations {
                 Timestamp.from(at), MSG_PUBLISHED, Timestamp.from(at), Timestamp.from(at.plus(ackTimeout)), c.commandId());
         history.record(new OutboxTransitionRecord(c.commandId(), OutboxState.IN_FLIGHT, OutboxState.PUBLISHED, c.attempt(),
                 "BROKER_CONFIRMED", c.correlationId(), at));
-        return new Resolution(Disposition.PUBLISHED, c.commandId(), c.deviceId(), null, null, MSG_PUBLISHED, at, updated == 1, c.correlationId(), ackRecorded(c.commandId()));
+        return new Resolution(Disposition.PUBLISHED, c.commandId(), c.deviceId(), null, null, MSG_PUBLISHED, appClockAt, updated == 1, c.correlationId(), ackRecorded(c.commandId()));
     }
 
     /**
@@ -410,6 +420,33 @@ public class OutboxDeliveryOperations {
                              : "Command expired before delivery (EXPIRED): the delivery window ended and the command was never sent",
                         (Integer) r[2] > 0 ? OutboxState.RETRY_WAIT : OutboxState.QUEUED));
             }
+            return out;
+        });
+    }
+
+    /**
+     * A QUEUED or RETRY_WAIT command whose device has ALREADY acknowledged it (the first ACK is authoritative, R13). It must not be published,
+     * and it has no confirmed publication either, so it ends as DEAD_LETTER UNCERTAIN_EXPIRED with the honest message DELIVERY_UNCONFIRMED:
+     * the delivery record never claims a broker confirmation it did not get, the failure signals stay suppressed (an acknowledged command is
+     * never reported as a publication failure), and the per-device hold of R32 applies. Nothing is sent; ActionHistory keeps the ACK.
+     */
+    public List<Resolution> resolveAcknowledgedUnpublished(int limit) {
+        return tx.execute(status -> {
+            Instant at = clock.instant();
+            List<Object[]> rows = jdbc.query("UPDATE command_outbox o SET state = 'DEAD_LETTER', next_attempt_at = NULL, terminal_at = ?, terminal_reason = 'UNCERTAIN_EXPIRED',"
+                            + " last_error_code = 'ACKNOWLEDGED_BEFORE_PUBLICATION', updated_at = ?"
+                            + " WHERE o.command_id IN (SELECT x.command_id FROM command_outbox x JOIN action_history ak ON ak.request_id = x.command_id"
+                            + " WHERE x.state IN ('QUEUED', 'RETRY_WAIT') AND ak.ack_status IS NOT NULL ORDER BY x.created_at LIMIT ? FOR UPDATE OF x SKIP LOCKED)"
+                            + " RETURNING o.command_id, o.device_id, o.attempt_count, o.correlation_id",
+                    (rs, i) -> new Object[]{rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getInt(3), rs.getString(4)},
+                    Timestamp.from(at), Timestamp.from(at), limit);
+            List<Resolution> out = new ArrayList<>();
+            for (Object[] r : rows)
+                out.add(finishDeadLetter((UUID) r[0], (UUID) r[1], (Integer) r[2], (String) r[3], at, OutboxTerminalReason.UNCERTAIN_EXPIRED,
+                        "ACKNOWLEDGED_BEFORE_PUBLICATION", true,
+                        "DELIVERY_UNCONFIRMED: the device acknowledged the command before NEXUS recorded a publication; it is not published (again)"
+                                + " and no broker confirmation is claimed",
+                        (Integer) r[2] > 0 ? OutboxState.RETRY_WAIT : OutboxState.QUEUED));
             return out;
         });
     }

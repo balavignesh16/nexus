@@ -60,6 +60,18 @@ public class DeviceCommandAckMessageHandler {
     private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
     @Autowired
     void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
+    /** P4.4: durable ACK facts and the database clock. Absent in unit tests that build the handler by hand; then the legacy behaviour applies. */
+    private com.nexus.action.outbox.CommandAckFacts ackFacts;
+    @Autowired(required=false)
+    void setAckFacts(com.nexus.action.outbox.CommandAckFacts ackFacts){this.ackFacts=ackFacts;}
+    private io.micrometer.core.instrument.MeterRegistry meters;
+    @Autowired(required=false)
+    void setMeters(io.micrometer.core.instrument.MeterRegistry meters){this.meters=meters;}
+
+    /** Fixed, low-cardinality outcome tags only (never an identifier). */
+    private void count(String outcome){
+        if(meters!=null)meters.counter("nexus.command.ack","outcome",outcome).increment();
+    }
 
     public DeviceCommandAckMessageHandler(ActionHistoryRepository actionHistoryRepository,
                                            RealtimePublisher realtimePublisher,
@@ -86,7 +98,9 @@ public class DeviceCommandAckMessageHandler {
 
     @Transactional
     public void handle(String topic, byte[] payload) {
-        Instant backendReceivedAt = clock.instant();
+        // The receipt time that is compared with the persisted ACK deadline must come from the SAME (database) clock that set the
+        // deadline; an application clock that is wrong in either direction must not make an ACK late or early.
+        Instant backendReceivedAt = ackFacts != null ? ackFacts.databaseNow() : clock.instant();
         UUID topicDeviceId = parseDeviceIdOrNull(topic);
         if (topicDeviceId == null) {
             log.warn("Malformed command-ack topic '{}'. Acknowledging and dropping (not retryable).", topic);
@@ -140,15 +154,26 @@ public class DeviceCommandAckMessageHandler {
         // Update ACK fields only: a concurrent publish-result update must not
         // erase this ACK, and an ACK never changes the current desired row.
         if (record.getAckStatus() != null) {
-            if (record.getAckStatus() != status || !ackReceivedAt.equals(record.getAckReceivedAt())
-                    || !java.util.Objects.equals(reason, record.getAckMessage()))
-                log.warn("Conflicting duplicate ACK for command {}; first ACK preserved",commandId);
+            duplicate(record.getAckStatus(), record.getAckReceivedAt(), record.getAckMessage(), commandId, status, ackReceivedAt, reason, backendReceivedAt);
             return;
         }
         if (actionHistoryRepository.updateAcknowledgement(commandId, topicDeviceId,
                 status, ackReceivedAt, backendReceivedAt, reason) == 0) {
-            log.warn("Guarded ACK update skipped for command {}; first ACK preserved",commandId);
+            // Another transaction recorded the first ACK between the read above and this guarded update. Re-read the committed ACK
+            // (the persistence context still holds the stale entity) and classify this one as an identical or conflicting duplicate.
+            var first = ackFacts == null ? null : ackFacts.firstAck(commandId);
+            if (first != null) duplicate(first.status(), first.deviceTimestamp(), first.message(), commandId, status, ackReceivedAt, reason, backendReceivedAt);
+            else log.warn("Guarded ACK update skipped for command {}; first ACK preserved",commandId);
             return;
+        }
+        // The guarded update above holds the action_history row lock until commit, so the history is classified under that lock: the
+        // timeout scanner (which needs the same row lock) cannot append ACK_TIMED_OUT between the check and the fact.
+        if (ackFacts != null) {
+            var snapshot = ackFacts.snapshot(commandId);
+            var lateness = ackFacts.appendFirstAck(commandId, status == AcknowledgementStatus.REJECTED, reason, snapshot, backendReceivedAt, commandId.toString());
+            count(lateness == com.nexus.action.outbox.CommandAckFacts.Lateness.AFTER_TIMEOUT ? "late_after_timeout"
+                    : lateness == com.nexus.action.outbox.CommandAckFacts.Lateness.AFTER_TERMINAL ? "late_after_terminal"
+                    : status == AcknowledgementStatus.REJECTED ? "rejected" : "accepted");
         }
 
         // Only the first authoritative ACK (guarded update above) reaches here, so duplicates cannot create a second fact.
@@ -164,6 +189,24 @@ public class DeviceCommandAckMessageHandler {
             });
         else publish.run();
         log.info("Command {} acknowledged by device {}: {}", commandId, topicDeviceId, status);
+    }
+
+    /**
+     * A second ACK for a command that already has one. Identical content changes nothing (a counter is incremented); a different content
+     * never overwrites the first (no last-write-wins) and is recorded once per distinct occurrence as ACK_CONFLICT_IGNORED, bounded per command.
+     */
+    private void duplicate(AcknowledgementStatus firstStatus, Instant firstTimestamp, String firstMessage, UUID commandId,
+                           AcknowledgementStatus status, Instant ackReceivedAt, String reason, Instant backendReceivedAt) {
+        boolean identical = firstStatus == status && ackReceivedAt.equals(firstTimestamp) && java.util.Objects.equals(reason, firstMessage);
+        if (identical) {
+            count("duplicate");
+            log.debug("Identical duplicate ACK for command {} ignored",commandId);
+            return;
+        }
+        count("conflict");
+        log.warn("Conflicting duplicate ACK for command {}; first ACK preserved",commandId);
+        if (ackFacts != null)
+            ackFacts.appendConflict(commandId, ackFacts.snapshot(commandId), backendReceivedAt, commandId.toString(), firstStatus.name(), status.name());
     }
 
     private UUID parseDeviceIdOrNull(String topic) {

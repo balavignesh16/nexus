@@ -2,7 +2,7 @@
 
 Date: 2026-10-15.
 
-Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED, TESTED AND COMMITTED (1936c2b), INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 IMPLEMENTED, TESTED AND COMMITTED (e91f2f7: V39, atomic acceptance, bounded dispatcher, status separation, R31 safety requirements). P4.3 IMPLEMENTED AND TESTED (evidence-gated retries, persisted backoff, dead letter, crash-safe failure signals; no migration; see below and contract R33). P4.4 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
+Status: **P4.0 APPROVED AND FINALIZED (decisions A1 to A9 applied). P4.1 IMPLEMENTED, TESTED AND COMMITTED (1936c2b), INCLUDING ITS SAFETY CORRECTIONS (V38; forensic findings F1, F2, F7). P4.2 IMPLEMENTED, TESTED AND COMMITTED (e91f2f7: V39, atomic acceptance, bounded dispatcher, status separation, R31 safety requirements). P4.3 IMPLEMENTED AND TESTED (evidence-gated retries, persisted backoff, dead letter, crash-safe failure signals; no migration; see below and contract R33). P4.4 IMPLEMENTED AND TESTED (durable ACK facts, persisted ACK timeout worker, runtime legacy reconciler, database-clock ACK deadline; no migration; see contract R34). P4.5 to P4.8 are not started.** P4.1 scope was narrowed on approval to the durable outbox schema (V37), configuration, model and retention protection; the command state history table and its legacy backfill (V39) moved to P4.2.
 
 Normative authority: [reliability-contract.md](reliability-contract.md). This ticket owns rollout, source ownership, dependencies and verification gates. It does not override contract clauses. Acceptance authority: [p4-acceptance-ledger.md](p4-acceptance-ledger.md); a planned test is not proof.
 
@@ -124,7 +124,9 @@ Verification: bounded-retry, expiry boundary, byte-identical payload capture on 
 
 Authority: R13, R14, R16. Ledger scenarios: 14.
 
-Deliverables: ACK history rows (accepted, rejected, conflict, after timeout, after terminal); idempotent ACK timeout scanner (single owner of ACK_TIMED_OUT, no second rule fact); runtime legacy reconciler with a grace period that never publishes and never touches rows that have an outbox row.
+**P4.4 status (2026-10-18): implemented and tested; the authoritative description is contract R34 and the P4.4 evidence section of the ledger. No migration was needed (V39 already holds the ACK fact types), so V40 stays reserved for P4.5.**
+
+Deliverables: ACK history rows (accepted, rejected, conflict, after timeout, after terminal) [`CommandAckFacts`, written by the actual ACK handler in its own transaction; a late first ACK appends the ACK outcome fact and then the late fact; conflict facts are bounded to 5 per command]; idempotent ACK timeout scanner (single owner of ACK_TIMED_OUT, no second rule fact) [`CommandAckTimeoutScanner`, database clock, row-lock serialised]; runtime legacy reconciler with a grace period that never publishes and never touches rows that have an outbox row [`LegacyDeliveryReconciler`, grace at least 5 minutes]. Added by the review: the ACK deadline and the ACK receipt time come from the database clock, an acknowledged command is never claimed and an acknowledged QUEUED or RETRY_WAIT command is resolved as unconfirmed, and the ACK path takes no outbox lock.
 
 Verification: duplicate, conflicting and late ACK tests; two-instance scanner race; reconciler spy proving zero publications across restarts and with the flag ON; `RuleAckTimeoutScanner` regression.
 

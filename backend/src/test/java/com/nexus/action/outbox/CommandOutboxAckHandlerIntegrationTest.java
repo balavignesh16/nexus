@@ -228,7 +228,8 @@ class CommandOutboxAckHandlerIntegrationTest {
         assertEquals("ACCEPTED", after.getAckStatus().name(), "and the earlier ACK is preserved");
         assertEquals(ackAt, after.getAckReceivedAt());
         assertEquals(CommandStatus.ACKNOWLEDGED, CommandStatus.from(after, clock));
-        assertEquals(List.of("ACCEPTED", "QUEUED", "ATTEMPT_STARTED", "PUBLISHED"), facts(id), "the delivery history has no ACK fact (those are P4.4)");
+        assertEquals(List.of("ACCEPTED", "QUEUED", "ATTEMPT_STARTED", "ACK_ACCEPTED", "PUBLISHED"), facts(id),
+                "P4.4: the ACK is a durable fact in its observed order; the delivery facts themselves are unchanged");
         assertTwinNotToldPublicationFailed(id);
     }
 
@@ -282,7 +283,9 @@ class CommandOutboxAckHandlerIntegrationTest {
         assertEquals(CommandStatus.ACKNOWLEDGED, CommandStatus.from(r, clock), "the ACK wins in the status projection");
         assertTrue(r.getMessage().startsWith("DELIVERY_UNCONFIRMED"), "the uncertainty stays recorded");
         assertEquals("DEAD_LETTER", outboxState(id), "the delivery record is untouched");
-        assertEquals(factsBefore, facts(id), "no history fact is written by a late ACK");
+        assertEquals(factsBefore, facts(id).subList(0, factsBefore.size()), "the delivery facts are untouched by a late ACK");
+        assertEquals(List.of("ACK_ACCEPTED", "ACK_AFTER_TERMINAL"), facts(id).subList(factsBefore.size(), facts(id).size()),
+                "P4.4: the late ACK is appended after the terminal fact, nothing before it is rewritten");
         verify(ruleFacts, never()).publicationFailed(any(), any(), any(), any());
         assertTwinNotToldPublicationFailed(id);
     }
@@ -305,7 +308,8 @@ class CommandOutboxAckHandlerIntegrationTest {
         ack(id, "ACCEPTED", null);
         assertEquals("ACCEPTED", record(id).getAckStatus().name());
         assertEquals(ExecutionStatus.FAILURE, record(id).getStatus());
-        assertEquals(factsBefore, facts(id));
+        assertEquals(factsBefore, facts(id).subList(0, factsBefore.size()), "the delivery facts are untouched");
+        assertEquals(List.of("ACK_ACCEPTED", "ACK_AFTER_TERMINAL"), facts(id).subList(factsBefore.size(), facts(id).size()), "P4.4: the ACK is added after the terminal fact");
         assertEquals("EXPIRED", jdbc.queryForObject("SELECT terminal_reason FROM command_outbox WHERE command_id = ?", String.class, id));
     }
 
