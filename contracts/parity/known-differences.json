@@ -118,7 +118,7 @@
     {
       "class": "B",
       "clause": "adapter-contract.md section 8.4 (backend robustness, defect candidates)",
-      "rationale": "The backend decoder throws instead of rejecting and dropping the message. DeviceCommandAckMessageHandler.parseTimestampOrNull calls Instant.ofEpochSecond for any integral timestamp, so a value outside the Instant range raises DateTimeException; TelemetryMQTTListener validates a null request after readValue returns null for the JSON text null, raising IllegalArgumentException. Both escape the handler unacknowledged, so the broker redelivers the same poison message. Recorded, not fixed in P5.1 (the Phase 4 safety semantics are frozen); the validator rejects them with a fixed code.",
+      "rationale": "The backend decoder throws instead of rejecting and dropping the message. DeviceCommandAckMessageHandler.parseTimestampOrNull calls Instant.ofEpochSecond for any integral timestamp, so a value outside the Instant range raises DateTimeException, which escapes the handler unacknowledged, so the broker redelivers the same poison message. Recorded, not fixed (the Phase 4 safety semantics are frozen); the validator rejects them with a fixed code. (The telemetry listener's equivalent for the JSON text null was fixed in P5.3 by the extraction into the MQTT adapter's decoder, which rejects it as MALFORMED_JSON, so it no longer differs and is no longer registered.)",
       "defectCandidate": true,
       "cases": {
         "ack:timestamp-beyond-int64": {
@@ -136,10 +136,6 @@
         "ack:timestamp-int64-max": {
           "backend": "EXCEPTION:DateTimeException",
           "validator": "REJECT"
-        },
-        "telemetry:payload-json-null": {
-          "backend": "EXCEPTION:IllegalArgumentException",
-          "validator": "REJECT:MALFORMED_JSON"
         }
       }
     },

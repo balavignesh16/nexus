@@ -179,6 +179,57 @@ class AdapterArchitectureTest {
     }
 
     @Test
+    void p5_065_credentialAdministrationIsNotExposedOnAnyNetworkSurface() throws IOException {
+        List<Path> all = javaFiles(MAIN);
+        // 1. the administration tool is Spring-free and opens no socket or server of any kind
+        for (Path file : javaFiles(MAIN.resolve("adapter/credentials"))) {
+            String c = code(read(file));
+            for (String forbidden : List.of("ServerSocket", "HttpServer", "SpringApplication", "@RestController", "@Controller", "@Component", "@Service", "@Bean",
+                    "jakarta.servlet", "org.springframework", "java.net.http", "java.net.Socket", "org.eclipse.paho", "WebSocket")) {
+                assertFalse(c.contains(forbidden), file.getFileName() + " must not use " + forbidden);
+            }
+        }
+        // 2. only the tool's own classes can create, rotate or revoke: nothing else references the admin operations
+        Set<String> admins = new TreeSet<>();
+        for (Path file : all) if (Pattern.compile("\\bCredentialAdmin\\b|\\bCredentialCli\\b").matcher(code(read(file))).find()) admins.add(MAIN.relativize(file).toString().replace('\\', '/'));
+        assertEquals(Set.of("adapter/credentials/CredentialAdmin.java", "adapter/credentials/CredentialCli.java"), admins);
+        // 3. the only statements that write the credential tables outside the tool are the backend's last-contact update
+        for (Path file : all) {
+            String relative = MAIN.relativize(file).toString().replace('\\', '/');
+            if (relative.startsWith("adapter/credentials/")) continue;
+            String c = code(read(file));
+            assertFalse(Pattern.compile("(?i)INSERT\\s+INTO\\s+device_(ingestion_credentials|credential_events)").matcher(c).find(), relative + " inserts credentials");
+            assertFalse(Pattern.compile("(?i)DELETE\\s+FROM\\s+device_(ingestion_credentials|credential_events)").matcher(c).find(), relative + " deletes credentials");
+            assertFalse(Pattern.compile("(?i)UPDATE\\s+device_credential_events").matcher(c).find(), relative + " alters events");
+            var update = Pattern.compile("(?i)UPDATE\\s+device_ingestion_credentials\\s+SET\\s+(\\w+)").matcher(c);
+            while (update.find()) assertEquals("last_valid_contact_at", update.group(1), relative + " may update only the last-contact column");
+        }
+        // 4. no request mapping, message mapping or endpoint is about credentials, and no MQTT topic carries them
+        Pattern mapping = Pattern.compile("@(Request|Get|Post|Put|Delete|Patch|Message|Subscribe)Mapping\\s*\\(([^)]*)\\)|@ServerEndpoint\\s*\\(([^)]*)\\)");
+        for (Path file : all) {
+            var m = mapping.matcher(code(read(file)));
+            while (m.find()) assertFalse(m.group().toLowerCase(java.util.Locale.ROOT).contains("credential"), file.getFileName() + " maps a credential endpoint: " + m.group());
+        }
+        for (Path file : javaFiles(MAIN.resolve("adapter/mqtt"))) assertFalse(code(read(file)).toLowerCase(java.util.Locale.ROOT).contains("credential"), file + " mentions credentials");
+        // 5. the live-rule check itself works
+        assertTrue(Pattern.compile("(?i)INSERT\\s+INTO\\s+device_(ingestion_credentials|credential_events)").matcher("jdbc.update(\"insert into device_ingestion_credentials(...)\")").find());
+    }
+
+    @Test
+    void p5_053_theHttpAdapterAndTheToolHaveNoLoggerSoNoKeyCanReachALog() throws IOException {
+        for (String area : List.of("adapter/http", "adapter/credentials")) {
+            for (Path file : javaFiles(MAIN.resolve(area))) {
+                String c = code(read(file));
+                for (String forbidden : List.of("org.slf4j", "java.util.logging", "System.out", "System.err", "printStackTrace", "Logger", "log.")) {
+                    if (forbidden.equals("System.out") && file.getFileName().toString().equals("CredentialCli.java")) continue;   // main() hands the CLI its own streams
+                    if (forbidden.equals("System.err") && file.getFileName().toString().equals("CredentialCli.java")) continue;
+                    assertFalse(c.contains(forbidden), file.getFileName() + " must not write to a log or the console: " + forbidden);
+                }
+            }
+        }
+    }
+
+    @Test
     void theCoreDoesNotImportTransportSpecificLibrariesIntoTheSpiCapabilities() throws IOException {
         // No capability interface may force an adapter to implement a no-op: every spi interface has only the methods of its capability.
         for (String name : List.of("TelemetryDecoder", "AcknowledgementDecoder", "ConnectivitySource", "CommandEgress", "DeviceAuthenticator", "AdapterLifecycle")) {
