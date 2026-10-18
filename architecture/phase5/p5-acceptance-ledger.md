@@ -2,7 +2,7 @@
 
 Date: 2026-10-18 (P5.0).
 
-Status: **P5.1 IMPLEMENTED (2026-10-18). 158 scenario IDs defined; 128 PLANNED, 30 COVERED, 0 DEFERRED. P5.1 (wire contract, validator, fixtures, differential tests) is implemented and its 30 scenarios are COVERED with the evidence below; every other scenario is PLANNED and unproven.** The first 128 IDs (P5-001 to P5-128) are the original P5.0 set, unchanged in number and order (their wording was clarified in place where the D7 to D10 amendments required it); P5-129 to P5-152 (section L) were added by the D7 to D10 amendment and P5-153 to P5-158 (section M) by the P5.1 preparation decisions of 2026-10-18; the eight section J scenarios moved from work package P5.1 to P5.V41 without any change of ID or requirement.
+Status: **P5.1 IMPLEMENTED (2026-10-18). 158 scenario IDs defined; 121 PLANNED, 37 COVERED, 0 DEFERRED. P5.1 (30 scenarios) and P5.V41 (7 of its 8; P5-118 needs the adapters) are implemented and COVERED with the evidence below; every other scenario is PLANNED and unproven.** The first 128 IDs (P5-001 to P5-128) are the original P5.0 set, unchanged in number and order (their wording was clarified in place where the D7 to D10 amendments required it); P5-129 to P5-152 (section L) were added by the D7 to D10 amendment and P5-153 to P5-158 (section M) by the P5.1 preparation decisions of 2026-10-18; the eight section J scenarios moved from work package P5.1 to P5.V41 without any change of ID or requirement.
 
 Normative requirements: [adapter-contract.md](adapter-contract.md). Execution and dependency plan: [p5-implementation-ticket.md](p5-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract. The accepted Phase 4 ledger ([p4-acceptance-ledger.md](../phase4/p4-acceptance-ledger.md)) is preserved unchanged and its guarantees are listed in contract section 16.
 
@@ -19,8 +19,8 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | Status | Count |
 |---|---|
-| PLANNED | 128 |
-| COVERED | 30 |
+| PLANNED | 121 |
+| COVERED | 37 |
 | DEFERRED | 0 |
 | **Total** | **158** |
 
@@ -193,13 +193,13 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P5-111 | V41 applies on an empty database | Migration on populated database | Flyway applies V41 after V40 with the recorded checksum. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-112 | V41 applies on a populated database and defaults existing devices to MQTT_JSON | Migration on populated database | A database with devices and templates upgraded to V41 reads every existing device as MQTT_JSON and loses no row. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-113 | The transport CHECK rejects unknown values | PostgreSQL integration | An unknown transport in devices or templates is refused by the database. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-114 | Credential constraints hold | PostgreSQL integration | Hash length, status, retire and revoke consistency, and at most one ACTIVE and one RETIRING credential per device are enforced by the database. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-115 | Credential events are append-only | PostgreSQL integration | UPDATE is refused; DELETE is allowed only with the parent credential. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-116 | Deleting a device removes its credentials and events | PostgreSQL integration | The cascade removes both; no credential survives its device. | §12 | P5.V41 | PLANNED | not yet written |
-| P5-117 | V37 to V40 are unchanged and the logical topic CHECK is compatible | Migration on populated database | The checksums of V1 to V40 are unchanged; an HTTP-assigned device's command row satisfies the V37 topic CHECK. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-111 | V41 applies on an empty database | Migration on populated database | Flyway applies V41 after V40 with the recorded checksum. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_111_v41AppliesAfterV40OnAnEmptyDatabaseWithARecordedChecksum |
+| P5-112 | V41 applies on a populated database and defaults existing devices to MQTT_JSON | Migration on populated database | A database with devices and templates upgraded to V41 reads every existing device as MQTT_JSON and loses no row. | §12 | P5.V41 | COVERED | TransportUpgradeMigrationTest.populatedV40UpgradeKeepsEveryRowDefaultsToMqttAndLeavesTheCommandPathAlone |
+| P5-113 | The transport CHECK rejects unknown values | PostgreSQL integration | An unknown transport in devices or templates is refused by the database. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_113_theTransportCheckAcceptsExactlyTheKnownValuesAndDefaultsToMqtt |
+| P5-114 | Credential constraints hold | PostgreSQL integration | Hash length, status, retire and revoke consistency, and at most one ACTIVE and one RETIRING credential per device are enforced by the database. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_114_credentialConstraintsAreEnforcedByTheDatabase |
+| P5-115 | Credential events are append-only | PostgreSQL integration | UPDATE is refused; DELETE is allowed only with the parent credential. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_115_credentialEventsAreAppendOnly |
+| P5-116 | Deleting a device removes its credentials and events | PostgreSQL integration | The cascade removes both; no credential survives its device. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_116_deletingADeviceRemovesItsCredentialsAndEvents |
+| P5-117 | V37 to V40 are unchanged and the logical topic CHECK is compatible | Migration on populated database | The checksums of V1 to V40 are unchanged; an HTTP-assigned device's command row satisfies the V37 topic CHECK. | §12 | P5.V41 | COVERED | TransportSchemaV41Test.p5_117_v1ToV40KeepTheirChecksumsAndThePinnedListIsComplete; HttpTransportSchemaCompatibilityTest (5 tests, spike S1) |
 | P5-118 | Disabling the adapters is the rollback | PostgreSQL integration | With the HTTP adapter disabled the application ignores the new columns and behaves as before V41. | §12 | P5.V41 | PLANNED | not yet written |
 
 
@@ -266,7 +266,7 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | Slice | Scenario count | COVERED | Scenario IDs |
 |---|---|---|---|
 | P5.1 | 30 | 30 | P5-001, P5-002, P5-003, P5-004, P5-005, P5-006, P5-007, P5-008, P5-009, P5-010, P5-011, P5-012, P5-014, P5-015, P5-016, P5-017, P5-018, P5-020, P5-021, P5-022, P5-024, P5-025, P5-143, P5-144, P5-153, P5-154, P5-155, P5-156, P5-157, P5-158 |
-| P5.V41 | 8 | 0 | P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118 |
+| P5.V41 | 8 | 7 | P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118 |
 | P5.2 | 16 | 0 | P5-013, P5-027, P5-028, P5-029, P5-030, P5-031, P5-032, P5-033, P5-034, P5-035, P5-036, P5-037, P5-038, P5-119, P5-123, P5-142 |
 | P5.3 | 13 | 0 | P5-023, P5-039, P5-040, P5-041, P5-042, P5-043, P5-044, P5-045, P5-046, P5-047, P5-048, P5-120, P5-124 |
 | P5.4 | 52 | 0 | P5-019, P5-026, P5-049, P5-050, P5-051, P5-052, P5-053, P5-054, P5-055, P5-056, P5-057, P5-058, P5-059, P5-060, P5-061, P5-062, P5-063, P5-064, P5-065, P5-067, P5-068, P5-069, P5-070, P5-071, P5-072, P5-073, P5-074, P5-075, P5-076, P5-077, P5-078, P5-079, P5-080, P5-081, P5-129, P5-130, P5-131, P5-132, P5-133, P5-134, P5-135, P5-136, P5-137, P5-138, P5-139, P5-140, P5-141, P5-145, P5-146, P5-147, P5-148, P5-152 |
@@ -305,3 +305,9 @@ What was run, on the development machine, against nothing but the repository (no
 - Negative controls: deleting the registry entry for ack:payload-bom made WireContractParityTest fail with UNREGISTERED ack:payload-bom (then restored and green again); the registry comparison is itself tested with synthetic data (unregistered, changed and stale entries are each reported); the schema mutation tests make a required field optional and confirm the corpus notices; the evolution checker detects renamed, removed, retyped, narrowed and newly required members and accepts additive ones.
 
 What is NOT proven by this evidence (and stays PLANNED): everything outside the 30 scenarios above. In particular nothing here touches the adapter SPI, the MQTT extraction, HTTP, V41, the SDKs or the integrated gate; the ESP32 profile describes the firmware source and has not been exercised against a flashed device (no hardware claim); the three backend defect candidates in contract section 8.5 are recorded, not fixed. P5-149, P5-150 and P5-151 (gate tooling and spike recording) were moved to P5.8 because P5.1 does not change the gate's segmentation.
+
+### P5.V41 (2026-10-18)
+
+- Spike S1 (PASSED): the proposed SQL was applied to a disposable TimescaleDB/PostgreSQL 16 schema and an HTTP-assigned device's command row was pushed through the V37 topic CHECK, the V37 guard triggers, the fenced claim, a confirmed outcome (PUBLISHED, normal history), a NOT_SENT retry, an UNCERTAIN dead letter and lease recovery with the R32 hold: the Phase 4 path is transport-agnostic because `command_outbox.topic` is the logical address. An address that does not match the logical string is still refused for an HTTP device.
+- `./mvnw.cmd -q -Dtest=TransportSchemaV41Test,TransportUpgradeMigrationTest,HttpTransportSchemaCompatibilityTest test`: 12 tests, 0 failures, 0 skipped, each class on its own disposable container. The pinned checksum list `backend/src/test/resources/db/migration-checksums-v1-v40.txt` was computed independently (Flyway's CRC32 line algorithm in Python) and equals what Flyway recorded; `git diff e29e215..HEAD` shows no change to V1 to V40.
+- P5-118 (disabling the adapters is the rollback) stays PLANNED: it needs the adapter enable flag, which does not exist before P5.2.

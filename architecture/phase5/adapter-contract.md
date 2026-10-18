@@ -361,9 +361,9 @@ Phase 4 states that `PUBLISHED` means broker publication and nothing more. That 
 3. The Phase 4 uncertain rules apply to every adapter unchanged: an ambiguous attempt is UNCERTAIN, ends `UNCERTAIN_EXPIRED`, is never resent, and holds later commands of the device for the R32 interval.
 4. Nothing in Phase 5 may claim exactly-once delivery, device receipt or physical actuation; the architecture tests that guard those claims (Phase 4 P4-123) are extended to the new documents, strings and UI labels.
 
-## 12. Migration V41 proposal (design only: NOT created in P5.0 and NOT part of P5.1)
+## 12. Migration V41 (implemented in P5.V41: `V41__device_transport_and_ingestion_credentials.sql`)
 
-Amendment of 2026-10-18: V41 is its own separately authorised stage (ledger section J, work package `P5.V41`). It is not created, tested or spiked by P5.1. The stage must be authorised before the P5.2 transport assignment API and before P5.4 need its columns.
+Amendment of 2026-10-18: V41 is its own work package (ledger section J, `P5.V41`), not part of P5.1. **Implemented 2026-10-18** after spike S1 passed against a disposable database (`HttpTransportSchemaCompatibilityTest`). The SQL below is the design; the committed file is authoritative. Differences from the proposal: `lookup_id` is constrained to 8 to 24 alphanumeric characters and `hash_algorithm` to a name pattern; credential events also index `(credential_id, occurred_at)`; `device_templates.protocol_type` (CHECK `MQTT`) is deliberately unchanged, so a template's `default_transport` is the only template-level transport statement. The two database roles of section 9.8.1 are not created here (P5.4).
 
 Forward-only, checksummed, tested on an empty and on a populated disposable database, never touching V1 to V40. Estimated size under 100 lines.
 
@@ -477,7 +477,7 @@ A spike is a time-boxed, disposable experiment whose result is written into the 
 
 | ID | Spike | Falsifies | When |
 |---|---|---|---|
-| **S1** | Apply the proposed V41 to a disposable copy of the V40 schema. Insert an outbox row for a device assigned `HTTP_WEBHOOK` with the logical topic; run the V37 CHECKs and the V37/V39 guard triggers through claim, PUBLISHED, retry and dead-letter transitions | "no change to V37 to V40 is needed" (10.12, section 12) | P5.1 records the on-paper analysis only (the V37 topic CHECK and guards do not reference transport); the empirical run is part of the separately authorised V41 stage and the compatibility stays **unproven until then** |
+| **S1 (PASSED 2026-10-18, P5.V41)** | Apply the proposed V41 to a disposable copy of the V40 schema. Insert an outbox row for a device assigned `HTTP_WEBHOOK` with the logical topic; run the V37 CHECKs and the V37/V39 guard triggers through claim, PUBLISHED, retry and dead-letter transitions | "no change to V37 to V40 is needed" (10.12, section 12) | P5.1 records the on-paper analysis only (the V37 topic CHECK and guards do not reference transport); the empirical run is part of the separately authorised V41 stage and the compatibility stays **unproven until then** |
 | **S2** | Read `OutboxDeliveryOperations`/`CommandStateHistory` for how `reason_code`, the message text and the history `PUBLISHED` fact are chosen; prove an evidence kind can be passed without altering existing MQTT assertions | "the evidence kind needs no schema change" | P5.1 |
 | **S3** | A throwaway servlet and a real Tomcat: write and flush a 1 KB response while the client (a) reads it, (b) never reads, (c) closes before the write, (d) resets mid-body; record what the application can observe in each case | the classification of 10.5 | before P5.4 outbound |
 | **S4** | The Phase 4 process-kill harness extended with a pull handler stub: kill before the claim, after the claim, during the write and after the write; check the five rows of 10.7 against the durable state | the kill-behaviour table | before P5.4 outbound |

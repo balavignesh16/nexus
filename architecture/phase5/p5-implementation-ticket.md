@@ -68,7 +68,7 @@ Verification: fixtures from the firmware source at the baseline, accept and reje
 
 Gate: contract tests, tooling tests, `--fast`.
 
-### P5.V41 Migration V41 (separately authorised; not part of P5.1)
+### P5.V41 Migration V41 (IMPLEMENTED 2026-10-18; not part of P5.1)
 
 Authority: contract 12. Ledger: section J (P5-111 to P5-118, all PLANNED). Prerequisite for the P5.2 transport assignment API and for P5.4. Includes the empirical spike S1 (apply the proposed SQL to a disposable V40 copy and push an HTTP-assigned device's outbox row through every V37/V39 CHECK and guard trigger) and produces V41 only if it passes. Order: P5.1, then P5.V41, then P5.2. The owner decides the authorisation; nothing here creates a migration.
 
