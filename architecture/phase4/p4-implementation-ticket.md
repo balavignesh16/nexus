@@ -152,6 +152,8 @@ Verification: cap and race tests, rate-limit test on real Mosquitto, architectur
 
 ## Slice P4.7: observability, read API and frontend
 
+**P4.7 status (2026-10-18): implemented and tested as part of the combined milestone P4-FINAL (branch `feature/p4-final`, not merged). The authoritative description is contract R37 and the P4-FINAL evidence section of the ledger.** Deliverables built: trace projector, read-only lifecycle and dead-letter API, backend-time latency timers, platform statements, frontend lifecycle visibility. No migration.
+
 Authority: R20, R21, R24. Ledger scenarios: 14 (P4-098 and P4-099 moved to P4.2).
 
 Deliverables: pipeline trace steps per transition; Micrometer metrics with fixed tags; additive read-only lifecycle and dead-letter listing endpoints and a `deliveryState` field; explanation truthfulness for queued, dead-lettered and unknown commands; frontend lifecycle display with separate labels and tolerance for unknown states. **No mutating endpoint and no internal requeue.**
@@ -159,6 +161,8 @@ Deliverables: pipeline trace steps per transition; Micrometer metrics with fixed
 Verification: MockMvc contract tests including 404 or 405 on any mutating path; architecture test for requeue dependencies; Vitest for labels; backend-timestamp latency tests.
 
 ## Slice P4.8: integrated validation, fault injection and enablement documentation
+
+**P4.8 status (2026-10-18): implemented and tested as part of P4-FINAL, with ONE scenario open (P4-111, the Phase 3 suite with the outbox ON) and the full gate recorded in the ledger.** Deliverables built: real-process crash campaign, multi-instance and flood tests, flag-off drain, mutation campaign, `phase4_enablement_check.py`, protected-path hashes, two new gate checks.
 
 Authority: R22, R27, R29. Ledger scenarios: 20 (plus the deferred scenario P4-124 which has no slice).
 

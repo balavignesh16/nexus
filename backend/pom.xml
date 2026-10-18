@@ -14,6 +14,8 @@
 	<name>nexus</name>
 	<description>NEXUS - The Physical Intelligence Framework</description>
 	<properties>
+		<surefire.groups></surefire.groups>
+		<surefire.excludedGroups>crash,crash-smoke</surefire.excludedGroups>
 		<java.version>21</java.version>
 		<testcontainers.version>1.20.2</testcontainers.version>
 	</properties>
@@ -103,6 +105,10 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>-XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+					<!-- P4-FINAL: the crash-recovery campaign starts real backend processes and is a separate gate stage. The ordinary run excludes
+					     the tag; the stage runs -Dsurefire.groups=crash (or crash-smoke) -Dsurefire.excludedGroups= -->
+					<groups>${surefire.groups}</groups>
+					<excludedGroups>${surefire.excludedGroups}</excludedGroups>
 				</configuration>
 			</plugin>
 			<plugin>

@@ -32,6 +32,15 @@ public class PipelineService {
         realtimePublisher.publishPipelineTrace(trace);
     }
 
+    /** Broadcasts an already stored trace (command lifecycle projection, P4-095); touches no database and never throws. */
+    public void publishTrace(PipelineTrace trace) {
+        try {
+            realtimePublisher.publishPipelineTrace(trace);
+        } catch (RuntimeException failure) {
+            // the trace is stored; a failed broadcast is only a missed live update
+        }
+    }
+
     public List<PipelineTrace> getHistory(int limit) {
         return repository.findAllByOrderByStartTimestampDesc(PageRequest.of(0, limit)).getContent();
     }

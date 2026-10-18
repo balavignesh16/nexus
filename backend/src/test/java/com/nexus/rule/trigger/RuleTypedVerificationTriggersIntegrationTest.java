@@ -131,6 +131,7 @@ class RuleTypedVerificationTriggersIntegrationTest extends TypedTriggerSupport {
 
         manual.request(rule, null);                                  // authorized plan -> durable acceptance -> real Mosquitto publication
         UUID command = sql.queryForObject("SELECT request_id FROM action_history WHERE device_id=?", UUID.class, f.device());
+        awaitDelivery();                                             // with the outbox ON the dispatcher publishes after the acceptance
         assertEquals("SUCCESS", sql.queryForObject("SELECT status FROM action_history WHERE request_id=?", String.class, command), "MQTT publication");
         assertNull(sql.queryForObject("SELECT ack_status FROM action_history WHERE request_id=?", String.class, command));
         assertEquals("PENDING", sql.queryForObject("SELECT verification_status FROM current_twin_verification_state WHERE device_id=?", String.class, f.device()));

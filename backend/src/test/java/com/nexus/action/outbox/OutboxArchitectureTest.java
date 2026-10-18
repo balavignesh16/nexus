@@ -198,9 +198,29 @@ class OutboxArchitectureTest {
     @Test
     void noRequeueResendOrRedriveOperationExistsAnywhereInTheBackend() throws IOException {
         Pattern declaration = Pattern.compile("(?i)(\\bclass|\\binterface|\\benum|\\brecord|\\bvoid|\\bpublic\\s+[\\w<>\\[\\],.? ]+)\\s+\\w*(?<![pP])(requeue|resend|redrive|retryDeadLetter|reviveDeadLetter)\\w*\\s*[({<]");
-        Pattern mapping = Pattern.compile("(?i)@(Get|Post|Put|Patch|Delete|Request)Mapping\\([^)]*(requeue|resend|redrive|dead-?letter|outbox)");
+        // P4-FINAL (decision D4): a READ-ONLY listing of dead letters is approved (GET /api/v1/actions/dead-letters). What stays forbidden is
+        // any requeue, resend or redrive endpoint under any method, and any endpoint that CHANGES something about a dead letter or the outbox.
+        Pattern mapping = Pattern.compile("(?i)@(Get|Post|Put|Patch|Delete|Request)Mapping\\([^)]*(requeue|resend|redrive)");
+        Pattern mutatingMapping = Pattern.compile("(?i)@(Post|Put|Patch|Delete|Request)Mapping\\([^)]*(dead-?letter|outbox)");
         assertEquals(Set.of(), namesOfFilesMatching(declaration), "a requeue or resend operation was added");
         assertEquals(Set.of(), namesOfFilesMatching(mapping), "an HTTP endpoint for requeue or resend was added");
+        assertEquals(Set.of(), namesOfFilesMatching(mutatingMapping), "a non-GET endpoint on dead letters or the outbox was added");
+    }
+
+    @Test
+    void theLifecycleControllerOffersReadOnlyEndpointsOnly() throws IOException {
+        Path controller = sources(MAIN, ".java").stream().filter(f -> f.getFileName().toString().equals("CommandLifecycleController.java")).findFirst().orElseThrow();
+        String text = read(controller);
+        java.util.regex.Matcher mappings = Pattern.compile("@(\\w+)Mapping").matcher(text);
+        int count = 0;
+        while (mappings.find()) {
+            String kind = mappings.group(1);
+            if (kind.equals("Request")) continue;                   // the class-level @RequestMapping("/api/v1/actions") prefix
+            assertEquals("Get", kind, "every endpoint of the lifecycle controller is a GET");
+            count++;
+        }
+        assertEquals(2, count, "exactly the lifecycle and the dead-letter listing");
+        assertTrue(!text.contains("@RequestBody") && !text.contains("JdbcTemplate") && !text.contains("Repository"), "no body, no direct data access in the controller");
     }
 
     @Test

@@ -73,9 +73,9 @@ class RuleFactRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, matches(rule), "the persisted decision was reused");
         assertEquals(1, count("SELECT count(*) FROM rule_action_candidates WHERE rule_id=? AND disposition='SELECTED'", rule));
         assertEquals(1, count("SELECT count(*) FROM action_history WHERE device_id=?", device), "exactly one command");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
         assertEquals(0, recovery.recover(10));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     /**
@@ -101,7 +101,7 @@ class RuleFactRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, count("SELECT count(*) FROM rule_action_plans WHERE fact_id=?", fact), "the plan was reused, not recreated");
         assertEquals(1, matches(rule));
         assertEquals(0, count("SELECT count(*) FROM action_history WHERE device_id=?", device), "recovery never redispatches an existing plan");
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void concurrentRecoveryWorkersProduceOneDecisionAndOneCommand() throws Exception {
@@ -122,7 +122,7 @@ class RuleFactRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, routed, "the lease lets exactly one worker route the fact");
         assertEquals(1, matches(rule));
         assertEquals(1, count("SELECT count(*) FROM action_history WHERE device_id=?", device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void aPermanentlyFailingFactIsQuarantinedAfterBoundedAttemptsAndNeverRetried() {
@@ -152,7 +152,7 @@ class RuleFactRecoveryIntegrationTest extends TypedTriggerSupport {
         recovery.recover(10);
         assertEquals(0, count("SELECT count(*) FROM rule_action_candidates WHERE rule_id=?", rule), "a paused rule gets no plan");
         assertEquals(0, count("SELECT count(*) FROM action_history WHERE device_id=?", device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void recoveredFactsOfAReplacedVersionCannotUseTheOldVersion() {
@@ -165,7 +165,7 @@ class RuleFactRecoveryIntegrationTest extends TypedTriggerSupport {
         lifecycle.legacySave(new Rule(rule, "replacement", true, 1, view.definition().conditions(), List.of(alert()), Map.of(), null, null, view.definition().runtime()), null);
         now = now.plusSeconds(900);
         recovery.recover(10);
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
         assertEquals(0, count("SELECT count(*) FROM action_history WHERE device_id=?", device), "the old version's command is never accepted");
     }
 

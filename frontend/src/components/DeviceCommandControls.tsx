@@ -3,6 +3,7 @@ import { deviceApi, CapabilityType, ExecutionStatus, type DeviceCapability } fro
 import { ApiError } from '../api/apiClient';
 import { useActionAcknowledgementStream } from '../realtime/streams/useActionAcknowledgementStream';
 import { Button } from './foundation/Button';
+import { queueFullMessage } from '../utils/commandLifecycle';
 
 interface DeviceCommandControlsProps {
   deviceId: string;
@@ -13,7 +14,7 @@ interface DeviceCommandControlsProps {
 // command to MQTT" - it then waits for a device ACK. No state here is ever
 // persisted to the backend, and a timeout never claims the command or the
 // device failed (see 'ack-timeout' below).
-type DispatchState = 'idle' | 'sending' | 'sent' | 'waiting-ack' | 'acknowledged' | 'rejected' | 'ack-timeout' | 'failed';
+type DispatchState = 'idle' | 'sending' | 'sent' | 'queued' | 'waiting-ack' | 'acknowledged' | 'rejected' | 'ack-timeout' | 'failed' | 'refused';
 
 // UI-only - not backend-persisted, not a scheduler. If an ACK arrives after
 // this fires, the realtime handler below still updates the UI to the real
@@ -99,13 +100,26 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
             setMessage('No acknowledgement received yet');
           }
         }, ACK_TIMEOUT_MS);
+      } else if (result.status === ExecutionStatus.ACCEPTED_FOR_DISPATCH) {
+        // Outbox mode: NEXUS durably accepted the command and will publish it; it is NOT yet published and NOT failed. An ACK still
+        // arrives through the realtime handler above; the lifecycle (queued, published, acknowledged) is on the Actions page.
+        setState('queued');
+        setMessage('Command accepted and queued for delivery - not yet published');
+        pendingCommandIdRef.current = result.requestId;
       } else {
         setState('failed');
         setMessage(result.message);
       }
     } catch (err) {
-      setState('failed');
-      setMessage(err instanceof ApiError ? err.message : 'Command failed');
+      if (err instanceof ApiError && err.status === 429) {
+        // A refusal writes nothing (P4.6): say that it was not queued, and do not call it a delivery failure.
+        const scope = (err.data as { scope?: unknown } | undefined)?.scope;
+        setState('refused');
+        setMessage(queueFullMessage(scope));
+      } else {
+        setState('failed');
+        setMessage(err instanceof ApiError ? err.message : 'Command failed');
+      }
     }
   };
 
@@ -114,6 +128,7 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
   // --primary chip. No dispatch/ACK logic above this line changed.
   const messageColor =
     state === 'failed' || state === 'rejected' ? 'var(--danger)' :
+    state === 'refused' ? 'var(--warning)' :
     state === 'acknowledged' ? 'var(--success)' :
     'var(--foundation-muted-fg)';
 

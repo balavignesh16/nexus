@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { DeviceCommandControls } from './DeviceCommandControls';
 import { deviceApi } from '../api/deviceApi';
 import { ApiError } from '../api/apiClient';
@@ -148,6 +148,71 @@ describe('DeviceCommandControls - truthful command dispatch UI', () => {
     fireEvent.click(screen.getByText('Turn LED OFF'));
 
     await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('Device is offline'));
+  });
+
+  it('an outbox-accepted command is shown as queued for delivery - not as failed, not as published', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockResolvedValue({
+      executionId: 'exec-q',
+      requestId: 'req-q',
+      matchId: null,
+      actionType: 'SEND_COMMAND',
+      parameters: {},
+      status: 'ACCEPTED_FOR_DISPATCH',
+      timestamp: new Date().toISOString(),
+      message: 'Durably accepted; MQTT delivery not yet known',
+    });
+
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+    fireEvent.click(screen.getByText('Turn LED ON'));
+
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('queued for delivery'));
+    const text = screen.getByTestId('device-command-result').textContent!.toLowerCase();
+    expect(text).toContain('not yet published');
+    expect(text).not.toContain('failed');
+    expect(text).not.toContain('command sent');
+    expect(text).not.toMatch(/led is (on|off)/);
+  });
+
+  it('a queued command is still resolved by a later device acknowledgement', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockResolvedValue({
+      executionId: 'exec-q2', requestId: 'req-q2', matchId: null, actionType: 'SEND_COMMAND', parameters: {},
+      status: 'ACCEPTED_FOR_DISPATCH', timestamp: new Date().toISOString(), message: 'Durably accepted',
+    });
+    const view = renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+    fireEvent.click(screen.getByText('Turn LED ON'));
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('queued for delivery'));
+
+    act(() => view.emitActionAcknowledged({ commandId: 'req-q2', deviceId: 'dev-1', status: 'ACCEPTED', message: '', timestamp: Date.now() }));
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('Acknowledged'));
+  });
+
+  it('a queue-full refusal (429) says nothing was queued or sent and is not called a failure', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockRejectedValue(
+      new ApiError(429, 'raw backend text that must not be shown', { status: 429, code: 'COMMAND_QUEUE_FULL', scope: 'DEVICE' }));
+
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+    fireEvent.click(screen.getByText('Turn LED ON'));
+
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('This device already has too many commands waiting'));
+    const text = screen.getByTestId('device-command-result').textContent!;
+    expect(text).toContain('not queued');
+    expect(text).toContain('nothing was sent');
+    expect(text.toLowerCase()).not.toContain('failed');
+    expect(text).not.toContain('raw backend text');
+  });
+
+  it('a global queue-full refusal names the system, not the device', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockRejectedValue(new ApiError(429, 'x', { scope: 'GLOBAL' }));
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+    fireEvent.click(screen.getByText('Turn LED OFF'));
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('NEXUS is holding too many commands'));
+  });
+
+  it('other API errors keep their existing truthful message', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockRejectedValue(new ApiError(500, 'Server error'));
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[capability()]} />);
+    fireEvent.click(screen.getByText('Turn LED ON'));
+    await waitFor(() => expect(screen.getByTestId('device-command-result')).toHaveTextContent('Server error'));
   });
 
   it('shows a truthful error message when the request itself fails (e.g. 404/400)', async () => {

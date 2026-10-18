@@ -32,6 +32,7 @@ class RuleExplanationPersistedFactsIntegrationTest extends TypedTriggerSupport {
         UUID loserB = rule("explain conflict b", 2, trigger, ledCommand(other, false));
         UUID alert = rule("explain alert", 3, trigger, alert());
         ingest(trigger, 30, now);
+        awaitDelivery();          // with the outbox ON the command is published by the dispatcher after the acceptance
         long revision = sql.queryForObject("SELECT rule_revision FROM rule_matches WHERE rule_id=?", Long.class, command);
 
         var selected = explanations.explain(matchOf(command));
@@ -74,6 +75,7 @@ class RuleExplanationPersistedFactsIntegrationTest extends TypedTriggerSupport {
         UUID trigger = device(), target = device();
         UUID rule = rule("explain stable", 1, trigger, ledCommand(target, true));
         ingest(trigger, 30, now);
+        awaitDelivery();          // with the outbox ON the command is published by the dispatcher after the acceptance
         UUID match = matchOf(rule);
         var before = explanations.explain(match);
 

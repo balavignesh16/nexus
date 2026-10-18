@@ -58,6 +58,7 @@ class RuleExecutionOutcomeIntegrationTest extends TypedTriggerSupport {
         var c = candidate(rule);
         assertEquals("ACCEPTED", c.get("outcome"));
         assertNull(c.get("outcome_reason"));
+        awaitDelivery();                                              // with the outbox ON the dispatcher publishes after the acceptance
         var h = history(c.get("request_id"));
         assertEquals("SUCCESS", h.get("status"), "P2.4: SUCCESS is publication to the disposable broker");
         assertNotNull(h.get("published_at"));
@@ -117,7 +118,7 @@ class RuleExecutionOutcomeIntegrationTest extends TypedTriggerSupport {
         assertEquals("FAILURE", history(c.get("request_id")).get("status"));
         assertEquals(0, count("SELECT count(*) FROM twin_state_transitions WHERE transition_type='DESIRED_STATE_CHANGED' AND command_id=?", c.get("request_id")));
         assertEquals(0, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", target));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void withNoActionHistoryRowNothingIsClaimed() {

@@ -54,7 +54,7 @@ class RuleTypedAuthorizationBindingIntegrationTest extends TypedTriggerSupport {
             assertEquals(0, count("SELECT count(*) FROM current_twin_verification_state WHERE device_id=?", d));
             assertEquals(0, count("SELECT count(*) FROM twin_state_transitions WHERE device_id=? AND transition_type IN ('DESIRED_STATE_CHANGED','CONVERGENCE_CHANGED')", d));
         }
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     private void denied(Planned p, ActionExecutionRequest forged, String expected) {
@@ -96,6 +96,6 @@ class RuleTypedAuthorizationBindingIntegrationTest extends TypedTriggerSupport {
         assertDoesNotThrow(() -> new TransactionTemplate(transactions).executeWithoutResult(tx -> authorization.check(exact, new ActionContext(null, p.pinned()))));
         engine.process(List.of(exact), new ActionContext(null, p.pinned()), "exact");
         assertEquals(1, count("SELECT count(*) FROM action_history WHERE request_id=?", p.requestId()));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 }

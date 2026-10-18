@@ -98,7 +98,7 @@ class DryRunApiIntegrationTest extends TypedTriggerSupport {
         assertTrue(id.startsWith("sim-"));
         assertThrows(IllegalArgumentException.class, () -> UUID.fromString(id), "a simulated id can never be replayed as a command/request id");
         assertEquals(0, count("SELECT count(*) FROM action_history"));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void falseAndZeroAreValuesNotMissingInput() throws Exception {
