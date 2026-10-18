@@ -2,9 +2,9 @@
 
 Date: 2026-10-18.
 
-Status: **P5.0 DRAFT FOR REVIEW (documentation only). P5.1 to P5.8 are NOT authorised.** Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.0 AMENDED (second revision, 2026-10-18; documentation only). P5.1 to P5.8 are NOT authorised.** Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
-Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (128 scenarios, all PLANNED). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
+Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (152 scenarios, all PLANNED: the original 128 unchanged plus 24 added by the amendment). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
 ## 1. Entry gate for every slice
 
@@ -58,9 +58,11 @@ Documents only: contract, ticket, ledger. No source, no schema file, no migratio
 
 ### P5.1 Versioned wire contract, schemas, fixtures, CLI and the V41 spike
 
-Authority: contract 6 to 8, 12, 13. Ledger: sections A, B (most), J. Scenarios: 30.
+Authority: contract 6 to 8, 12, 13. Ledger: sections A, B (most), J, L (part). Scenarios: 35.
 
 Deliverables: `contracts/v1/*.schema.json`, `contracts/versions.json`; the shared rule module (device equality, freshness); `contracts/fixtures/firmware-v1/` with provenance sidecars and the drift detector; the Python package `nexus_contract` with the `validate` CLI; the backend contract test and the differential corpus test; the V41 spike: apply the proposed SQL to a disposable copy, prove the V37 topic CHECK accepts an HTTP-assigned device's command row, and produce V41 only if the spike passes and the owner has authorised it.
+
+**Design spikes that must finish before the dependent code (contract section 20):** S1 (apply the proposed V41 to a disposable V40 copy and push an HTTP-assigned device's outbox row through every V37/V39 CHECK and guard trigger, in particular the topic CHECK `topic = 'nexus/devices/' || device_id || '/commands'`), S2 (how `reason_code` and the outcome message are chosen, to carry an evidence kind without touching MQTT assertions), S8 (cost of a PostgreSQL-only class with and without a shared container, and the projected segmented backend time). A falsified spike stops the dependent work and is reported before code. Also in this slice: the strict known-field validation and `requires` rules of contract 6.1, and the extension of `backend_batches.py` by addition only (contract 21: required reports, no omitted or duplicated class, the full gate failing on any missing or failed segment, and the transparent time record).
 
 Verification: fixtures from the firmware source at the baseline, accept and reject, both directions; version-resolution table; evolution test; backend and CLI agree on the whole corpus; migration tests on an empty and a populated database; mutation on a schema.
 
@@ -68,9 +70,11 @@ Gate: contract tests, tooling tests, the migration tests, `--fast`.
 
 ### P5.2 Adapter SPI, registry, intake ports and boundary tests (no behaviour change)
 
-Authority: contract 3 to 5. Ledger: sections C, K (parts). Scenarios: 15.
+Authority: contract 3 to 5. Ledger: sections C, K, L (parts). Scenarios: 16.
 
 Deliverables: `adapter.spi` (interfaces and records); `adapter.core` (registry, assignment check, intake bridges, egress router, descriptor and diagnostics); the architecture tests of section 3; the fixed rejection vocabulary; the device transport assignment API (read and a guarded update that rejects unknown transports).
+
+Also: the inventory half of spike S6 (every acceptance-time connectivity and client-connected check, with file and line) and the `TransportEligibility` port with the unchanged MQTT rule behind it (contract 10.8); the MQTT behaviour must stay identical and no Twin or Rule class may change.
 
 Constraint: wiring only. No existing class changes behaviour; the dispatcher still receives the MQTT publisher through the router with a single implementation.
 
@@ -84,13 +88,15 @@ Deliverables: `adapter.mqtt` (`MqttJsonAdapter`: decoder, lifecycle, egress, con
 
 Risk and control: this is the slice most likely to change behaviour silently. Controls: the existing listener, publisher, ACK, status, outbox, crash-smoke and lifecycle tests pass **with no assertion edited**; a differential test over a generated corpus; the Phase 3 suite in both modes; manual acknowledge ordering proven on a real broker.
 
-### P5.4 HTTP/webhook adapter: ingest, credentials, and (only if signed off) pull delivery
+### P5.4 HTTP/webhook adapter: ingest, credentials, and (only if the pull design survives its spikes) pull delivery
 
-Authority: contract 9, 10, 11. Ledger: sections E, F, B (part). Scenarios: 34.
+Authority: contract 9, 10, 11, 9.8.1. Ledger: sections E, F, L and B (part). Scenarios: 52.
 
-Deliverables: the three ingest endpoints; credential verification, rotation and revocation; the administrative command (decision D7); bounds and the bind guard; HTTP status mapping; if and only if contract section 10 is authorised separately: the pull endpoint, the `HTTP_SERVED` evidence kind and the extended statements. Without that sign-off the adapter is ingest-only and the section F scenarios become DEFERRED with the reason.
+Part 1, ingest and credentials (D2, D7): the three ingest endpoints under `/api/v1/device-adapter/`; credential verification with the HMAC-SHA-256 pepper design; the `nexus-credentials` administrative CLI (create, rotate, revoke, list, audit) with its dedicated least-privilege database role, one-time secret display, owner-only output file, audit events, and the architecture tests that the backend and the CLI expose no network surface for credential administration; bounds, status mapping, the bind guard, the `last_valid_contact_at` write (at most every 5 s per device, database clock) for D9; cross-implementation hashing test (spike S7).
 
-Gate: negative authentication tests, impersonation tests, fault injection for the serve outcomes, the Phase 4 suites unchanged.
+Part 2, outbound pull (D8, D9): **entry condition:** spikes S3 (what Tomcat can observe), S4 (process-kill behaviour of a pull handler), S5 (long-poll cost without a held connection) and S6 (eligibility window against the measured polling cadence) are complete and recorded, and the owner has authorised the outbound part. Then: `POST .../commands/pull` with the exact transitions of contract 10.3; the `HTTP_SERVED` evidence kind and the additive `delivery.evidenceKind` / `deliveryEvidence` members with the updated statements and frontend labels (contract 11); the `TransportEligibility` implementation for HTTP (a valid authenticated contact within the 60-second initial window, finalised from S6) behind the core port. If any spike falsifies the design, Part 2 is not built: the HTTP adapter is ingest-only, the section F and L pull scenarios are marked DEFERRED with the reason, and the conformance report says "command egress: not supported".
+
+Gate: negative authentication, impersonation, ingest and credential-CLI tests; fault injection for the five kill points; the Phase 3 suite with the outbox OFF and ON in sequential batches; the Phase 4 suites and the crash smoke unchanged.
 
 ### P5.5 Simulator adapter, Python SDK and the freshness correction (D4)
 
@@ -131,17 +137,29 @@ Deliverables: the Phase 5 gate checks; the full Phase 3 suite OFF and ON in batc
 | I | Conformance and extensibility | 8 |
 | J | Migration V41 | 8 |
 | K | Observability, operations, gate | 10 |
-| | **Total (unique IDs P5-001 to P5-128)** | **128** |
+| L | Amendment scenarios (D7 to D10, version refinement) | 24 |
+| | **Total (unique IDs P5-001 to P5-152)** | **152** |
 
-All 128 are PLANNED. By slice: P5.1 30, P5.2 15, P5.3 13, P5.4 34, P5.5 9, P5.6 10, P5.7 9, P5.8 8.
+All 152 are PLANNED. By slice: P5.1 35, P5.2 16, P5.3 13, P5.4 52, P5.5 9, P5.6 10, P5.7 9, P5.8 8. The IDs P5-001 to P5-128 are the original P5.0 set; P5-129 to P5-152 were added by the amendment, and none was removed or renumbered.
 
-## 6. Open decisions for the owner (beyond D1 to D6)
+## 6. Decisions: resolved, and what is still open
 
-- **D7. Credential administration surface (needed before P5.4).** Proposal: a local administrative command only; no REST endpoint to create, rotate or revoke credentials until the platform has an authorisation model. Reason: with no platform authentication, an open endpoint would let any caller mint a device credential.
-- **D8. HTTP command delivery sign-off (needed before the pull part of P5.4).** The design of contract section 10 and its evidence-kind extension (section 11) must be accepted as written, amended, or declined. Declining makes the HTTP adapter ingest-only; the conformance report will say so.
-- **D9. Connectivity for HTTP devices (needed with D8).** Acceptance currently requires the MQTT presence of a device. Proposal: for HTTP-assigned devices acceptance uses "authenticated contact within a configured recency window", recorded as its own fact, not as MQTT presence. Alternative: HTTP devices cannot receive manual commands in Phase 5. Either must be chosen before any pull code.
-- **D10. Gate budget.** Section 7 estimates that Phase 5 test classes may push the backend check towards or beyond 1,800 s. Decide in P5.1, from a measurement, whether to share containers, to split the check, or to ask for a budget change.
-- **D11 (informational).** The simulator's current acceptance of future-dated commands is a behaviour change visible to existing simulator users; D4 already approves it.
+Resolved in the amendment review (2026-10-18), with the contract section that now holds the wording:
+
+- **D7 approved:** credentials are created, rotated and revoked only by a local administrative CLI; no unauthenticated or publicly reachable REST endpoint and no hidden HTTP interface (contract 9.8, 9.8.1).
+- **D8 conditionally approved:** HTTP pull stays a Phase 5 objective as an authenticated POST; the ten pre-implementation requirements are answered in contract section 10 (exact transitions 10.3, HTTP versus broker 10.5 and 10.6, kill behaviour 10.7, polling retries 10.9, schema check 10.12) and are confirmed by spikes S1 to S5 before any outbound code; if the Phase 4 safety contract cannot be met HTTP stays ingest-only with the outbound scenarios DEFERRED (10.13).
+- **D9 approved with refinement:** command eligibility from a recent valid authenticated contact on backend time, initial window 60 seconds, finalised against the measured polling cadence (spike S6); an eligibility signal, not connectivity; invalid or revoked credentials, malformed requests and inactive devices never establish it; implemented through a core `TransportEligibility` port, with no Twin or Rule change (contract 10.8).
+- **D10 approved:** bounded sequential backend segments with exhaustive discovery, no passing with a missing or failed segment, existing limits kept, additional time recorded (contract 21; section 7 below).
+- **Contract-version refinement:** strict known-field validation for a newer minor; unknown optional fields ignored and counted; unsupported semantics rejected through `requires` (contract 6.1); legacy firmware unchanged.
+
+Still open (none blocks P5.1):
+
+1. **Evidence labelling for external Phase 4 clients.** The state stays `PUBLISHED` for an HTTP-served command and the evidence kind is added as new members (contract 11). A client outside this repository that ignores the new members would still read `PUBLISHED`. Accept this residual risk with release notes, or require a new state value (which needs a migration of the V37 constraints)? The recommendation is to accept it: there is no external client in the repository and HTTP devices exist only after an explicit operator assignment.
+2. **Final value of the eligibility window** (60 s initial) after the cadence measurement in spike S6, and whether a device may configure its own cadence.
+3. **Credential CLI implementation language** (Python sharing the hashing specification, or a Spring-free Java main) and the operator procedure for creating the two database roles; both are decided in the P5.4 design with spike S7.
+4. **Pepper management** in deployments (environment variable versus secret file) and the procedure for changing it (it invalidates every credential).
+5. **Gate budget outcome** from spike S8: shared containers alone, or a split of the backend check. No timeout is raised without a separate measured justification (D10).
+6. **Hardware validation of the ESP32 library** remains outside Phase 5; a later, separately authorised flashing exercise is needed before any hardware claim.
 
 ## 7. Validation cost estimates and resource impact
 
@@ -159,7 +177,9 @@ Measured baseline (P4-FINAL gate on the 16 GB development machine with a 5 GB WS
 | P5.8 | 2 | +10 s | mutation campaign: about 12 runs of 30 to 90 s each, outside the gate |
 | **Total** | **about 30 backend classes** | **about +300 s without sharing, +180 s with** | |
 
-Consequence: 1,541 s plus the estimate gives about 1,720 to 1,840 s, i.e. at or over the unchanged 1,800 s budget. The mitigation planned in P5.1 is to give the new PostgreSQL-only classes a shared container (as `CrashInfra` does for the crash campaign) and to keep the broker-dependent classes few; if the measured total still exceeds 1,750 s the gate is split into two named checks (core and adapters) rather than raising a timeout, which needs the owner's approval (D10).
+D10 reporting rule: every slice's evidence and the gate output state the number of segments, classes and tests, the seconds per segment and in total, the lowest free memory observed, and the difference from the 1,541 s baseline, so the additional execution time of Phase 5 is visible slice by slice. A segment that is missing, failed, timed out or without a report fails the backend check and therefore the full gate.
+
+Consequence: 1,541 s plus the estimate gives about 1,720 to 1,840 s, i.e. at or over the unchanged 1,800 s budget. The mitigation planned in P5.1 is to give the new PostgreSQL-only classes a shared container (as `CrashInfra` does for the crash campaign) and to keep the broker-dependent classes few; if the measured total still exceeds 1,750 s the gate is split into two named checks (core and adapters) rather than raising a timeout, which, as a change of the limits, needs the owner's separate approval on the measured numbers (D10).
 
 Memory: each batch keeps its 1.4 GB heap bound; the HTTP tests need no Mosquitto container, so they are lighter than the MQTT classes; the ESP32 native build is a small C++ process. No new long-lived service is added to the gate.
 
@@ -174,10 +194,10 @@ Wall-clock for a Phase 5 milestone commit: about the same 30 minutes for `--full
 | R5.3 | Version policy ambiguity (what N means; silent reinterpretation of an unsupported major) | Medium | High | Total resolution function with a table test; N defined as a major; listed supported versions tested against the code | P5.1 |
 | R5.4 | Schemas drift between backend, CLI and the ESP32 library | High | Medium | One authoritative directory; byte-equality build test; differential corpus; drift detector on the firmware source | P5.1 |
 | R5.5 | Credential leak or timing oracle in the HTTP adapter | Medium | High | Hash only; constant-time comparison; dummy compare for unknown ids; log scan test; no credential in URLs; negative suite | P5.4 |
-| R5.6 | HTTP devices have no observable presence, so the acceptance connectivity guard and the client-connected check are MQTT-shaped | High | High (blocks HTTP commands) | D9 decision before pull code; explicit fact for HTTP contact; otherwise HTTP is ingest-only | P5.4 |
+| R5.6 | HTTP devices have no observable presence, so the acceptance connectivity guard and the client-connected check are MQTT-shaped | High | High (blocks HTTP commands) | D9 resolved: a `TransportEligibility` core port, HTTP rule = valid authenticated contact within 60 s on the database clock; spike S6 inventories every guard site first; if it cannot be made transport-aware without touching Twin or Rule, HTTP is ingest-only | P5.2, P5.4 |
 | R5.7 | Pull delivery weakens Phase 4 truthfulness (a served response read as device receipt) | Medium | High | Evidence kinds named in every statement; `HTTP_SERVED` defined as weaker than the broker; conservative UNCERTAIN; never re-serve | P5.4 |
 | R5.8 | A device that polls slower than the delivery window loses commands | High | Medium | Visible EXPIRED dead letters; documented poll interval; SDK enforces at most 5 s | P5.4, P5.6 |
-| R5.9 | Credential administration without platform authentication lets any caller mint a credential | High if exposed | High | D7: administrative command only; REST creation not built | P5.4 |
+| R5.9 | Credential administration without platform authentication lets any caller mint a credential | High if exposed | High | D7 resolved: local CLI only, least-privilege database role, no network surface (architecture tests), audit events; residual: anyone with the operating-system account and database login can run it, stated as an operations privilege | P5.4 |
 | R5.10 | V41 touches `devices`, a hot table, or conflicts with the V37 topic CHECK | Low | High | Constant-default column (no rewrite); spike before authoring; populated-database test; forward-only | P5.1 |
 | R5.11 | The simulator freshness fix breaks tests or users that depended on 300 s or on future-dated commands | Medium | Low | The fix is approved (D4); tests state their window explicitly; release note | P5.5 |
 | R5.12 | The gate exceeds its 1,800 s budget or exhausts memory again | High | Medium | Measured plan in section 7; shared containers; split check only with approval; bounded batches | all |
@@ -185,6 +205,10 @@ Wall-clock for a Phase 5 milestone commit: about the same 30 minutes for `--full
 | R5.14 | PlatformIO native tooling is unavailable offline or heavy on this machine | Medium | Medium | Confirm the offline cache in P5.1; fall back to a plain CMake host build with the same corpus | P5.6 |
 | R5.15 | Over-claiming: "secure", "exactly once", "hardware validated", "supports any transport" | Medium | High | Section 19 of the contract; claims audit extended to every new document, README and UI string | P5.8 |
 | R5.16 | F1 (connection-pool exhaustion) interacts with a new request-handling path | Low to medium | Medium | HTTP intake uses the same transaction boundaries as MQTT; bounded per-device concurrency; F1 stays tracked and is not claimed fixed | P5.4 |
+| R5.18 | An external Phase 4 client reads `PUBLISHED` for an HTTP-served command and shows it as an MQTT publication | Low | Medium | Additive `evidenceKind` members, explanation sentences and `ActionHistory.message` that name HTTP, this repository's frontend labelled by evidence, release notes; open question 1 | P5.4 |
+| R5.19 | The 60-second eligibility window accepts commands for a device that has gone away (a false positive), or rejects a slow poller (a false negative) | Medium | Medium | The cost of a false positive is a visible EXPIRED dead letter, never a late delivery (window at most 20 s); window bounded 15 to 300 s and finalised from the cadence measurement (S6) | P5.4 |
+| R5.20 | A framework write that succeeds is mistaken for receipt | Medium | High | `HTTP_SERVED` defined as weaker than the broker confirmation and named in every statement; uncertain by default; spike S3 turned into tests | P5.4 |
+| R5.21 | A newer-minor payload smuggles semantics a receiver silently ignores | Low | Medium | Strict known-field validation, `requires` rejection, counted unknown fields (contract 6.1) | P5.1 |
 | R5.17 | Scope creep into later adapters (Modbus, BLE, OPC UA, serial, CAN, vendor clouds) | Medium | Medium | D5 defers them; the conformance kit and the test adapter make them cheap later, not now | all |
 
 ## 9. What is not authorised by this ticket

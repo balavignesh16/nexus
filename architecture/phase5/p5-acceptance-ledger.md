@@ -2,7 +2,7 @@
 
 Date: 2026-10-18 (P5.0).
 
-Status: **P5.0 DRAFT. 128 scenario IDs defined; 128 PLANNED, 0 COVERED, 0 DEFERRED. Nothing is implemented; no scenario is proven.**
+Status: **P5.0 DRAFT. 152 scenario IDs defined; 152 PLANNED, 0 COVERED, 0 DEFERRED. Nothing is implemented; no scenario is proven.** The first 128 IDs (P5-001 to P5-128) are the original P5.0 set, unchanged in number and order (their wording was clarified in place where the D7 to D10 amendments required it); P5-129 to P5-152 (section L) were added by the amendment.
 
 Normative requirements: [adapter-contract.md](adapter-contract.md). Execution and dependency plan: [p5-implementation-ticket.md](p5-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract. The accepted Phase 4 ledger ([p4-acceptance-ledger.md](../phase4/p4-acceptance-ledger.md)) is preserved unchanged and its guarantees are listed in contract section 16.
 
@@ -19,10 +19,10 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | Status | Count |
 |---|---|
-| PLANNED | 128 |
+| PLANNED | 152 |
 | COVERED | 0 |
 | DEFERRED | 0 |
-| **Total** | **128** |
+| **Total** | **152** |
 
 
 ## A. Wire contract and JSON Schemas
@@ -39,7 +39,7 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-008 | ACK schema pins status and reason | Unit | status is ACCEPTED or REJECTED; reason is optional; the timestamp is an integer; an unknown status is rejected. | §7 | P5.1 | PLANNED | not yet written |
 | P5-009 | Status message accepts only online and offline | Unit | The plain texts online and offline are accepted case-sensitively as today; anything else is rejected without being treated as a state change. | §7 | P5.1 | PLANNED | not yet written |
 | P5-010 | Rules a schema cannot express are in a shared rule module | Unit | Topic-versus-payload device equality and command freshness are implemented once, annotated in x-nexus-rules, and exercised by the shared corpus. | §8 | P5.1 | PLANNED | not yet written |
-| P5-011 | Unknown optional fields are tolerated within a major | Unit | A payload with an extra optional field validates under the schemas of the same major. | §6 | P5.1 | PLANNED | not yet written |
+| P5-011 | Unknown optional fields are tolerated within a major | Unit | A payload with an extra optional field validates under the schemas of the same major; the extra field is ignored, not interpreted (see P5-143 and P5-144 for the strict-known-field rules). | §6, §6.1 | P5.1 | PLANNED | not yet written |
 | P5-012 | Required-field removal is rejected | Mutation check | A mutated schema that makes a required field optional fails the corpus. | §6, §8 | P5.1 | PLANNED | not yet written |
 | P5-013 | Closed rejection vocabulary | Unit | Every rejection produced by the decoders is one of the fixed codes of section 7; a test enumerates them and fails on a new, undocumented code. | §7 | P5.2 | PLANNED | not yet written |
 | P5-014 | Schema change process is recorded | Validation gate / audit | A test fails if a published schema file changes without a matching entry in the versions file and the ledger. | §6 | P5.1 | PLANNED | not yet written |
@@ -52,7 +52,7 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-015 | Unversioned messages resolve to legacy-v1 | Unit | No contractVersion resolves to legacy-v1 and is counted nexus.adapter.contract{version=legacy-v1}. | §6 | P5.1 | PLANNED | not yet written |
 | P5-016 | Version resolution is a total function | Unit | A table-driven test covers: absent, empty, non-string, malformed, 1.0, 1.m known, 1.m above the known minor, 2.0, 0.9, 10.0, negative numbers, leading zeros. | §6 | P5.1 | PLANNED | not yet written |
 | P5-017 | Unsupported major is rejected permanently, never reinterpreted | Unit | 2.0 and 0.9 give UNSUPPORTED_CONTRACT_MAJOR; the message is not decoded as an older major; the counter and diagnostics show it. | §6 | P5.1 | PLANNED | not yet written |
-| P5-018 | A higher minor within the supported major is accepted with unknown optional fields ignored | Unit | 1.5 under a backend that knows 1.0 resolves to 1.0, ignores unknown optional fields, and is counted forward-minor. | §6 | P5.1 | PLANNED | not yet written |
+| P5-018 | A higher minor within the supported major is accepted only under strict known-field validation | Unit | 1.5 under a backend that knows 1.0 resolves to 1.0; every known field is validated exactly as in 1.0; unknown optional fields are ignored and counted; the message is counted forward-minor. | §6, §6.1 | P5.1 | PLANNED | not yet written |
 | P5-019 | Header and body version conflict is rejected | API (MockMvc) | X-Nexus-Contract-Version differing from the body contractVersion gives CONTRACT_VERSION_CONFLICT. | §6 | P5.4 | PLANNED | not yet written |
 | P5-020 | The support window lists only the actual versions | Validation gate / audit | versions.json lists exactly legacy-v1 and 1.0 with major 1 only; a test fails if the code accepts a version not listed or lists one the code rejects. | §6 | P5.1 | PLANNED | not yet written |
 | P5-021 | Every firmware fixture validates as legacy-v1 and as 1.0 | Unit | The golden accept fixtures pass both resolutions. | §13 | P5.1 | PLANNED | not yet written |
@@ -117,7 +117,7 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-062 | Redelivered telemetry is deduplicated by messageId over HTTP | PostgreSQL integration | Identical resend gives 200 with duplicate true and one stored row; a conflicting resend gives 409. | §9.10 | P5.4 | PLANNED | not yet written |
 | P5-063 | HTTP status mapping is complete and stable | API (MockMvc) | Each rejection code maps to exactly the status of section 15; 4xx are permanent, 5xx and 429 are retryable. | §15 | P5.4 | PLANNED | not yet written |
 | P5-064 | The adapter refuses an unsafe bind | Validation gate / audit | With credentials enabled on a non-loopback address and no forwarded-https guard the adapter does not start. | §9.9 | P5.4 | PLANNED | not yet written |
-| P5-065 | Credential administration is not exposed on the open API | Architecture test | No REST mapping creates, rotates or revokes a credential (decision D7); the administrative command works and is audited. | §9.8 | P5.4 | PLANNED | not yet written |
+| P5-065 | Credential administration is not exposed on any network surface | Architecture test | No REST mapping, WebSocket message, actuator endpoint or MQTT topic creates, rotates, revokes or lists credentials, and the administrative CLI opens no listening socket and starts no HTTP server (decision D7); the CLI works and is audited. | §9.8, §9.8.1 | P5.4 | PLANNED | not yet written |
 | P5-066 | Authentication claims are limited | Validation gate / audit | A documentation and UI-string audit finds no statement that the platform is authenticated or secure. | §18 | P5.8 | PLANNED | not yet written |
 
 
@@ -135,12 +135,12 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-074 | A served command is never served twice | Concurrency (multiple connections / instances) | Two simultaneous pulls for one device yield at most one response with the command; the other gets 204. | §10.5 | P5.4 | PLANNED | not yet written |
 | P5-075 | Per-device ordering is preserved | PostgreSQL integration | A later command is not served while an earlier one of the device is unresolved. | §10.3 | P5.4 | PLANNED | not yet written |
 | P5-076 | The uncertain hold applies to HTTP | PostgreSQL integration | After an UNCERTAIN serve, later commands of the device are held for the R32 interval. | §10.5 | P5.4 | PLANNED | not yet written |
-| P5-077 | Serving is not an ACK and an ACK is not convergence | PostgreSQL integration | After a serve the ACK fields are empty and verification is unchanged; a posted ACK is recorded by the unchanged core. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-077 | Serving is not an ACK and an ACK is not convergence | PostgreSQL integration | After a serve the ACK fields are empty and verification is unchanged; a posted ACK is recorded by the unchanged core. | §10.3 | P5.4 | PLANNED | not yet written |
 | P5-078 | The HTTP ACK is correlated by command and device | API (MockMvc) | An ACK for another device's command is rejected; first-ACK-wins, conflict and late-ACK facts behave as over MQTT. | §10.7 | P5.4 | PLANNED | not yet written |
-| P5-079 | A device that polls too rarely sees visible expiry | PostgreSQL integration | A command not pulled within its window ends as a dead letter EXPIRED and appears in the dead-letter listing. | §10.9 | P5.4 | PLANNED | not yet written |
-| P5-080 | Pull is authenticated, authorised and transport-checked | API (MockMvc) | Missing, revoked and cross-device credentials and a non-HTTP device are rejected as in section 9. | §10.1 | P5.4 | PLANNED | not yet written |
+| P5-079 | A device that polls too rarely sees visible expiry | PostgreSQL integration | A command not pulled within its window ends as a dead letter EXPIRED and appears in the dead-letter listing. | §10.10 | P5.4 | PLANNED | not yet written |
+| P5-080 | Pull is authenticated, authorised, transport-checked and eligibility-recorded | API (MockMvc) | Missing, revoked and cross-device credentials and a non-HTTP device are rejected as in section 9; only a valid pull records a contact (see P5-140). | §10.1, §10.8 | P5.4 | PLANNED | not yet written |
 | P5-081 | Statements name the evidence kind | Unit | The lifecycle statements and the rule-match explanation say 'served over HTTP' and never 'published to the broker' for an HTTP command; no sentence claims receipt or actuation. | §11 | P5.4 | PLANNED | not yet written |
-| P5-082 | HTTP command delivery is declared only when proven | Validation gate / audit | The adapter's descriptor lacks CommandEgress until every scenario of this section is COVERED; the conformance report reflects it. | §10.11 | P5.7 | PLANNED | not yet written |
+| P5-082 | HTTP command delivery is declared only when proven | Validation gate / audit | The adapter's descriptor lacks CommandEgress until every scenario of this section is COVERED; the conformance report reflects it. | §10.13 | P5.7 | PLANNED | not yet written |
 
 
 ## G. Simulator adapter and Python SDK
@@ -218,16 +218,46 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-127 | Phase 3 suite passes with the outbox OFF and ON at the end of Phase 5 | Validation gate / audit | 776 tests in both modes with no assertion changed. | §16 | P5.8 | PLANNED | not yet written |
 | P5-128 | Mutation campaign of Phase 5 | Mutation check | At least ten recorded mutations (schema, version resolution, authentication, transport check, device match, evidence kind, uncertain re-serve, size bound, freshness direction, dependency rule) are each killed by the intended tests and restored byte for byte. | §14 | P5.8 | PLANNED | not yet written |
 
+
+## L. P5.0 amendment scenarios (D7 to D10 and the version refinement); the IDs above are unchanged
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P5-129 | Pull is POST only | API (MockMvc) | A GET, PUT or DELETE on the pull path answers 405 and changes nothing; the credential is accepted only in the Authorization header. | §10.1 | P5.4 | PLANNED | not yet written |
+| P5-130 | The pull claim and outcome transitions match the specified table | PostgreSQL integration | A recorded run of each outcome shows exactly the states, columns and history facts of the table in section 10.3 (T2 claim, T4 NOT_SENT, CONFIRMED with HTTP_SERVED, UNCERTAIN) and nothing else. | §10.3 | P5.4 | PLANNED | not yet written |
+| P5-131 | Kill before the claim loses nothing | Fault injection | The backend process is killed with a command QUEUED; after restart a pull serves it once inside its window; a pull inside the lease of nothing claims nothing. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-132 | Kill after the claim and before any byte is uncertain, never re-served | Fault injection | A killed process leaves IN_FLIGHT; lease expiry gives DEAD_LETTER UNCERTAIN_EXPIRED; no later pull returns the command; the hold applies. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-133 | Kill during response writing is uncertain, and a truncated body is not a command | Fault injection | A kill mid-body gives the uncertain dead letter; the SDK and the reference device reject a body that fails the length, JSON or hash check. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-134 | Kill after the response and before the outcome transaction | Fault injection | The command is dead-lettered UNCERTAIN_EXPIRED even though the device may hold it; a later ACK is recorded ACK_ACCEPTED then ACK_AFTER_TERMINAL and the command is not re-served. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-135 | Kill after PUBLISHED and before the ACK | Fault injection | After restart the persisted ACK timeout is recorded once; nothing is re-served; the lifecycle API shows PUBLISHED with evidence HTTP_SERVED and ack.timedOut. | §10.7 | P5.4 | PLANNED | not yet written |
+| P5-136 | A polling retry after a lost response never causes a second unsafe delivery | PostgreSQL integration | Repeated pulls after a served, uncertain, claimed or expired command return 204; a RETRY_WAIT command is served only after its scheduled time and only because the previous attempt was NOT_SENT. | §10.9 | P5.4 | PLANNED | not yet written |
+| P5-137 | The classification follows what the framework can observe | Fault injection | Real Tomcat tests (spike S3 turned into tests): a normal read, a client that never reads, a client that closes before the write and a mid-body reset give CONFIRMED, CONFIRMED, UNCERTAIN or NOT_SENT, and UNCERTAIN as designed; no outcome claims receipt. | §10.5 | P5.4 | PLANNED | not yet written |
+| P5-138 | Delivery evidence kind is additive and never mislabels HTTP as MQTT | API (MockMvc) | delivery.evidenceKind and deliveryEvidence are present (BROKER_CONFIRMED for MQTT, HTTP_SERVED for HTTP); explanation sentences, ActionHistory.message and the frontend label say 'served over HTTP' for HTTP and 'published to the MQTT broker' only for MQTT; existing members are unchanged. | §11 | P5.4 | PLANNED | not yet written |
+| P5-139 | Eligibility follows a valid contact within the window on the database clock | PostgreSQL integration | With an injected database clock a contact 59 s old is eligible, 61 s old is not (default 60 s); the window setting is validated to 15 to 300 s at startup. | §10.8 | P5.4 | PLANNED | not yet written |
+| P5-140 | Only valid contacts establish eligibility | API (MockMvc) | Invalid, revoked, expired and wrong-device credentials, malformed and oversized requests, wrong content type and inactive devices leave last_valid_contact_at unchanged. | §10.8 | P5.4 | PLANNED | not yet written |
+| P5-141 | Eligibility is not connectivity | PostgreSQL integration | A valid contact changes nothing in the connectivity registry, produces no connectivity transition and fires no connectivity rule trigger; a posted status message is recorded as a device claim. | §10.8 | P5.4 | PLANNED | not yet written |
+| P5-142 | Transport eligibility sits behind a core port | Architecture test | CommandAcceptance and the executor guard call TransportEligibility only; the MQTT rule (registry ONLINE and client connected) is unchanged for MQTT devices; no Twin or Rule class changes. | §10.8 | P5.2 | PLANNED | not yet written |
+| P5-143 | A newer minor is validated strictly on known fields | Unit | A 1.5 message whose known field has a type, range, length, alphabet or enum value invalid under 1.0 is rejected with the field's code; a newer minor never loosens validation. | §6.1 | P5.1 | PLANNED | not yet written |
+| P5-144 | Unsupported required semantics are rejected, unknown fields are only counted | Unit | A non-empty requires array is rejected UNSUPPORTED_REQUIRED_FEATURE; unknown fields are not stored, forwarded or echoed; the counter has no field names or values as tags or log text. | §6.1 | P5.1 | PLANNED | not yet written |
+| P5-145 | Credential CLI handles the secret safely | Validation gate / audit | The key is displayed once, an output file is created owner-only and never overwritten, and a scan of captured output, logs, arguments and environment finds the secret only in the one intended place. | §9.8.1 | P5.4 | PLANNED | not yet written |
+| P5-146 | Credential CLI database role is least privilege | PostgreSQL integration | With the dedicated role the CLI can do its operations and cannot read telemetry, commands or rules, delete credentials or events, or alter other tables; the backend role can only read credentials and update the last-contact column. | §9.8.1 | P5.4 | PLANNED | not yet written |
+| P5-147 | Credential CLI audit and atomicity | PostgreSQL integration | Every operation appends an event with actor cli:<account> and no secret; a failure at any step leaves no credential and prints no key. | §9.8.1 | P5.4 | PLANNED | not yet written |
+| P5-148 | Pepper handling fails closed and both implementations agree | Differential test (backend vs CLI) | A missing pepper stops the CLI and disables credential verification; the CLI and the backend compute the same HMAC over a corpus; verification is constant time (spike S7). | §9.8.1 | P5.4 | PLANNED | not yet written |
+| P5-149 | The segmented backend check cannot pass with a missing or failed segment | Validation gate / audit | With a fake runner: a segment without a report, a crashed segment, a timed-out segment, a failing test, a duplicate class and an unexpected class each fail the check; the full gate fails with it. | §21 | P5.1 | PLANNED | not yet written |
+| P5-150 | The gate records the cost of each slice transparently | Validation gate / audit | The gate output and each slice's evidence list segments, classes, tests, seconds per segment, total seconds, lowest free memory and the difference from the 1,541 s baseline. | §21 | P5.1 | PLANNED | not yet written |
+| P5-151 | The design spikes are recorded before the dependent code | Validation gate / audit | Spike results S1 to S8 are written into the evidence section before the slice that depends on them is committed; a falsified claim is reported and the dependent work stops. | §20 | P5.1 | PLANNED | not yet written |
+| P5-152 | Outbound HTTP scenarios are deferred, not dropped, if the design cannot be met | Validation gate / audit | If a spike falsifies section 10, every section F and L pull scenario is marked DEFERRED with the reason, the descriptor lacks CommandEgress and the conformance report says not supported. | §10.13 | P5.4 | PLANNED | not yet written |
+
 ## Coverage mapping
 
 ### By slice
 
 | Slice | Scenario count | Scenario IDs |
 |---|---|---|
-| P5.1 | 30 | P5-001, P5-002, P5-003, P5-004, P5-005, P5-006, P5-007, P5-008, P5-009, P5-010, P5-011, P5-012, P5-014, P5-015, P5-016, P5-017, P5-018, P5-020, P5-021, P5-022, P5-024, P5-025, P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118 |
-| P5.2 | 15 | P5-013, P5-027, P5-028, P5-029, P5-030, P5-031, P5-032, P5-033, P5-034, P5-035, P5-036, P5-037, P5-038, P5-119, P5-123 |
+| P5.1 | 35 | P5-001, P5-002, P5-003, P5-004, P5-005, P5-006, P5-007, P5-008, P5-009, P5-010, P5-011, P5-012, P5-014, P5-015, P5-016, P5-017, P5-018, P5-020, P5-021, P5-022, P5-024, P5-025, P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118, P5-143, P5-144, P5-149, P5-150, P5-151 |
+| P5.2 | 16 | P5-013, P5-027, P5-028, P5-029, P5-030, P5-031, P5-032, P5-033, P5-034, P5-035, P5-036, P5-037, P5-038, P5-119, P5-123, P5-142 |
 | P5.3 | 13 | P5-023, P5-039, P5-040, P5-041, P5-042, P5-043, P5-044, P5-045, P5-046, P5-047, P5-048, P5-120, P5-124 |
-| P5.4 | 34 | P5-019, P5-026, P5-049, P5-050, P5-051, P5-052, P5-053, P5-054, P5-055, P5-056, P5-057, P5-058, P5-059, P5-060, P5-061, P5-062, P5-063, P5-064, P5-065, P5-067, P5-068, P5-069, P5-070, P5-071, P5-072, P5-073, P5-074, P5-075, P5-076, P5-077, P5-078, P5-079, P5-080, P5-081 |
+| P5.4 | 52 | P5-019, P5-026, P5-049, P5-050, P5-051, P5-052, P5-053, P5-054, P5-055, P5-056, P5-057, P5-058, P5-059, P5-060, P5-061, P5-062, P5-063, P5-064, P5-065, P5-067, P5-068, P5-069, P5-070, P5-071, P5-072, P5-073, P5-074, P5-075, P5-076, P5-077, P5-078, P5-079, P5-080, P5-081, P5-129, P5-130, P5-131, P5-132, P5-133, P5-134, P5-135, P5-136, P5-137, P5-138, P5-139, P5-140, P5-141, P5-145, P5-146, P5-147, P5-148, P5-152 |
 | P5.5 | 9 | P5-083, P5-084, P5-086, P5-087, P5-088, P5-089, P5-090, P5-091, P5-092 |
 | P5.6 | 10 | P5-085, P5-093, P5-094, P5-095, P5-096, P5-097, P5-098, P5-099, P5-100, P5-101 |
 | P5.7 | 9 | P5-082, P5-103, P5-104, P5-105, P5-106, P5-107, P5-108, P5-109, P5-122 |
@@ -237,19 +267,19 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | Layer | Count |
 |---|---|
-| Unit | 29 |
-| PostgreSQL integration | 26 |
-| Validation gate / audit | 15 |
-| API (MockMvc) | 14 |
+| PostgreSQL integration | 32 |
+| Unit | 31 |
+| Validation gate / audit | 20 |
+| API (MockMvc) | 17 |
 | SDK host test | 9 |
 | PostgreSQL + Mosquitto integration | 8 |
+| Fault injection | 8 |
+| Architecture test | 7 |
 | Simulator (pytest) | 7 |
-| Architecture test | 6 |
+| Differential test (backend vs CLI) | 4 |
 | Mutation check | 4 |
-| Differential test (backend vs CLI) | 3 |
 | Migration on populated database | 3 |
 | Concurrency (multiple connections / instances) | 2 |
-| Fault injection | 2 |
 
 ## Evidence not yet produced
 
