@@ -34,11 +34,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>the Digital Twin, Rule Engine, telemetry service and every Phase 4 reliability class (outbox, retry, deadlines, ordering, ACK handling,
  *       queue capacity, rate limiting) are byte-identical to the Phase 4 baseline, except for the short, named list of approved Phase 5 changes.</li>
  * </ul>
- * The last two use {@code git diff} against the validated Phase 4 commit, so they hold for the whole of Phase 5 and not only for this change.
+ * The last two use {@code git diff} from the validated Phase 4 commit to the certified end of Phase 5, so they hold for the whole of Phase 5 and stay true when a later phase changes the core.
  */
 class AdapterExtensibilityTest {
     /** The validated Phase 4 baseline every Phase 5 diff is measured from. */
     static final String PHASE4_BASELINE = "e29e215e5138de4460e9891e05859a61a098c3aa";
+    /**
+     * The certified end of Phase 5. The proof measures the Phase 5 change set (baseline to this commit), so it stays true when a later phase legitimately
+     * changes the core; a later phase has its own contract and its own diff rules.
+     */
+    static final String PHASE5_END = "1eb3f80f5ef6f646f5993cdd166310031cbe5af7";
 
     /** The only core files Phase 5 may change outside {@code adapter/}: each is an approved, tested extension point (adapter-contract.md sections 5 and 9). */
     static final Set<String> APPROVED_CORE_CHANGES = Set.of(
@@ -138,19 +143,16 @@ class AdapterExtensibilityTest {
                 "backend/src/main/java/com/nexus/action/persistence", "backend/src/main/java/com/nexus/realtime");
         for (String directory : untouched) {
             assertTrue(Files.isDirectory(ROOT.resolve(directory)), directory + " exists (otherwise the proof proves nothing)");
-            List<String> committed = git("diff", "--name-status", PHASE4_BASELINE, "--", directory);
-            assertEquals(List.of(), committed, directory + " differs from the Phase 4 baseline in the working tree");
-            List<String> untracked = git("status", "--porcelain", "--untracked-files=all", "--", directory);
-            assertEquals(List.of(), untracked, directory + " has uncommitted or untracked changes");
+            List<String> committed = git("diff", "--name-status", PHASE4_BASELINE, PHASE5_END, "--", directory);
+            assertEquals(List.of(), committed, directory + " was changed by Phase 5");
         }
     }
 
     @Test
     void p5_108_everyPhase5ChangeOutsideTheAdapterPackagesIsOnTheApprovedList() throws Exception {
-        List<String> changed = git("diff", "--name-only", PHASE4_BASELINE, "--", "backend/src/main");
-        List<String> untracked = git("status", "--porcelain", "--untracked-files=all", "--", "backend/src/main").stream().map(l -> l.substring(3).trim()).toList();
+        List<String> changed = git("diff", "--name-only", PHASE4_BASELINE, PHASE5_END, "--", "backend/src/main");
         Set<String> outside = new TreeSet<>();
-        for (String file : Stream.concat(changed.stream(), untracked.stream()).toList()) {
+        for (String file : changed) {
             if (!file.startsWith("backend/src/main/java/com/nexus/adapter/")) outside.add(file);
         }
         assertEquals(new TreeSet<>(APPROVED_CORE_CHANGES), outside, "Phase 5 changed these core files; each must be an approved, tested extension point");
