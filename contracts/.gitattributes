@@ -1,4 +1,5 @@
 fixtures/** -text
+fixtures/firmware-v1/manifest.json text eol=lf
 parity/*.json text eol=lf
 v1/*.json text eol=lf
 *.md text eol=lf
