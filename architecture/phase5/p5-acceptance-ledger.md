@@ -2,7 +2,7 @@
 
 Date: 2026-10-18 (P5.0).
 
-Status: **P5.0 DRAFT. 152 scenario IDs defined; 152 PLANNED, 0 COVERED, 0 DEFERRED. Nothing is implemented; no scenario is proven.** The first 128 IDs (P5-001 to P5-128) are the original P5.0 set, unchanged in number and order (their wording was clarified in place where the D7 to D10 amendments required it); P5-129 to P5-152 (section L) were added by the amendment.
+Status: **P5.0 DRAFT. 158 scenario IDs defined; 158 PLANNED, 0 COVERED, 0 DEFERRED. Nothing is implemented; no scenario is proven.** The first 128 IDs (P5-001 to P5-128) are the original P5.0 set, unchanged in number and order (their wording was clarified in place where the D7 to D10 amendments required it); P5-129 to P5-152 (section L) were added by the D7 to D10 amendment and P5-153 to P5-158 (section M) by the P5.1 preparation decisions of 2026-10-18; the eight section J scenarios moved from work package P5.1 to P5.V41 without any change of ID or requirement.
 
 Normative requirements: [adapter-contract.md](adapter-contract.md). Execution and dependency plan: [p5-implementation-ticket.md](p5-implementation-ticket.md). This ledger owns testable scenarios and evidence status; it does not redefine the contract. The accepted Phase 4 ledger ([p4-acceptance-ledger.md](../phase4/p4-acceptance-ledger.md)) is preserved unchanged and its guarantees are listed in contract section 16.
 
@@ -19,25 +19,25 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | Status | Count |
 |---|---|
-| PLANNED | 152 |
+| PLANNED | 158 |
 | COVERED | 0 |
 | DEFERRED | 0 |
-| **Total** | **152** |
+| **Total** | **158** |
 
 
 ## A. Wire contract and JSON Schemas
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P5-001 | Schemas exist for telemetry, command, acknowledgement and status | Unit | contracts/v1 holds one draft 2020-12 schema per message kind and contracts/versions.json lists the supported versions; every schema is itself valid. | §6, §8 | P5.1 | PLANNED | not yet written |
+| P5-001 | Schemas exist for telemetry, command, acknowledgement and status | Unit | contracts/v1 holds one draft 2020-12 schema per message kind (telemetry, command, acknowledgement, plain-text status) and contracts/versions.json lists the supported versions; every schema is itself valid. There is no connectivity schema: connectivity is an internal core observation, not a wire message. | §6, §8 | P5.1 | PLANNED | not yet written |
 | P5-002 | The backend and the CLI use the same schema files | Validation gate / audit | A build test proves the classpath copy of every schema is byte-identical to contracts/v1; the CLI reads contracts/v1 directly; no second copy exists. | §8 | P5.1 | PLANNED | not yet written |
-| P5-003 | Backend and CLI agree on every fixture | Differential test (backend vs CLI) | The same fixture corpus produces the same verdict and the same fixed error code in the backend contract test and in the CLI; any disagreement fails. | §8 | P5.1 | PLANNED | not yet written |
+| P5-003 | The real backend decoders and the Python validator agree on every fixture | Differential test (backend vs CLI) | The same real-payload corpus is run through the unmodified backend decoding/validation paths and through the Python validator (bounded batch); verdicts and fixed codes match except registered, classified differences; an unregistered or stale difference fails. Python-versus-Python agreement does not satisfy this. | §8 | P5.1 | PLANNED | not yet written |
 | P5-004 | The CLI validates locally with no backend | SDK host test | python -m nexus_contract validate runs with no network and no database, exits non-zero on failure and prints fixed codes only. | §8 | P5.1 | PLANNED | not yet written |
 | P5-005 | Telemetry schema covers legacy and generic shapes | Unit | Legacy (sensorType, unit, numeric value) and generic (capabilityKey) telemetry validate; a non-numeric legacy value and a payload with neither shape are rejected with INVALID_LEGACY_PAYLOAD. | §7 | P5.1 | PLANNED | not yet written |
 | P5-006 | messageId alphabet and length are enforced identically everywhere | Unit | 1 to 64 characters from A-Z a-z 0-9 . _ : - ; 0, 65 and a character outside the set are INVALID_MESSAGE_ID in schema, backend and CLI. | §7 | P5.1 | PLANNED | not yet written |
-| P5-007 | Command schema pins the wire payload | Unit | commandId, capability, command, value and an integer epoch-second timestamp are required; a float or ISO timestamp is rejected. | §7 | P5.1 | PLANNED | not yet written |
+| P5-007 | Command schema pins the generic wire payload | Unit | commandId (UUID text), capability, command, value and an integer epoch-second timestamp are required; value may be whatever the backend CommandValueValidator accepts for the capability type (boolean, servo integer, relay object), so the schema is not narrowed to the LED firmware; a float or ISO timestamp is rejected. | §7 | P5.1 | PLANNED | not yet written |
 | P5-008 | ACK schema pins status and reason | Unit | status is ACCEPTED or REJECTED; reason is optional; the timestamp is an integer; an unknown status is rejected. | §7 | P5.1 | PLANNED | not yet written |
-| P5-009 | Status message accepts only online and offline | Unit | The plain texts online and offline are accepted case-sensitively as today; anything else is rejected without being treated as a state change. | §7 | P5.1 | PLANNED | not yet written |
+| P5-009 | Status message accepts only online and offline as plain text | Unit | The bare texts online and offline, with surrounding whitespace trimmed and compared case-sensitively exactly as DeviceStatusMessageHandler does today, are accepted; Online, empty text, whitespace only and JSON are rejected without being treated as a state change; no JSON envelope or version field is introduced. | §7 | P5.1 | PLANNED | not yet written |
 | P5-010 | Rules a schema cannot express are in a shared rule module | Unit | Topic-versus-payload device equality and command freshness are implemented once, annotated in x-nexus-rules, and exercised by the shared corpus. | §8 | P5.1 | PLANNED | not yet written |
 | P5-011 | Unknown optional fields are tolerated within a major | Unit | A payload with an extra optional field validates under the schemas of the same major; the extra field is ignored, not interpreted (see P5-143 and P5-144 for the strict-known-field rules). | §6, §6.1 | P5.1 | PLANNED | not yet written |
 | P5-012 | Required-field removal is rejected | Mutation check | A mutated schema that makes a required field optional fails the corpus. | §6, §8 | P5.1 | PLANNED | not yet written |
@@ -56,7 +56,7 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-019 | Header and body version conflict is rejected | API (MockMvc) | X-Nexus-Contract-Version differing from the body contractVersion gives CONTRACT_VERSION_CONFLICT. | §6 | P5.4 | PLANNED | not yet written |
 | P5-020 | The support window lists only the actual versions | Validation gate / audit | versions.json lists exactly legacy-v1 and 1.0 with major 1 only; a test fails if the code accepts a version not listed or lists one the code rejects. | §6 | P5.1 | PLANNED | not yet written |
 | P5-021 | Every firmware fixture validates as legacy-v1 and as 1.0 | Unit | The golden accept fixtures pass both resolutions. | §13 | P5.1 | PLANNED | not yet written |
-| P5-022 | Every reject fixture produces the same code in backend and CLI | Differential test (backend vs CLI) | Malformed JSON, wrong types, a non-UUID device id and a stale command give the identical fixed code in both. | §13 | P5.1 | PLANNED | not yet written |
+| P5-022 | Every reject fixture produces the same code in the real backend path and the validator | Differential test (backend vs CLI) | Malformed JSON, wrong types, a non-UUID device id and a stale command give the identical fixed code in the unmodified backend path and in the validator, except registered differences. | §13 | P5.1 | PLANNED | not yet written |
 | P5-023 | Legacy acceptance is never stricter or looser than the code at the baseline | Unit | A differential test runs the baseline decoder (kept as a reference in test code) against the new legacy-v1 path over a generated corpus and finds no verdict difference. | §6, §13 | P5.3 | PLANNED | not yet written |
 | P5-024 | Schema evolution: 1.0 fixtures stay valid in every later 1.x | Unit | A test loads every 1.0 fixture and validates it against every 1.x schema present. | §6 | P5.1 | PLANNED | not yet written |
 | P5-025 | Breaking-change detection | Mutation check | Renaming a field, changing a type or narrowing a range in a schema copy is detected by the evolution test. | §6 | P5.1 | PLANNED | not yet written |
@@ -189,18 +189,18 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-110 | Mutation: a decoder that accepts invalid input fails the kit | Mutation check | Weakening a decoder in a copy makes the kit fail for the right scenario. | §14 | P5.8 | PLANNED | not yet written |
 
 
-## J. Migration V41 (design only now; scenarios apply when it is authorised)
+## J. Migration V41 (design only; work package P5.V41, separately authorised, not part of P5.1; every scenario stays PLANNED)
 
 | ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
 |---|---|---|---|---|---|---|---|
-| P5-111 | V41 applies on an empty database | Migration on populated database | Flyway applies V41 after V40 with the recorded checksum. | §12 | P5.1 | PLANNED | not yet written |
-| P5-112 | V41 applies on a populated database and defaults existing devices to MQTT_JSON | Migration on populated database | A database with devices and templates upgraded to V41 reads every existing device as MQTT_JSON and loses no row. | §12 | P5.1 | PLANNED | not yet written |
-| P5-113 | The transport CHECK rejects unknown values | PostgreSQL integration | An unknown transport in devices or templates is refused by the database. | §12 | P5.1 | PLANNED | not yet written |
-| P5-114 | Credential constraints hold | PostgreSQL integration | Hash length, status, retire and revoke consistency, and at most one ACTIVE and one RETIRING credential per device are enforced by the database. | §12 | P5.1 | PLANNED | not yet written |
-| P5-115 | Credential events are append-only | PostgreSQL integration | UPDATE is refused; DELETE is allowed only with the parent credential. | §12 | P5.1 | PLANNED | not yet written |
-| P5-116 | Deleting a device removes its credentials and events | PostgreSQL integration | The cascade removes both; no credential survives its device. | §12 | P5.1 | PLANNED | not yet written |
-| P5-117 | V37 to V40 are unchanged and the logical topic CHECK is compatible | Migration on populated database | The checksums of V1 to V40 are unchanged; an HTTP-assigned device's command row satisfies the V37 topic CHECK. | §12 | P5.1 | PLANNED | not yet written |
-| P5-118 | Disabling the adapters is the rollback | PostgreSQL integration | With the HTTP adapter disabled the application ignores the new columns and behaves as before V41. | §12 | P5.1 | PLANNED | not yet written |
+| P5-111 | V41 applies on an empty database | Migration on populated database | Flyway applies V41 after V40 with the recorded checksum. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-112 | V41 applies on a populated database and defaults existing devices to MQTT_JSON | Migration on populated database | A database with devices and templates upgraded to V41 reads every existing device as MQTT_JSON and loses no row. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-113 | The transport CHECK rejects unknown values | PostgreSQL integration | An unknown transport in devices or templates is refused by the database. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-114 | Credential constraints hold | PostgreSQL integration | Hash length, status, retire and revoke consistency, and at most one ACTIVE and one RETIRING credential per device are enforced by the database. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-115 | Credential events are append-only | PostgreSQL integration | UPDATE is refused; DELETE is allowed only with the parent credential. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-116 | Deleting a device removes its credentials and events | PostgreSQL integration | The cascade removes both; no credential survives its device. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-117 | V37 to V40 are unchanged and the logical topic CHECK is compatible | Migration on populated database | The checksums of V1 to V40 are unchanged; an HTTP-assigned device's command row satisfies the V37 topic CHECK. | §12 | P5.V41 | PLANNED | not yet written |
+| P5-118 | Disabling the adapters is the rollback | PostgreSQL integration | With the HTTP adapter disabled the application ignores the new columns and behaves as before V41. | §12 | P5.V41 | PLANNED | not yet written |
 
 
 ## K. Observability, operations, documentation and gate
@@ -248,13 +248,25 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 | P5-151 | The design spikes are recorded before the dependent code | Validation gate / audit | Spike results S1 to S8 are written into the evidence section before the slice that depends on them is committed; a falsified claim is reported and the dependent work stops. | §20 | P5.1 | PLANNED | not yet written |
 | P5-152 | Outbound HTTP scenarios are deferred, not dropped, if the design cannot be met | Validation gate / audit | If a spike falsifies section 10, every section F and L pull scenario is marked DEFERRED with the reason, the descriptor lacks CommandEgress and the conformance report says not supported. | §10.13 | P5.4 | PLANNED | not yet written |
 
+## M. P5.1 preparation decisions (2026-10-18); the IDs above are unchanged
+
+| ID | Scenario | Intended layer | Required assertion / evidence | Clauses | Slice | Status | Exact test |
+|---|---|---|---|---|---|---|---|
+| P5-153 | The generic command contract represents every command the backend can emit | Unit | Payloads built by the backend's OutboxPayload for LED, FAN, BUZZER (boolean), SERVO (integer 0 to 180) and RELAY (channel/state object) validate; the schema is not restricted to boolean values. | §7, §8.2 | P5.1 | PLANNED | not yet written |
+| P5-154 | The ESP32 legacy profile mirrors what the firmware accepts | Unit | Under the profile a boolean value and an integer timestamp pass; a servo integer, a relay object, a float timestamp and a non-string commandId fail the profile while still passing the generic layer where the generic contract allows them; freshness uses the absolute 30-second rule with an injected reference time (boundary ages 29, 30, 31 in both directions). | §8.2, §13 | P5.1 | PLANNED | not yet written |
+| P5-155 | Validation layers are reported separately and missing context is never a pass | Unit | Each of the five layers reports PASS, FAIL or NOT_PERFORMED; without a topic, reference time or capability profile the matching layer is NOT_PERFORMED with the missing input named; the wall clock is never read implicitly; --require-all-layers fails on any NOT_PERFORMED. | §8.2 | P5.1 | PLANNED | not yet written |
+| P5-156 | Plain-text status parity with the real handler | Differential test (backend vs CLI) | online/offline, padded variants, wrong case, empty, whitespace-only, JSON and embedded NUL give the same accept/reject in DeviceStatusMessageHandler and in the validator, and the validator never requires an envelope or a version. | §8.1, §6.1 | P5.1 | PLANNED | not yet written |
+| P5-157 | Intentional differences are registered and classified, and the registry cannot go stale | Validation gate / audit | contracts/parity/known-differences.json lists each difference with class A to E, clause and rationale; an unregistered difference fails, a registered one that no longer differs fails; class A entries are rejected (a schema mistake is fixed, not registered). | §8.3, §8.4 | P5.1 | PLANNED | not yet written |
+| P5-158 | Historically valid legacy payloads are never rejected more strictly | Differential test (backend vs CLI) | Every golden firmware accept fixture and every simulator-produced legacy payload that the unmodified backend accepts is accepted by the validator in legacy-v1 mode; a stricter verdict fails unless it is a registered class D/E decision. | §6.1, §8.3 | P5.1 | PLANNED | not yet written |
+
 ## Coverage mapping
 
 ### By slice
 
 | Slice | Scenario count | Scenario IDs |
 |---|---|---|
-| P5.1 | 35 | P5-001, P5-002, P5-003, P5-004, P5-005, P5-006, P5-007, P5-008, P5-009, P5-010, P5-011, P5-012, P5-014, P5-015, P5-016, P5-017, P5-018, P5-020, P5-021, P5-022, P5-024, P5-025, P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118, P5-143, P5-144, P5-149, P5-150, P5-151 |
+| P5.1 | 33 | P5-001, P5-002, P5-003, P5-004, P5-005, P5-006, P5-007, P5-008, P5-009, P5-010, P5-011, P5-012, P5-014, P5-015, P5-016, P5-017, P5-018, P5-020, P5-021, P5-022, P5-024, P5-025, P5-143, P5-144, P5-149, P5-150, P5-151, P5-153, P5-154, P5-155, P5-156, P5-157, P5-158 |
+| P5.V41 | 8 | P5-111, P5-112, P5-113, P5-114, P5-115, P5-116, P5-117, P5-118 |
 | P5.2 | 16 | P5-013, P5-027, P5-028, P5-029, P5-030, P5-031, P5-032, P5-033, P5-034, P5-035, P5-036, P5-037, P5-038, P5-119, P5-123, P5-142 |
 | P5.3 | 13 | P5-023, P5-039, P5-040, P5-041, P5-042, P5-043, P5-044, P5-045, P5-046, P5-047, P5-048, P5-120, P5-124 |
 | P5.4 | 52 | P5-019, P5-026, P5-049, P5-050, P5-051, P5-052, P5-053, P5-054, P5-055, P5-056, P5-057, P5-058, P5-059, P5-060, P5-061, P5-062, P5-063, P5-064, P5-065, P5-067, P5-068, P5-069, P5-070, P5-071, P5-072, P5-073, P5-074, P5-075, P5-076, P5-077, P5-078, P5-079, P5-080, P5-081, P5-129, P5-130, P5-131, P5-132, P5-133, P5-134, P5-135, P5-136, P5-137, P5-138, P5-139, P5-140, P5-141, P5-145, P5-146, P5-147, P5-148, P5-152 |
@@ -267,20 +279,20 @@ Normative requirements: [adapter-contract.md](adapter-contract.md). Execution an
 
 | Layer | Count |
 |---|---|
+| Unit | 34 |
 | PostgreSQL integration | 32 |
-| Unit | 31 |
-| Validation gate / audit | 20 |
+| Validation gate / audit | 21 |
 | API (MockMvc) | 17 |
 | SDK host test | 9 |
-| PostgreSQL + Mosquitto integration | 8 |
 | Fault injection | 8 |
+| PostgreSQL + Mosquitto integration | 8 |
 | Architecture test | 7 |
 | Simulator (pytest) | 7 |
-| Differential test (backend vs CLI) | 4 |
+| Differential test (backend vs CLI) | 6 |
 | Mutation check | 4 |
 | Migration on populated database | 3 |
 | Concurrency (multiple connections / instances) | 2 |
 
 ## Evidence not yet produced
 
-Everything. P5.0 produces documents only. The first evidence will come with P5.1 (schemas, fixtures, the CLI and the V41 spike) after a separate authorisation.
+Everything. P5.0 produces documents only. The first evidence will come with P5.1 (schemas, fixtures and the local validator with the real-backend differential tests) after a separate authorisation. P5.1 produces no migration evidence: section J belongs to P5.V41.

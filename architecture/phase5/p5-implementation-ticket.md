@@ -4,14 +4,14 @@ Date: 2026-10-18.
 
 Status: **P5.0 AMENDED (second revision, 2026-10-18; documentation only). P5.1 to P5.8 are NOT authorised.** Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
-Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (152 scenarios, all PLANNED: the original 128 unchanged plus 24 added by the amendment). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
+Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
 ## 1. Entry gate for every slice
 
 1. Inspect branch, HEAD, status and index; preserve expected handoff-document changes and any user work.
 2. Confirm the protected paths are untouched: `firmware/**`, `hardware-tests/**`, `results/**`, Review III artefacts and the user-owned documents (`CLAUDE.md`, `NEXT_TASK.md`, `PROJECT_HANDOFF.md`, `CODEX_HANDOFF.md`, `ROADMAP.md`). `tests/test_protected_paths.py` checks the first group by content hash.
 3. Do not query, migrate, repair, reset or recreate the development PostgreSQL. Do not run `start.bat`, `start_nexus.py` or `seed.ps1`. Use disposable PostgreSQL and Mosquitto.
-4. Never change the checksum of V1 to V40. V41 is created only by the slice that the owner authorises for it (P5.1), and only as designed in contract section 12 after its spike.
+4. Never change the checksum of V1 to V40. V41 is created only by the separately authorised work package `P5.V41` (not by P5.1), and only as designed in contract section 12 after its empirical spike S1.
 5. Work in a worktree on a branch created from the integrated Phase 4 head, one slice per commit series, never on `main`.
 6. No staging, commit, tag or push unless explicitly requested for that operation.
 7. Validate with the memory-safe procedures of Phase 4: Phase 3 rule suite in sequential batches with the outbox OFF and ON, the backend check through `backend_batches.py`, one Maven process at a time, bounded heap, the full gate launched detached.
@@ -56,17 +56,21 @@ Strict order: P5.1, P5.2, P5.3 (the risky extraction), then P5.4 and P5.5 (indep
 
 Documents only: contract, ticket, ledger. No source, no schema file, no migration, no SDK. Exit: owner review of the documents and of the open decisions of section 6.
 
-### P5.1 Versioned wire contract, schemas, fixtures, CLI and the V41 spike
+### P5.1 Versioned wire contract, schemas, fixtures and the local validator
 
-Authority: contract 6 to 8, 12, 13. Ledger: sections A, B (most), J, L (part). Scenarios: 35.
+Authority: contract 6 to 8, 13. Ledger: sections A, B (most), L (part), M. Scenarios: 33. The eight migration scenarios of section J are **not** in this slice (work package `P5.V41`, below).
 
-Deliverables: `contracts/v1/*.schema.json`, `contracts/versions.json`; the shared rule module (device equality, freshness); `contracts/fixtures/firmware-v1/` with provenance sidecars and the drift detector; the Python package `nexus_contract` with the `validate` CLI; the backend contract test and the differential corpus test; the V41 spike: apply the proposed SQL to a disposable copy, prove the V37 topic CHECK accepts an HTTP-assigned device's command row, and produce V41 only if the spike passes and the owner has authorised it.
+Deliverables: `contracts/v1/` JSON Schemas for **telemetry, command, acknowledgement and status** (the status schema models the existing plain-text payload; there is **no** `connectivity.schema.json`), the ESP32 legacy command profile, `contracts/versions.json`; the shared rule module (device equality, freshness with an injected reference time, status trimming); `contracts/fixtures/firmware-v1/` with provenance sidecars and the drift detector; the Python package `nexus_contract` with the `validate` CLI, the layered result of contract 8.2 and a bounded `validate-corpus` mode; the backend-side differential tests of contract 8.3 against the unmodified decoders, and `contracts/parity/known-differences.json`. **Not in this slice:** any migration (V41), any Java JSON Schema dependency, any change to backend, frontend, firmware or simulator production code.
 
-**Design spikes that must finish before the dependent code (contract section 20):** S1 (apply the proposed V41 to a disposable V40 copy and push an HTTP-assigned device's outbox row through every V37/V39 CHECK and guard trigger, in particular the topic CHECK `topic = 'nexus/devices/' || device_id || '/commands'`), S2 (how `reason_code` and the outcome message are chosen, to carry an evidence kind without touching MQTT assertions), S8 (cost of a PostgreSQL-only class with and without a shared container, and the projected segmented backend time). A falsified spike stops the dependent work and is reported before code. Also in this slice: the strict known-field validation and `requires` rules of contract 6.1, and the extension of `backend_batches.py` by addition only (contract 21: required reports, no omitted or duplicated class, the full gate failing on any missing or failed segment, and the transparent time record).
+**Design spikes (contract section 20):** S1 is **not** run in P5.1: only its on-paper result is recorded (the V37 topic CHECK and guard triggers do not mention transport) and the compatibility is unproven until the empirical run in `P5.V41`. S2 (how `reason_code` and the outcome message are chosen, to carry an evidence kind without touching MQTT assertions), S8 (cost of a PostgreSQL-only class with and without a shared container, and the projected segmented backend time). A falsified spike stops the dependent work and is reported before code. Also in this slice: the strict known-field validation and `requires` rules of contract 6.1, and the extension of `backend_batches.py` by addition only (contract 21: required reports, no omitted or duplicated class, the full gate failing on any missing or failed segment, and the transparent time record).
 
-Verification: fixtures from the firmware source at the baseline, accept and reject, both directions; version-resolution table; evolution test; backend and CLI agree on the whole corpus; migration tests on an empty and a populated database; mutation on a schema.
+Verification: fixtures from the firmware source at the baseline, accept and reject, both directions; version-resolution table; evolution test; the Python validator and the **real backend decoders** agree on the whole corpus except registered differences (contract 8.3); mutation on a schema.
 
-Gate: contract tests, tooling tests, the migration tests, `--fast`.
+Gate: contract tests, tooling tests, `--fast`.
+
+### P5.V41 Migration V41 (separately authorised; not part of P5.1)
+
+Authority: contract 12. Ledger: section J (P5-111 to P5-118, all PLANNED). Prerequisite for the P5.2 transport assignment API and for P5.4. Includes the empirical spike S1 (apply the proposed SQL to a disposable V40 copy and push an HTTP-assigned device's outbox row through every V37/V39 CHECK and guard trigger) and produces V41 only if it passes. Order: P5.1, then P5.V41, then P5.2. The owner decides the authorisation; nothing here creates a migration.
 
 ### P5.2 Adapter SPI, registry, intake ports and boundary tests (no behaviour change)
 
@@ -138,9 +142,10 @@ Deliverables: the Phase 5 gate checks; the full Phase 3 suite OFF and ON in batc
 | J | Migration V41 | 8 |
 | K | Observability, operations, gate | 10 |
 | L | Amendment scenarios (D7 to D10, version refinement) | 24 |
-| | **Total (unique IDs P5-001 to P5-152)** | **152** |
+| M | P5.1 preparation decisions (command profiles, layers, status, parity) | 6 |
+| | **Total (unique IDs P5-001 to P5-158)** | **158** |
 
-All 152 are PLANNED. By slice: P5.1 35, P5.2 16, P5.3 13, P5.4 52, P5.5 9, P5.6 10, P5.7 9, P5.8 8. The IDs P5-001 to P5-128 are the original P5.0 set; P5-129 to P5-152 were added by the amendment, and none was removed or renumbered.
+All 158 are PLANNED. By work package: P5.1 33, P5.V41 8, P5.2 16, P5.3 13, P5.4 52, P5.5 9, P5.6 10, P5.7 9, P5.8 8. The IDs P5-001 to P5-128 are the original P5.0 set; P5-129 to P5-152 were added by the D7 to D10 amendment and P5-153 to P5-158 by the P5.1 preparation decisions. None was removed or renumbered; the eight section J scenarios changed work package only.
 
 ## 6. Decisions: resolved, and what is still open
 
@@ -198,7 +203,7 @@ Wall-clock for a Phase 5 milestone commit: about the same 30 minutes for `--full
 | R5.7 | Pull delivery weakens Phase 4 truthfulness (a served response read as device receipt) | Medium | High | Evidence kinds named in every statement; `HTTP_SERVED` defined as weaker than the broker; conservative UNCERTAIN; never re-serve | P5.4 |
 | R5.8 | A device that polls slower than the delivery window loses commands | High | Medium | Visible EXPIRED dead letters; documented poll interval; SDK enforces at most 5 s | P5.4, P5.6 |
 | R5.9 | Credential administration without platform authentication lets any caller mint a credential | High if exposed | High | D7 resolved: local CLI only, least-privilege database role, no network surface (architecture tests), audit events; residual: anyone with the operating-system account and database login can run it, stated as an operations privilege | P5.4 |
-| R5.10 | V41 touches `devices`, a hot table, or conflicts with the V37 topic CHECK | Low | High | Constant-default column (no rewrite); spike before authoring; populated-database test; forward-only | P5.1 |
+| R5.10 | V41 touches `devices`, a hot table, or conflicts with the V37 topic CHECK | Low | High | Constant-default column (no rewrite); empirical spike S1 before authoring; populated-database test; forward-only | P5.V41 |
 | R5.11 | The simulator freshness fix breaks tests or users that depended on 300 s or on future-dated commands | Medium | Low | The fix is approved (D4); tests state their window explicitly; release note | P5.5 |
 | R5.12 | The gate exceeds its 1,800 s budget or exhausts memory again | High | Medium | Measured plan in section 7; shared containers; split check only with approval; bounded batches | all |
 | R5.13 | The ESP32 library works on the host but not on a device (timing, memory, RTC, Wi-Fi) | Medium | Medium | No hardware claim; host-only validation stated everywhere; a documented hardware checklist for later | P5.6 |

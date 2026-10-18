@@ -99,7 +99,7 @@ There is no single "DeviceAdapter" with every method. An adapter declares the ca
 | `AdapterLifecycle` | `start()`, `stop()` | Own the connection or listener (connect and disconnect) | yes (Paho client) | yes (servlet endpoints; start and stop gate acceptance only) | yes (in-process) |
 | `TelemetryDecoder` | `decode(RawMessage) -> Decoded<TelemetryPayload> \| Rejection` | Bytes and transport metadata to a typed payload, never throws for bad input | yes | yes | yes |
 | `AcknowledgementDecoder` | `decode(RawMessage) -> Decoded<AckPayload> \| Rejection` | Bytes to a typed ACK | yes | yes | yes |
-| `ConnectivitySource` | `decode(RawMessage) -> Decoded<ConnectivityObservation> \| Rejection` | Transport-observed presence (MQTT retained birth and will). HTTP has none: its eligibility signal is not connectivity (section 10.8) | yes | no | yes |
+| `ConnectivitySource` | `decode(RawMessage) -> Decoded<ConnectivityObservation> \| Rejection` | Transport-observed presence (MQTT retained birth and will), delivered to the core as an internal `ConnectivityObservation`. This is a core-facing value, **not a wire message**: the MQTT wire format is the plain-text status of section 7 and no JSON connectivity message exists or is introduced. HTTP has none: its eligibility signal is not connectivity (section 10.8) | yes | no | yes |
 | `CommandEgress` | `deliver(CommandEnvelope, Duration) -> Attempt` | Put one already-accepted, already-leased command on the transport; classify the outcome | yes | **only after section 10 is approved**; otherwise the capability is not declared | yes |
 | `DeviceAuthenticator` | `authenticate(RawMessage) -> AuthenticatedDevice \| Rejection` | Transport-level identity of the sender | no (broker-level; topic scoping) | yes (section 9) | no |
 
@@ -153,7 +153,8 @@ A message that declares a minor above the highest one the backend knows is **not
 3. **Unsupported semantics are rejected, not accepted silently.** A message may declare features it requires the receiver to understand in the reserved top-level array `requires` (strings of the form `<name>`). A receiver that does not know every named feature rejects the whole message permanently with `UNSUPPORTED_REQUIRED_FEATURE`. This is the only way a minor may carry semantics the receiver must honour; a change that is not ignorable and is not announced in `requires` is a breaking change and needs a new major. `requires` is itself a known field of 1.0 (optional, at most 8 entries of at most 32 characters from `a-z 0-9 _ -`); in Phase 5 no feature name is defined, so any non-empty `requires` is rejected today.
 4. **Unknown enum values in known enum fields are rejected** (`status` of an ACK is exactly `ACCEPTED` or `REJECTED`), unless the contract explicitly marks a field as tolerant; Phase 5 marks none.
 5. **A higher minor never changes the transport, device, authorisation or admission outcome** (sections 5 and 9 run before and independently of the version).
-6. **Legacy unversioned firmware** is unaffected: it resolves to legacy-v1 under the exact rules below, has no `requires`, and the committed firmware's payloads stay accepted.
+6. **Legacy unversioned firmware** is unaffected: it resolves to legacy-v1 under the exact rules below, has no `requires`, and the committed firmware's payloads stay accepted. A payload that is historically valid is never rejected more strictly because a validator exists (decision of 2026-10-18); a difference is recorded in the registry of section 8.4, not resolved by tightening legacy acceptance.
+7. **`contractVersion` applies only where the message format has a place for it.** Telemetry, command and acknowledgement are JSON objects and may carry it. The MQTT status message is the bare text `online` or `offline`: it has no JSON envelope and no version field, none is added, and it always resolves to legacy-v1 semantics. Over HTTP the version of a posted status travels only in the `X-Nexus-Contract-Version` header.
 
 **Legacy-v1 compatibility policy (explicit).** Messages without `contractVersion` are interpreted exactly as the committed code interprets them today: the legacy numeric telemetry shape (`deviceId`, `timestamp`, `sensorType`, `value`, `unit`; numeric value; the topic and payload device ids must agree), the generic shape with `capabilityKey`, the optional `messageId` and `readbackCommandId`; the ACK shape `commandId`, `status` of `ACCEPTED` or `REJECTED`, epoch-second `timestamp`, optional `reason`; status as the plain text `online` or `offline`; commands as `commandId`, `capability`, `command`, `value`, epoch-second `timestamp`. Legacy-v1 acceptance rules never become stricter than today's, and never looser: the golden fixtures (section 13) pin both directions. New producers (SDKs, the reference device) emit `contractVersion`.
 
@@ -166,18 +167,79 @@ The baseline is what the committed firmware sends and accepts; it was read from 
 | Message | Direction | Content (v1) | Notes |
 |---|---|---|---|
 | Telemetry | device to NEXUS | `deviceId` (UUID), `timestamp` (ISO-8601 UTC), `sensorType`, `value` (number), `unit`; optional `capabilityKey`, `readbackCommandId`, `messageId` (1 to 64 chars from `A-Z a-z 0-9 . _ : -`) | the committed firmware sends the five legacy fields and **no** `messageId`, so firmware telemetry is not deduplicated; SDK producers add one |
-| Command | NEXUS to device | `commandId`, `capability`, `command`, `value`, `timestamp` (integer epoch seconds, acceptance time) | device rejects if `abs(now - timestamp) > 30 s` with reason `STALE`, missing fields `MALFORMED`, unknown capability or command `UNSUPPORTED` |
+| Command | NEXUS to device | `commandId` (UUID text), `capability`, `command`, `value`, `timestamp` (integer epoch seconds, acceptance time). **Generic contract:** `command` is `SET_STATE` and `value` is whatever the capability type's backend validator (`CommandValueValidator`) accepts today: a boolean for LED, FAN and BUZZER, an integer 0 to 180 for SERVO, an object with `channel` and `state` for RELAY. **ESP32 legacy profile** (section 8.2): boolean `value` only, integer `timestamp`, and the firmware's own freshness window | the real ESP32 firmware rejects if `abs(now - timestamp) > 30 s` with reason `STALE`, missing fields `MALFORMED`, unknown capability or command `UNSUPPORTED`; this describes the firmware, not the whole contract |
 | Acknowledgement | device to NEXUS | `commandId`, `status` (`ACCEPTED` or `REJECTED`), `timestamp` (integer epoch seconds, device clock), optional `reason` | a device claim: never used for latency (Phase 4 R13) |
-| Status | device to NEXUS | the plain text `online` or `offline` (retained birth and last will on MQTT) | over HTTP a posted `status` is recorded as a device claim; it does not drive the connectivity registry (section 10.8) |
+| Status | device to NEXUS | the plain text `online` or `offline` (retained birth and last will on MQTT). The backend trims surrounding whitespace and then compares **case-sensitively** (`DeviceStatusMessageHandler.parseStatusOrNull`: `trim()` then `"online".equals`); `Online`, `ONLINE`, empty text and JSON are ignored as not a status | no JSON envelope, no `contractVersion`; over HTTP a posted `status` is recorded as a device claim; it does not drive the connectivity registry (section 10.8) |
 
 **Rejection vocabulary (closed, fixed codes, also the metric tags):** `MALFORMED_JSON`, `INVALID_FIELDS`, `INVALID_MESSAGE_ID`, `INVALID_LEGACY_PAYLOAD`, `TOPIC_DEVICE_MISMATCH` (MQTT), `DEVICE_MISMATCH`, `TRANSPORT_MISMATCH`, `INVALID_CONTRACT_VERSION`, `CONTRACT_VERSION_CONFLICT`, `UNSUPPORTED_CONTRACT_MAJOR`, `PAYLOAD_TOO_LARGE`, `UNAUTHENTICATED`, `FORBIDDEN_DEVICE`, plus the core's existing `ONBOARDING_REJECTED`, `INVALID_TELEMETRY`, `DUPLICATE_CONFLICT`. The first group already exists as the Phase 4 `nexus.telemetry.permanent.rejections` reasons and keeps its spelling.
 
 ## 8. Schemas and the local validator (exit criterion E2)
 
-- One authoritative directory `contracts/v1/` holds JSON Schema (draft 2020-12) files for telemetry, command, acknowledgement and status, and `contracts/versions.json` listing the supported versions of section 6. No schema is duplicated: the backend loads these files from the classpath copy produced by the build (a build step copies, a test proves byte equality), the Python validator reads them directly, and the ESP32 library's host tests read them.
+- One authoritative directory `contracts/v1/` holds JSON Schema (draft 2020-12) files for **telemetry, command, acknowledgement and status**, and `contracts/versions.json` listing the supported versions of section 6. **There is no `connectivity.schema.json`:** the only connectivity wire format is the plain-text status, which the status contract models as it is (section 8.1); connectivity as such is an internal core-facing observation addressed in the adapter interface work (sections 3 and 4), and a schema would be added only if source inspection finds an independent connectivity wire protocol (none exists at `e29e215`). No schema is duplicated: the backend loads these files from the classpath copy produced by the build (a build step copies, a test proves byte equality), the Python validator reads them directly, and the ESP32 library's host tests read them.
 - `python -m nexus_contract validate --kind telemetry payload.json` (and `--contract-version`) validates a payload locally without a backend, printing a fixed error code per failure and exiting non-zero on any. A `--legacy` flag applies the legacy-v1 policy.
 - A backend contract test and the CLI run **the same fixture corpus** and must agree on every verdict (a differential test); a disagreement fails the build.
 - JSON Schema cannot express every rule (the topic and payload device ids must agree; the 64-character `messageId` alphabet is expressible; the 30 s freshness depends on a clock). Rules a schema cannot hold are listed in the schema's `x-nexus-rules` annotation and implemented once in a small shared rule module whose cases are in the fixture corpus.
+
+### 8.1 Status contract (plain text)
+
+The status contract models the real MQTT payload and changes nothing about it. The validator treats the raw payload bytes as text, applies the backend's own preprocessing (UTF-8 decode, `trim()`), and then checks the result against `status.schema.json`, a string schema whose only valid instances are `online` and `offline`. The wrapping into a JSON string exists only inside the validator so that the same schema machinery applies; the production MQTT payload is never wrapped, enveloped or versioned. Case-sensitive comparison and trimming are documented behaviour of the baseline (legacy-v1, class D, section 8.4) and the corpus pins them in both directions: `online`, `offline` and the same words with surrounding whitespace are accepted; `Online`, `OFFLINE`, empty text, whitespace only, `{"status":"online"}` and `online\u0000` are rejected as not a status.
+
+### 8.2 Validation layers, the generic command contract and the ESP32 legacy profile
+
+Validation is reported in separate layers so that one of them never silently stands in for another. The validator output names each layer with `PASS`, `FAIL` (with a fixed code) or `NOT_PERFORMED` (with the missing input named):
+
+| Layer | What it checks | Runtime input needed |
+|---|---|---|
+| 1. Structural | the JSON Schema of the message kind and version (types, required fields, lengths, alphabets, enums) | none |
+| 2. Legacy compatibility profile | the stricter shape that one real firmware accepts, selected explicitly (`--profile esp32-legacy-v1`); the generic contract is never narrowed to it | none |
+| 3. Identity consistency | topic device id equals payload `deviceId` (telemetry); topic device id and `commandId` shape for the ACK and command | the topic (`--topic`); otherwise `NOT_PERFORMED` |
+| 4. Freshness | command age against a window | an injected reference time (`--reference-time`) and the window of the selected profile; otherwise `NOT_PERFORMED`. The validator never reads the wall clock implicitly |
+| 5. Capability semantics | the value against the capability type (boolean, servo range, relay channel and state, binding constraints) | a capability profile supplied by the caller; otherwise `NOT_PERFORMED` |
+
+A `NOT_PERFORMED` layer is never reported as passed and is never an error by itself; `--require-all-layers` turns it into a failure for a caller that wants completeness.
+
+**Generic command contract (layer 1).** It represents the commands the backend can actually emit: required `commandId` (UUID text), `capability` (text), `command` (text, `SET_STATE` for every capability type the backend writes today), `value` (boolean, integer or object as listed in section 7) and `timestamp` (integer epoch seconds). It is not restricted to the LED-only firmware.
+
+**ESP32 legacy profile (layer 2).** It additionally represents exactly what `firmware/src/main.cpp` accepts: `commandId` a string, `capability` and `command` strings, `value` a **boolean**, `timestamp` an integer that fits a C `long`; the firmware's freshness rule `abs(now - timestamp) > 30` is `STALE` (the absolute difference, so a timestamp up to 30 s in the future is accepted); the reasons the firmware emits are `MALFORMED`, `STALE` and `UNSUPPORTED`. A SERVO or RELAY command therefore passes layer 1 and fails layer 2, which is the correct statement about that firmware and not a defect of the generic contract.
+
+### 8.3 Differential test plan: Python validator against the real backend decoders
+
+Matching Python results to Python tests proves nothing about the backend. The parity tests therefore run the same real payloads through both implementations and compare normalised verdicts (`ACCEPT` or `REJECT:<fixed code>` per layer):
+
+1. **Corpus.** Real payloads only: the firmware golden fixtures derived from the source (section 13), payloads produced by the simulator's own publisher and command-handler code paths (offline, no broker), payloads produced by the backend's own `OutboxPayload` and `CommandValueValidator` paths, and reject cases built by mutating them. Each item records its origin.
+2. **Backend side.** Test-only code drives the existing decoder and validation paths, unmodified: `DeviceStatusMessageHandler` for status, `DeviceCommandAckMessageHandler` for acknowledgements (with recording fakes for its collaborators), `TelemetryRequest` with `StrictMessageIdDeserializer` and Bean Validation, and the telemetry listener's decoding, and for commands the backend-emitted payloads and `CommandValueValidator` verdicts. No production class is changed to make this possible; where a private parse step cannot be driven from outside, the test observes the handler's externally visible effect and says so.
+3. **Python side.** The same corpus is submitted to the validator in **one bounded batch** per test class (a `validate-corpus` mode that reads a manifest and writes one result file; `python -I`, no network, a hard timeout, process reuse inside the class), never one subprocess per payload. A missing interpreter or validator **fails** the gate instead of skipping.
+4. **Comparison and the registry.** Every disagreement must be a registered difference in `contracts/parity/known-differences.json` (class A to E, clause, rationale, owning slice). An unregistered difference fails; a registered difference that no longer exists also fails, so the registry cannot rot. A schema is never loosened or tightened merely to make an implementation agree.
+5. **Direction.** Both directions are exercised: what the backend accepts the validator must also accept unless the difference is registered, and the reverse. The Python package is the schema authority; no Java JSON Schema dependency is added in Phase 5.
+
+### 8.4 Discrepancy classes and the inventory
+
+Definitions (decision of 2026-10-18):
+
+- **A. Schema mistake:** the proposed schema incorrectly models established valid or invalid payload behaviour. A is fixed in the schema; it is never a registered difference.
+- **B. Existing backend/firmware inconsistency:** their parsers, supported fields or validation semantics differ. Recorded; not automatically a defect.
+- **C. Simulator parity gap:** simulator behaviour differs from the authoritative device/contract semantics.
+- **D. Intentional legacy compatibility:** existing unversioned payloads, missing optional fields, precision rules and raw status handling that must remain supported.
+- **E. Unsupported input requiring rejection:** inputs forbidden by the approved contract.
+
+Inventory. "Verified" means read in the source at `e29e215` for this document; "to probe" means a candidate that P5.1 must establish with the differential corpus before it is registered:
+
+| # | Finding | Class | State |
+|---|---|---|---|
+| 1 | Firmware telemetry timestamp has seconds precision and a `Z` suffix (`currentIsoTimestampUtc`) | D | verified |
+| 2 | Firmware telemetry carries no `messageId`, so it is not deduplicated by the inbox | D | verified |
+| 3 | Messages without `contractVersion` resolve to legacy-v1 | D | verified (contract 6) |
+| 4 | Status is bare text; the backend trims and then compares case-sensitively; anything else is not a status | D | verified. The preparation report of 2026-10-18 said "case-insensitive": that was wrong, corrected here |
+| 5 | Firmware command acceptance: `value` must be a boolean, `timestamp` a `long`, freshness is `abs(age) > 30` | B (with the backend, which can emit servo, relay and non-boolean values) | verified. Expressed as the ESP32 profile, not as the generic contract |
+| 6 | The simulator's command freshness is one-sided (`clock - timestamp > stale_window`) and its default window is 300 s, against the firmware's absolute 30 s | C | verified; scheduled for P5.5 (300 s to 30 s) and **not changed in P5.1**. The fixture verdicts are the firmware's; the simulator disagreement is registered, not hidden |
+| 7 | The backend ACK path requires a textual UUID `commandId`, a textual `status` that matches the enum case-sensitively (`ACCEPTED` or `REJECTED`) and an integral `timestamp`; `reason` is read with `asText()`, so a non-text JSON value is stored as its text form | D for the legacy path (today's acceptance is preserved); the 1.0 schema types `reason` as a bounded string. Whether a 1.0 message may be stricter than legacy-v1 here is decided by the P5.1 probe and registered | verified for the parser; the resulting registry entry is to probe |
+| 8 | Telemetry `timestamp` forms the backend accepts beyond the firmware's ISO form (for example numeric epoch) | D | to probe |
+| 9 | Simulator acceptance of command fields the firmware rejects (non-integer timestamp, non-UUID `commandId`) | C | to probe |
+| 10 | Unsupported major, malformed version, header/body version conflict, non-empty `requires`, unknown enum value in a known enum field, `messageId` outside the alphabet or length, topic/payload device mismatch | E | verified as contract rules (6, 6.1, 7); the fixed codes are pinned by the corpus |
+| 11 | Documentation errors found by this review: P5-009 omitted trimming; the preparation report called status handling case-insensitive; a connectivity schema was listed although no connectivity wire message exists | A (the modelling mistake class, caught before any schema existed) | corrected in this change |
+
+Lenient backend handling is not automatically a production defect: it is recorded under B or D with its reason, and changes to it are a separate decision.
+
 
 ## 9. HTTP/webhook adapter: ingest and device credentials (D2)
 
@@ -289,7 +351,9 @@ Phase 4 states that `PUBLISHED` means broker publication and nothing more. That 
 3. The Phase 4 uncertain rules apply to every adapter unchanged: an ambiguous attempt is UNCERTAIN, ends `UNCERTAIN_EXPIRED`, is never resent, and holds later commands of the device for the R32 interval.
 4. Nothing in Phase 5 may claim exactly-once delivery, device receipt or physical actuation; the architecture tests that guard those claims (Phase 4 P4-123) are extended to the new documents, strings and UI labels.
 
-## 12. Migration V41 proposal (design only: NOT created in P5.0)
+## 12. Migration V41 proposal (design only: NOT created in P5.0 and NOT part of P5.1)
+
+Amendment of 2026-10-18: V41 is its own separately authorised stage (ledger section J, work package `P5.V41`). It is not created, tested or spiked by P5.1. The stage must be authorised before the P5.2 transport assignment API and before P5.4 need its columns.
 
 Forward-only, checksummed, tested on an empty and on a populated disposable database, never touching V1 to V40. Estimated size under 100 lines.
 
@@ -351,7 +415,7 @@ Design notes and open points (each becomes a ledger scenario):
 2. **Drift detector.** A test parses `firmware/src/main.cpp` for the JSON keys it builds and the keys it requires in a command (`doc["..."]` patterns) and compares them with the fixture set and the schemas; if the firmware ever changes its key set, the test fails and names the key. The firmware tree hash is already immutable, so this is a guard for a future approved change.
 3. **Both directions.** Accept fixtures (what the firmware sends today must validate under legacy-v1 and under the 1.0 schemas with `contractVersion` added) and reject fixtures (malformed JSON, wrong types, a non-UUID device id, a stale command) with the exact reason code the backend and the validator both produce.
 4. **Semantic equality, not byte identity.** "Byte-compatible interpretation" means the same bytes parse to the same typed value; field order and whitespace do not matter. The ESP32 library's host build must produce documents that parse to the same typed values as the fixtures.
-5. **Clock and freshness fixtures.** Command fixtures include the boundary cases (age 29, 30, 31 seconds; future-dated by 29, 30, 31 seconds) with the verdict the **firmware** computes; the simulator, the ESP32 library and the backend freshness helper must all agree (this is also the regression test for D4).
+5. **Clock and freshness fixtures.** Command fixtures include the boundary cases (age 29, 30, 31 seconds; future-dated by 29, 30, 31 seconds) with the verdict the **firmware** computes; the ESP32 library and the backend freshness helper must agree with the firmware's verdicts. The simulator's current 300-second one-sided rule is a registered class C difference until P5.5; the fixtures record the firmware's verdict and P5.1 does not change the simulator (this is also the regression test for D4 once P5.5 lands).
 6. **Frozen corpus, extended only by addition.** A new fixture may be added; an existing one changes only through a deliberate, reviewed contract change that is recorded in the ledger.
 
 ## 14. Conformance suite and extensibility proof
@@ -403,7 +467,7 @@ A spike is a time-boxed, disposable experiment whose result is written into the 
 
 | ID | Spike | Falsifies | When |
 |---|---|---|---|
-| **S1** | Apply the proposed V41 to a disposable copy of the V40 schema. Insert an outbox row for a device assigned `HTTP_WEBHOOK` with the logical topic; run the V37 CHECKs and the V37/V39 guard triggers through claim, PUBLISHED, retry and dead-letter transitions | "no change to V37 to V40 is needed" (10.12, section 12) | P5.1, before V41 is authored |
+| **S1** | Apply the proposed V41 to a disposable copy of the V40 schema. Insert an outbox row for a device assigned `HTTP_WEBHOOK` with the logical topic; run the V37 CHECKs and the V37/V39 guard triggers through claim, PUBLISHED, retry and dead-letter transitions | "no change to V37 to V40 is needed" (10.12, section 12) | P5.1 records the on-paper analysis only (the V37 topic CHECK and guards do not reference transport); the empirical run is part of the separately authorised V41 stage and the compatibility stays **unproven until then** |
 | **S2** | Read `OutboxDeliveryOperations`/`CommandStateHistory` for how `reason_code`, the message text and the history `PUBLISHED` fact are chosen; prove an evidence kind can be passed without altering existing MQTT assertions | "the evidence kind needs no schema change" | P5.1 |
 | **S3** | A throwaway servlet and a real Tomcat: write and flush a 1 KB response while the client (a) reads it, (b) never reads, (c) closes before the write, (d) resets mid-body; record what the application can observe in each case | the classification of 10.5 | before P5.4 outbound |
 | **S4** | The Phase 4 process-kill harness extended with a pull handler stub: kill before the claim, after the claim, during the write and after the write; check the five rows of 10.7 against the durable state | the kill-behaviour table | before P5.4 outbound |
