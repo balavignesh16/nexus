@@ -2,7 +2,7 @@
 
 Date: 2026-10-18.
 
-Status: **P5.1, P5.V41, P5.2, P5.3, P5.4 (ingest and credentials; outbound pull deferred), P5.5, P5.6 and P5.7 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.8 is authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.1, P5.V41, P5.2, P5.3, P5.4 (ingest and credentials; outbound pull deferred), P5.5, P5.6, P5.7 and P5.8 IMPLEMENTED (2026-10-18; see the ledger evidence and its P5.8 disclosures). Phase 5 is complete; Phase 6 was not started and is in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
 Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
@@ -120,7 +120,7 @@ Authority: contract 14. Ledger: section I, K (parts). Scenarios: 9.
 
 Deliverables: the reusable kit; the reports for the three adapters; the minimal in-test adapter and the empty-diff proof for the Twin and Rule packages; the mixed-fleet test.
 
-### P5.8 Integrated validation, mutation campaign and documentation
+### P5.8 Integrated validation, mutation campaign and documentation (IMPLEMENTED 2026-10-18)
 
 Authority: contract 16 to 19. Ledger: section K, E and H (claims), I (mutation). Scenarios: 8.
 

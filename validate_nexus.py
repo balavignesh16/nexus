@@ -104,6 +104,15 @@ def main() -> int:
         checks.append(skipped("simulator unit tests", f"environment not installed at {simpy}"))
     checks.append(execute("git whitespace check", ["git", "diff", "--check"], rt.ROOT, 60, a.verbose))
     if a.full:
+        # Phase 5 (ledger P5-126): the adapter conformance kit at unit level with the extensibility proof (git diff of the Twin, Rule and Phase 4 reliability
+        # packages against the Phase 4 baseline), and the live conformance run of the three adapters against disposable PostgreSQL and Mosquitto with a mixed
+        # fleet. The same classes also run inside the complete backend suite; these named checks make the Phase 5 evidence visible on its own line.
+        checks.append(execute("phase 5 adapter conformance kit and extensibility proof (unit level)",
+                              [mvnw, "-q", "-Dtest=ConformanceKitTest,AdapterConformanceTest,AdapterExtensibilityTest,SharedCasesOracleTest", "test"],
+                              rt.ROOT / "backend", 600, a.verbose))
+        checks.append(execute("phase 5 adapter smoke (MQTT, HTTP and simulator conformance, mixed fleet, on PostgreSQL and Mosquitto)",
+                              [mvnw, "-q", "-Dtest=AdapterConformanceIntegrationTest", "test"],
+                              rt.ROOT / "backend", 600, a.verbose))
         checks.append(execute("deterministic physical-intelligence loop smoke",
                               [mvnw, "-q", "-Dtest=PhysicalIntelligenceLoopSmokeTest", "test"],
                               rt.ROOT / "backend", 600, a.verbose))

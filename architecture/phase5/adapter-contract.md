@@ -518,6 +518,10 @@ Command delivery over HTTP and the dispatcher routing for HTTP and the simulator
 
 **Remaining Phase 5 limitations (after P5.7).** HTTP command pull and the dispatcher routing through the egress router are deferred; MQTT version resolution is a decision for the owner (it would reject, for the first time, a payload that is historically accepted); the NOT_SENT / UNCERTAIN classification of the real broker bridge is the Phase 4 table, not re-proven over a live broker here; nothing in Phase 5 is physical-hardware validation.
 
+## 16.5 (P5.8 closing notes)
+
+The operator guide is `operator-guide.md` (enabling, credentials, assignment, rollback, adding a transport, validation commands, limits). The Phase 5 gate additions are the two named checks in `validate_nexus.py --full`, the cost line of `backend_batches.py`, `tests/test_phase5_gate.py`, `tests/test_phase5_claims.py` and `tests/test_phase5_protected_paths.py`. The final capability matrix is the one in section 16.4 and has not changed: HTTP and the simulator still do not accept commands. Rollback is the removal of the two enable properties (`AdapterRollbackIntegrationTest`). The closing evidence, the gate attempts and their disclosures are in the ledger section "P5.8".
+
 ## 16. Preserved Phase 4 guarantees (the "do not break" list)
 
 Atomic acceptance; frozen payload and timestamp; claim, lease and fencing; the NOT_SENT-only retry policy; uncertain is never resent and holds later commands; bounded attempts and window; the database clock for lifecycle facts; first-ACK-wins and the persisted ACK timeout; convergence separate from ACK separate from actuation; the messageId inbox semantics; queue caps and the shared publish rate; the read-only lifecycle API; the trace projection. The Phase 3 rule suite must stay green with the outbox OFF and ON. No Phase 5 slice may change an accepted Phase 4 assertion.

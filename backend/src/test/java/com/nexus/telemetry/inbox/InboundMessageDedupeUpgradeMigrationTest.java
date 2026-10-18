@@ -91,7 +91,8 @@ class InboundMessageDedupeUpgradeMigrationTest {
 
         try (Connection c = connect()) {
             assertEquals(checksumsBefore, checksumsThroughV39(c), "V1 to V39 checksums are unchanged");
-            assertEquals("40", InboxSql.text(c, "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1"));
+            // Phase 5 added V41 after this test was written: the upgrade must leave V40 installed and successful; a later migration is allowed.
+            assertEquals("40", InboxSql.text(c, "SELECT version FROM flyway_schema_history WHERE success AND version = '40'"));
             assertEquals(columnsBefore, telemetryColumns(c), "telemetry_history schema is unchanged (P4-086)");
             assertEquals(rowsBefore, telemetryRows(c), "telemetry rows are identical");
             assertEquals(hypertableBefore, InboxSql.text(c, "SELECT COUNT(*) || ':' || (SELECT COUNT(*) FROM timescaledb_information.dimensions WHERE hypertable_name = 'telemetry_history') FROM timescaledb_information.hypertables WHERE hypertable_name = 'telemetry_history'"),

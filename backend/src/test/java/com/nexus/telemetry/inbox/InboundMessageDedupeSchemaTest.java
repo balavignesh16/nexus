@@ -41,7 +41,8 @@ class InboundMessageDedupeSchemaTest {
     @Test
     void v40IsInstalledAsTheLatestMigrationOnAFreshDatabase() throws Exception {
         try (Connection c = connect()) {
-            assertEquals("40", InboxSql.text(c, "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1"));
+            // Phase 5 added V41 after this test was written: what matters here is that V40 is installed and successful, not that nothing follows it.
+            assertEquals("40", InboxSql.text(c, "SELECT version FROM flyway_schema_history WHERE success AND version = '40'"));
             assertEquals(1, InboxSql.count(c, "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'inbound_message_dedupe'"));
         }
     }

@@ -37,6 +37,7 @@ INTEGRATION_WEIGHT = 3
 JVM_HEAP = "-Xmx1400m"           # bounded fork heap (the former fork used a quarter of the machine's RAM)
 MAVEN_HEAP = "-Xmx300m"
 CONTEXT_CACHE = "8"              # spring.test.context.cache.maxSize: cached application contexts per JVM
+BASELINE_SECONDS = 1541           # measured at P4-FINAL: 219 classes, 1,746 tests, 10 batches; Phase 5 reports its cost against this (decision D10)
 MIN_FREE_MB = 1200               # a batch does not start while the machine is below this; the wait counts against the budget
 EXCLUDED_TAGS = ("crash", "crash-smoke")   # run by their own checks (pom: surefire.excludedGroups)
 
@@ -188,8 +189,12 @@ def run(mvnw: str, deadline_seconds: int, verbose: bool = False, classes: list[T
     detail = {"classesDiscovered": len(classes), "classesWithReports": len(executed), "batches": len(batches), "batchesRun": len(batch_rows), "totals": totals,
               "minFreeMbObserved": min_free, "seconds": round(time.monotonic() - started), "rows": batch_rows,
               "classesWithoutTestsOrReports": sorted(inventory - set(executed))}
+    detail["baselineSeconds"] = BASELINE_SECONDS
+    detail["differenceFromBaselineSeconds"] = detail["seconds"] - BASELINE_SECONDS
     (log_dir / "backend-batches.json").write_text(json.dumps(detail, indent=1), encoding="utf-8")
-    ok = not failures and totals["failures"] == 0 and totals["errors"] == 0
+    ok =not failures and totals["failures"] == 0 and totals["errors"] == 0
     summary = (f"{'PASS' if ok else 'FAIL'}: {len(batch_rows)}/{len(batches)} batches, {len(executed)}/{len(classes)} classes, tests {totals['tests']}, failures {totals['failures']}, "
-               f"errors {totals['errors']}, skipped {totals['skipped']}, min free {min_free} MB, {detail['seconds']}s" + ("; " + " | ".join(failures) if failures else ""))
+               f"errors {totals['errors']}, skipped {totals['skipped']}, min free {min_free} MB, {detail['seconds']}s "
+               f"({detail['differenceFromBaselineSeconds']:+d}s against the {BASELINE_SECONDS}s baseline), seconds per batch {[r['seconds'] for r in batch_rows]}"
+               + ("; " + " | ".join(failures) if failures else ""))
     return Result(ok, summary, detail)

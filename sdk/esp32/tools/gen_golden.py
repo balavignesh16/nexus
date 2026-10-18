@@ -152,8 +152,8 @@ def extras() -> list[tuple[str, int, bytes]]:
         ("x:fresh-future-edge", T, command(timestamp=T + 30)),
         ("x:fresh-past-edge", T, command(timestamp=T - 30)),
         ("x:stale-past-edge", T, command(timestamp=T - 31)),
-        ("x:payload-at-limit", T, led[:-1] + b',"pad":"' + b"a" * (MAX_PAYLOAD - len(led) - 10) + b'"}'),
-        ("x:payload-over-limit", T, led[:-1] + b',"pad":"' + b"a" * (MAX_PAYLOAD - len(led) - 9) + b'"}'),
+        ("x:payload-at-limit", T, led[:-1] + b',"pad":"' + b"a" * (MAX_PAYLOAD - len(led) - 9) + b'"}'),
+        ("x:payload-over-limit", T, led[:-1] + b',"pad":"' + b"a" * (MAX_PAYLOAD - len(led) - 8) + b'"}'),
         ("x:nested-depth-30", T, led[:-1] + b',"d":' + b"[" * 29 + b"]" * 29 + b"}"),
         ("x:large-valid-key-count", T, led[:-1] + b"," + b",".join(b'"k%d":%d' % (i, i) for i in range(40)) + b"}"),
     ]

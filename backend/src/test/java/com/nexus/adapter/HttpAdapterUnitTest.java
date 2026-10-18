@@ -149,4 +149,30 @@ class HttpAdapterUnitTest {
         when(store.find(lookup)).thenReturn(Optional.of(new CredentialStore.Stored(UUID.randomUUID(), device, lookup, hasher.hash(secret), KeyHasher.ALGORITHM, "ACTIVE", null, now, "MAINTENANCE", "HTTP_WEBHOOK")));
         assertEquals(com.nexus.adapter.spi.RejectionCode.FORBIDDEN_DEVICE, adapter.authenticateHeader(header).failure(), "a valid key of an inactive device is refused as forbidden");
     }
+
+    @Test
+    void p5_058_aBodyWithoutADeclaredLengthIsStillBoundedWhileReading() throws Exception {
+        // Mutation M09 survived the first campaign: only the declared Content-Length was ever tested. A chunked or lying request declares nothing (-1),
+        // so the limit must also hold while the body is read.
+        KeyHasher hasher = new KeyHasher(PEPPER);
+        CredentialStore store = mock(CredentialStore.class);
+        HttpWebhookAdapter adapter = new HttpWebhookAdapter(store, hasher);
+        SecureRandom random = new SecureRandom();
+        String lookup = KeyFormat.newLookupId(random), secret = KeyFormat.newSecret(random);
+        UUID device = UUID.randomUUID();
+        when(store.find(lookup)).thenReturn(Optional.of(new CredentialStore.Stored(UUID.randomUUID(), device, lookup, hasher.hash(secret), KeyHasher.ALGORITHM, "ACTIVE", null,
+                Instant.now(), "ACTIVE", "HTTP_WEBHOOK")));
+        TelemetryIntake telemetry = mock(TelemetryIntake.class);
+        HttpIngestController controller = new HttpIngestController(adapter, settings(false, "127.0.0.1"), telemetry, mock(AcknowledgementIntake.class), store,
+                new AdapterMetrics(new SimpleMeterRegistry()));
+        for (int size : new int[]{8193, 20000, 1_000_000}) {
+            jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
+            when(request.getContentLengthLong()).thenReturn(-1L);
+            when(request.getContentType()).thenReturn("application/json");
+            when(request.getHeader("Authorization")).thenReturn("Bearer " + KeyFormat.format(lookup, secret));
+            when(request.getInputStream()).thenReturn(new org.springframework.mock.web.DelegatingServletInputStream(new java.io.ByteArrayInputStream(new byte[size])));
+            assertEquals(413, controller.telemetry(device.toString(), request).getStatusCode().value(), "size " + size);
+        }
+        verify(telemetry, never()).submit(any(), any());
+    }
 }
