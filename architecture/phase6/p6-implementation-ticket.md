@@ -34,3 +34,9 @@ Every scenario has a layer and a pass criterion in the ledger. A slice is comple
 * Migration V42 only (V41 was the latest and no historical migration changed). Two existing tests that assumed the latest version (`TransportSchemaV41Test`) were relaxed to assert what they mean (V41 installed after V40 with a checksum).
 * Decision: the draft is stored outside `rules` (see contract section 7). The ledger text for P6-039 was corrected accordingly.
 * Deviation noted: no separate "generation log" table; the draft row carries the provenance and the append-only decision table carries the audit trail.
+
+## P6.4 delivered (2026-10-19)
+
+* No migration (V42 is the latest). Nothing is persisted: findings and recommendations are recomputed with stable ids from existing tables and indexes, which satisfies "no duplicate durable recommendations" by having none. The contract's earlier idea of a retention policy for transient recommendations therefore applies to no rows.
+* Packages `com.nexus.intelligence.anomaly` (cleaner, four detectors, read-only reader, service, settings) and `com.nexus.intelligence.recommend` (facts reader, service, optional narrator); `AnomalyController` (GET only).
+* Findings during the slice (recorded, not hidden): the default minimum baseline of 20 produced false outlier flags on ordinary noise and was raised to 100 from a measurement; command history is stamped by the database clock, so its window must use the database clock (a backend-clock window missed the newest fact).

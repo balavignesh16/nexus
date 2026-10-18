@@ -132,4 +132,39 @@ class IntelligenceArchitectureTest {
         assertThat(DECISION_ROUTE.matcher("@PostMapping(\"/{id}/approve\")").find()).isTrue(); // the rule fires on a violating source
         assertThat(DECISION_ROUTE.matcher("@PostMapping(\"/drafts\")").find()).isFalse();
     }
+
+    @Test
+    void p6_065_p6_069_detectionAndRecommendationCannotReachDraftsApprovalOrAnyModelExceptThroughTheNarrator() throws IOException {
+        List<String> violations = new ArrayList<>();
+        int scanned = 0;
+        for (String dir : List.of("com/nexus/intelligence/anomaly", "com/nexus/intelligence/recommend")) {
+            try (Stream<Path> s = Files.walk(MAIN.resolve(dir))) {
+                for (Path p : (Iterable<Path>) s.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                    scanned++;
+                    String src = Files.readString(p);
+                    String name = p.getFileName().toString();
+                    if (src.contains("import com.nexus.intelligence.draft")) violations.add(name + " imports the draft code");
+                    if (src.contains("com.nexus.rule.approval")) violations.add(name + " names the approval code");
+                    if (src.contains("ModelGateway") && !name.equals("RecommendationNarrator.java")) violations.add(name + " reaches the model gateway");
+                    if (src.contains("import com.nexus.intelligence.model.") && !name.equals("RecommendationNarrator.java")) violations.add(name + " imports the model layer");
+                    if (src.contains("ModelProvider") || src.contains("RestClient")) violations.add(name + " reaches a provider or an HTTP client");
+                }
+            }
+        }
+        assertThat(scanned).isGreaterThan(10);
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void p6_071_detectionAndRecommendationHaveNoBackgroundTaskNoEventListenerAndNothingOnTheIngestionPath() throws IOException {
+        List<String> found = new ArrayList<>();
+        Pattern background = Pattern.compile("@(Scheduled|Async|EventListener|TransactionalEventListener|PostConstruct|EnableScheduling)\\b");
+        for (String dir : List.of("com/nexus/intelligence/anomaly", "com/nexus/intelligence/recommend", "com/nexus/intelligence/api")) {
+            try (Stream<Path> s = Files.walk(MAIN.resolve(dir))) {
+                for (Path p : (Iterable<Path>) s.filter(f -> f.toString().endsWith(".java"))::iterator) if (background.matcher(Files.readString(p)).find()) found.add(p.getFileName().toString());
+            }
+        }
+        assertThat(found).as("Layer 3 runs only when asked: no scheduler, async executor or event listener").isEmpty();
+        assertThat(background.matcher("@Scheduled(fixedDelay = 1)").find()).isTrue();
+    }
 }
