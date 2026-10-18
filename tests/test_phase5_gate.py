@@ -131,6 +131,55 @@ class SegmentedCheck(unittest.TestCase):
         self.assertIn("budget of 0s exhausted", result.summary)
 
 
+class BackendBudget(unittest.TestCase):
+    """The owner-approved backend budget (2,400 s, Phase 5 certification): applied to the whole backend check, and a genuine overrun still fails."""
+
+    def run_with_clock(self, budget, seconds_per_batch):
+        clock = [0.0]
+        seen_timeouts = []
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            sources, reports, logs = make_sources(tmp / "src"), tmp / "reports", tmp / "logs"
+
+            def fake_run(command, **kwargs):
+                seen_timeouts.append(kwargs.get("timeout"))
+                reports.mkdir(parents=True, exist_ok=True)
+                for name in [a.removeprefix("-Dtest=") for a in command if a.startswith("-Dtest=")][0].split(","):
+                    report(reports, name)
+                if kwargs.get("timeout") is not None and seconds_per_batch > kwargs["timeout"]:
+                    clock[0] += kwargs["timeout"]                  # the process is killed when it reaches its timeout, as subprocess.run does
+                    raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                clock[0] += seconds_per_batch
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            fake_time = mock.Mock(monotonic=lambda: clock[0], sleep=lambda s: None)
+            with mock.patch.object(bb.subprocess, "run", fake_run), mock.patch.object(bb, "free_mb", lambda: 10**6), mock.patch.object(bb, "REPORTS", reports),                     mock.patch.object(bb.read_reports, "__defaults__", (reports,)), mock.patch.object(bb, "time", fake_time):
+                result = bb.run("mvnw", budget, classes=bb.discover(sources), max_weight=1, log_dir=logs)
+        return result, seen_timeouts
+
+    def test_the_official_gate_uses_2400_seconds_for_the_whole_backend_check(self):
+        self.assertEqual(2400, vn.BACKEND_FULL_TIMEOUT_SECONDS)
+        with mock.patch.object(vn.backend_batches, "run", return_value=bb.Result(True, "PASS", {})) as run:
+            vn.backend_batches_check("mvnw", False)
+        self.assertEqual(2400, run.call_args.args[1])
+
+    def test_a_run_between_the_old_and_the_new_budget_passes_and_each_batch_keeps_its_own_process_timeout(self):
+        # 3 batches of 640 s = 1,920 s: over the former 1,800 s, inside 2,400 s (the measured Phase 5 case)
+        result, timeouts = self.run_with_clock(2400, 640)
+        self.assertTrue(result.ok, result.summary)
+        self.assertEqual(3, result.detail["batchesRun"])
+        self.assertEqual(2400, timeouts[0])                      # a batch may use what is left of the budget, never more
+        self.assertEqual([2400, 1760, 1120], timeouts)
+        # the same run against the former budget fails honestly
+        old, _ = self.run_with_clock(1800, 640)
+        self.assertFalse(old.ok)
+
+    def test_a_genuine_overrun_of_the_new_budget_still_fails(self):
+        result, _ = self.run_with_clock(2400, 900)               # 3 x 900 s = 2,700 s
+        self.assertFalse(result.ok)
+        self.assertIn("Maven exit code -1", result.summary)    # batch 3 was given the 600 s that were left and was stopped there
+
+
 class FullGate(unittest.TestCase):
     """validate_nexus.py --full with every check replaced by a canned one: only the gate's own decisions are under test."""
 

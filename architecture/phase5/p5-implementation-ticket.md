@@ -219,3 +219,5 @@ Wall-clock for a Phase 5 milestone commit: about the same 30 minutes for `--full
 ## 9. What is not authorised by this ticket
 
 Any source, schema, migration, SDK or test change; any change to `firmware/**`, `hardware-tests/**` or `results/**`; any change to the user-owned documents; any merge, push or tag; the HTTP pull implementation (until D8 and D9). P5.0 is complete when the owner has reviewed these documents.
+
+**Budget outcome (2026-10-18):** the measured Phase 5 backend check took 1,618 s and 1,922 s; the owner approved raising the backend-check budget from 1,800 s to 2,400 s (nothing else changed). See the ledger section "Backend budget adjustment".

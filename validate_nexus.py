@@ -21,7 +21,10 @@ class Check:
     reason: str
     outputSummary: str = ""
 
-BACKEND_FULL_TIMEOUT_SECONDS = 1800
+# Owner-approved on 2026-10-18 (Phase 5 certification): 1,800 s -> 2,400 s for the complete backend check only. Measured with Phase 5 (243 classes, 1,896 tests,
+# 11 sequential batches): 1,618 s and 1,922 s on the same machine in two runs, against 1,541 s for Phase 4 (219 classes, 1,746 tests); the 1,922 s run exhausted the
+# former budget with every test passing. Nothing else changed: the batches, the per-batch process timeout, the report checks and the failure behaviour are as before.
+BACKEND_FULL_TIMEOUT_SECONDS = 2400
 
 
 def cli() -> argparse.ArgumentParser:
@@ -87,9 +90,9 @@ def main() -> int:
     if a.full:
         # Wall-clock budget of the complete backend suite only (real PostgreSQL and Mosquitto containers, 190+ test classes). The suite measured
         # 1,068 s at P4.3 and 1,175 s at P4.4 on the 16 GB development machine, so the former 1,200 s left a 25 s margin and made the gate flaky for reasons
-        # unrelated to correctness; 1,800 s leaves a margin of about 50%. No check, assertion, skip or exit-code handling was changed, and no other budget.
+        # unrelated to correctness; 1,800 s left a margin of about 50% (raised to 2,400 s for Phase 5, see BACKEND_FULL_TIMEOUT_SECONDS). No check, assertion, skip or exit-code handling was changed, and no other budget.
         # P4-FINAL: the same set of test classes, run as deterministic sequential bounded batches (backend_batches.py) because one Maven process holding every
-        # container and Spring context exhausted the machine's memory. The 1,800 s budget is unchanged and covers all batches; completeness is proven from the reports.
+        # container and Spring context exhausted the machine's memory. The budget covers all batches; completeness is proven from the reports.
         checks.append(backend_batches_check(mvnw, a.verbose))
     else:
         checks.append(execute("backend compile", [mvnw, "-q", "-DskipTests", "test"], rt.ROOT / "backend", 300, a.verbose))
