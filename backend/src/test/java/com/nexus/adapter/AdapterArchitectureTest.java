@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * proofs, like the Phase 4 architecture tests: they read the production sources and fail the build on a forbidden dependency. Each rule is
  * also exercised on synthetic sources so that a rule that matches nothing today cannot silently stop working.
  */
-class AdapterArchitectureTest {
+public class AdapterArchitectureTest {
     private static final Path MAIN = locate("src/main/java/com/nexus");
 
     /** Transport packages: nothing outside adapter may depend on them, and they may not depend on the core. */
@@ -57,15 +57,15 @@ class AdapterArchitectureTest {
     }
 
     /** Strips comments so a sentence in Javadoc is not mistaken for a dependency. */
-    static String code(String source) {
+    public static String code(String source) {
         return source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//[^\\n]*", "");
     }
 
-    static boolean dependsOnTransport(String source) {
+    public static boolean dependsOnTransport(String source) {
         return Pattern.compile("com\\.nexus\\.adapter\\.(" + String.join("|", TRANSPORTS) + ")\\b").matcher(code(source)).find();
     }
 
-    static boolean importsCoreService(String source) {
+    public static boolean importsCoreService(String source) {
         String c = code(source);
         return CORE_SERVICES.stream().anyMatch(p -> p.matcher(c).find());
     }

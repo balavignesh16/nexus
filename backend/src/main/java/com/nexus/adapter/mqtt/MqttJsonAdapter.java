@@ -122,7 +122,15 @@ public class MqttJsonAdapter implements AdapterDescriptor, AdapterLifecycle, Tel
 
     @Override
     public Attempt deliver(CommandEnvelope command, Duration timeout) {
-        MqttPublisher.Result result = wire.publish(MqttTopics.commands(command.deviceId()), command.payload(), timeout);
+        MqttPublisher.Result result;
+        try {
+            result = wire.publish(MqttTopics.commands(command.deviceId()), command.payload(), timeout);
+        } catch (RuntimeException e) {
+            // The port is documented never to throw, but a failure after the client may have been reached is doubt, never proof of non-delivery
+            // and never a confirmation; the caller classifies by the Attempt, so the exception must not escape (conformance kit, egress scenario).
+            uncertain.incrementAndGet();
+            return Attempt.uncertain("PUBLISHER_FAILED");
+        }
         return switch (result.kind()) {
             case CONFIRMED -> {
                 confirmed.incrementAndGet();

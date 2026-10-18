@@ -150,6 +150,29 @@
           "validator": "REJECT"
         }
       }
+    },
+    {
+      "class": "E",
+      "clause": "adapter-contract.md section 6 (version resolution), 6.1 rule 6, 8.4",
+      "rationale": "The MQTT path treats contractVersion and requires as ordinary unknown fields, exactly as the committed listener and handlers always did, so a message declaring major 2.0, a malformed version text or a non-empty requires list is accepted and processed as a legacy-v1 message. The contract forbids this (section 6 resolution table: reject permanently, never reinterpret), and the HTTP adapter, the Python validator and the SDKs do reject it. It is registered, not tightened, because section 6.1 rule 6 and the Phase 4 freeze say a historically accepted payload is never rejected more strictly in this phase, and no shipped producer (the firmware, the simulator, the SDKs on MQTT) declares a version the backend does not know. Consequence to remember: a future producer that relies on requires to make a receiver refuse a message it cannot honour is NOT protected over MQTT until the MQTT decoder resolves versions (a decision for the owner, with a migration note for existing devices).",
+      "cases": {
+        "telemetry:contractVersion-2.0-field": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:UNSUPPORTED_CONTRACT_MAJOR"
+        },
+        "telemetry:contractVersion-invalid-text": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_CONTRACT_VERSION"
+        },
+        "telemetry:requires-non-empty": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:UNSUPPORTED_REQUIRED_FEATURE"
+        },
+        "ack:contractVersion-2.0-field": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        }
+      }
     }
   ],
   "simulatorEntries": [

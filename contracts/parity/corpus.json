@@ -645,6 +645,34 @@
    "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13"
   },
   {
+   "id": "telemetry:contractVersion-1.9-field",
+   "kind": "telemetry",
+   "origin": "mutation",
+   "payloadText": "{\"deviceId\":\"3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":24.5,\"unit\":\"CELSIUS\",\"contractVersion\":\"1.9\"}",
+   "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13"
+  },
+  {
+   "id": "telemetry:contractVersion-2.0-field",
+   "kind": "telemetry",
+   "origin": "mutation",
+   "payloadText": "{\"deviceId\":\"3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":24.5,\"unit\":\"CELSIUS\",\"contractVersion\":\"2.0\"}",
+   "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13"
+  },
+  {
+   "id": "telemetry:contractVersion-invalid-text",
+   "kind": "telemetry",
+   "origin": "mutation",
+   "payloadText": "{\"deviceId\":\"3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":24.5,\"unit\":\"CELSIUS\",\"contractVersion\":\"x\"}",
+   "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13"
+  },
+  {
+   "id": "telemetry:requires-non-empty",
+   "kind": "telemetry",
+   "origin": "mutation",
+   "payloadText": "{\"deviceId\":\"3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"sensorType\":\"TEMPERATURE_SENSOR\",\"value\":24.5,\"unit\":\"CELSIUS\",\"contractVersion\":\"1.0\",\"requires\":[\"x\"]}",
+   "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13"
+  },
+  {
    "id": "telemetry:topic-uppercase-device",
    "kind": "telemetry",
    "origin": "mutation",
@@ -1022,6 +1050,12 @@
    "kind": "acknowledgement",
    "origin": "mutation",
    "payloadText": "{\"commandId\":\"a1b2c3d4-e5f6-4789-8abc-def012345678\",\"status\":\"ACCEPTED\",\"timestamp\":1767225600,\"contractVersion\":\"1.0\"}"
+  },
+  {
+   "id": "ack:contractVersion-2.0-field",
+   "kind": "acknowledgement",
+   "origin": "mutation",
+   "payloadText": "{\"commandId\":\"a1b2c3d4-e5f6-4789-8abc-def012345678\",\"status\":\"ACCEPTED\",\"timestamp\":1767225600,\"contractVersion\":\"2.0\"}"
   },
   {
    "id": "ack:payload-trailing-garbage",
