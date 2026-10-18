@@ -133,7 +133,21 @@ public class DeviceCommandAckMessageHandler {
             return;
         }
         String reason = node.hasNonNull("reason") ? node.get("reason").asText() : null;
+        apply(topicDeviceId, commandId, status, ackReceivedAt, reason, backendReceivedAt);
+    }
 
+    /**
+     * P5.2: applies an acknowledgement that an adapter has already decoded (the adapter intake port). It is the SAME application step as
+     * {@link #handle}, reached without the MQTT topic and JSON parsing; the receipt time comes from the same (database) clock.
+     */
+    @Transactional
+    public void acknowledge(UUID deviceId, UUID commandId, AcknowledgementStatus status, Instant deviceTimestamp, String reason) {
+        Instant backendReceivedAt = ackFacts != null ? ackFacts.databaseNow() : clock.instant();
+        apply(deviceId, commandId, status, deviceTimestamp, reason, backendReceivedAt);
+    }
+
+    private void apply(UUID topicDeviceId, UUID commandId, AcknowledgementStatus status, Instant ackReceivedAt, String reason,
+                       Instant backendReceivedAt) {
         if(devices!=null && devices.findByIdForUpdate(topicDeviceId).isEmpty()) {
             log.warn("Command-ack for unknown device {} ignored",topicDeviceId);
             return;

@@ -12,7 +12,9 @@ import com.nexus.device.capability.CapabilityType;
 import com.nexus.device.capability.DeviceCapability;
 import com.nexus.device.capability.DeviceCapabilityRepository;
 import com.nexus.device.connectivity.DeviceConnectivityRegistry;
-import com.nexus.device.connectivity.DeviceConnectivityStatus;
+import com.nexus.adapter.core.MqttTransportEligibility;
+import com.nexus.adapter.spi.Eligibility;
+import com.nexus.adapter.spi.TransportEligibility;
 import com.nexus.device.domain.Device;
 import com.nexus.device.domain.DeviceMode;
 import com.nexus.device.domain.DeviceRepository;
@@ -150,6 +152,21 @@ public class CommandExecutor implements ActionExecutor {
         return outboxSettings != null && outboxSettings.enabled();
     }
 
+    /** P5.2: in the application this is the router that picks the rule by the device's transport; a hand-built executor uses the MQTT rule. */
+    private TransportEligibility transportEligibility;
+    @Autowired(required = false)
+    void setTransportEligibility(TransportEligibility transportEligibility) {
+        this.transportEligibility = transportEligibility;
+    }
+    private TransportEligibility transportEligibility() {
+        TransportEligibility current = transportEligibility;
+        if (current == null) {
+            current = new MqttTransportEligibility(deviceConnectivityRegistry, mqttClient);
+            transportEligibility = current;
+        }
+        return current;
+    }
+
     @Override
     public boolean supports(ActionType type) {
         return type == ActionType.SEND_COMMAND;
@@ -243,15 +260,11 @@ public class CommandExecutor implements ActionExecutor {
             if (effectiveUnit == null) effectiveUnit = deviceCapability.get().getUnit();
         }
 
-        DeviceConnectivityStatus connectivity = deviceConnectivityRegistry.get(deviceId)
-                .map(c -> c.status())
-                .orElse(null);
-        if (connectivity != DeviceConnectivityStatus.ONLINE) {
-            throw new CommandRejectedException("Device is offline");
-        }
-
-        if (!mqttClient.isConnected()) {
-            throw new CommandRejectedException("MQTT backend is not connected");
+        // P5.2: the acceptance-time reachability guard is the device's TRANSPORT eligibility (adapter-contract.md section 10.8). For an MQTT
+        // device it is exactly the former pair of checks, with the former wording: registry ONLINE, then the broker client connected.
+        Eligibility eligibility = transportEligibility().eligible(deviceId, Instant.now());
+        if (!eligibility.eligible()) {
+            throw new CommandRejectedException(eligibility.message());
         }
 
         String legacyType = bindingId == null ? capability : null;

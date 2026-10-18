@@ -2,7 +2,7 @@
 
 Date: 2026-10-18.
 
-Status: **P5.1 IMPLEMENTED (2026-10-18; 30 scenarios COVERED, see the ledger evidence). P5.V41 and P5.2 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.1, P5.V41 and P5.2 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.3 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
 Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
@@ -72,7 +72,7 @@ Gate: contract tests, tooling tests, `--fast`.
 
 Authority: contract 12. Ledger: section J (P5-111 to P5-118, all PLANNED). Prerequisite for the P5.2 transport assignment API and for P5.4. Includes the empirical spike S1 (apply the proposed SQL to a disposable V40 copy and push an HTTP-assigned device's outbox row through every V37/V39 CHECK and guard trigger) and produces V41 only if it passes. Order: P5.1, then P5.V41, then P5.2. The owner decides the authorisation; nothing here creates a migration.
 
-### P5.2 Adapter SPI, registry, intake ports and boundary tests (no behaviour change)
+### P5.2 Adapter SPI, registry, intake ports and boundary tests (no behaviour change) (IMPLEMENTED 2026-10-18)
 
 Authority: contract 3 to 5. Ledger: sections C, K, L (parts). Scenarios: 16.
 
