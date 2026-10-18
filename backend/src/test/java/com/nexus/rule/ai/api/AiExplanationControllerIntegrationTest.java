@@ -66,6 +66,7 @@ class AiExplanationControllerIntegrationTest {
         registry.add("spring.flyway.user", postgres::getUsername);
         registry.add("spring.flyway.password", postgres::getPassword);
         registry.add("nexus.ai.enabled", () -> "true");
+        registry.add("nexus.ai.send-device-evidence", () -> "true");
         registry.add("nexus.ai.rate-limit.requests-per-minute", () -> "1000");
         registry.add("nexus.ai.rate-limit.burst", () -> "1000");
         registry.add("nexus.ai.rate-limit.concurrency-limit", () -> "50");

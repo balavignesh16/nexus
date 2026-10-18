@@ -55,6 +55,7 @@ public class RuleMatchExplanationService {
     private final GroundingChecker groundingChecker;
     private final DeterministicExplanationRenderer fallbackRenderer;
     private final boolean aiEnabled;
+    private com.nexus.intelligence.model.AiCallGuard callGuard;
 
     public RuleMatchExplanationService(RuleMatchExplanationContextBuilder contextBuilder,
                                         AiExplanationContextMapper mapper,
@@ -62,7 +63,8 @@ public class RuleMatchExplanationService {
                                         AiCandidateParser candidateParser,
                                         GroundingChecker groundingChecker,
                                         DeterministicExplanationRenderer fallbackRenderer,
-                                        @Value("${nexus.ai.enabled:false}") boolean aiEnabled) {
+                                        // device evidence leaves the platform only when the provider is enabled AND sending it is separately consented to
+                                        @Value("#{${nexus.ai.enabled:false} and ${nexus.ai.send-device-evidence:false}}") boolean aiEnabled) {
         this.contextBuilder = contextBuilder;
         this.mapper = mapper;
         this.reasoningBoundary = reasoningBoundary;
@@ -70,6 +72,17 @@ public class RuleMatchExplanationService {
         this.groundingChecker = groundingChecker;
         this.fallbackRenderer = fallbackRenderer;
         this.aiEnabled = aiEnabled;
+    }
+
+    /** Optional: bounds the provider call (timeout, bulkhead, circuit breaker). Absent in unit tests that construct the service directly. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCallGuard(com.nexus.intelligence.model.AiCallGuard callGuard) {
+        this.callGuard = callGuard;
+    }
+
+    private Optional<String> guarded(AiExplanationContext aiContext) {
+        com.nexus.intelligence.model.AiCallGuard.Result result = callGuard.call(() -> reasoningBoundary.generate(aiContext).orElse(null));
+        return result.refusal() != null ? Optional.empty() : Optional.ofNullable(result.text());
     }
 
     public RuleMatchExplanation explain(UUID matchId) {
@@ -94,7 +107,7 @@ public class RuleMatchExplanationService {
 
         Optional<String> raw;
         try {
-            raw = reasoningBoundary.generate(aiContext);
+            raw = callGuard == null ? reasoningBoundary.generate(aiContext) : guarded(aiContext);
         } catch (RuntimeException e) {
             // No provider-implementation exception may escape this
             // service - any unexpected failure inside a boundary
