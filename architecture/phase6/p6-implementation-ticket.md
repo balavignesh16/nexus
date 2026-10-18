@@ -11,7 +11,7 @@ Rules of work: one local commit per milestone; focused tests, affected regressio
 | P6.0 | Contract and acceptance foundation | contract, ticket, ledger, protected-path and ancestry checks | 3 |
 | P6.1 | Layer 1 completion | evidence references and presence model; non-match explainer (dry-run based); command explainers (queued, not published, uncertain, ACK timeout, no convergence, failed stage); read-only API; determinism, abstention, contradiction | 21 |
 | P6.2 | AI isolation | provider-independent interfaces, opt-in configuration, timeout, retry, breaker, bulkhead, minimised bounded context, structured output validation, architecture rules, fault injection, injection delimiting, origin and model identity | 13 |
-| P6.3 | Draft-rule assistance | V42 (drafts, approvals, generation log, DB guard), draft port using the existing draft path, local approval tool, retention job | 19 |
+| P6.3 | Draft-rule assistance | V42 (`ai_rule_drafts`, append-only `ai_rule_draft_decisions`, approver-role check, activation guard, expiry/supersede/purge functions), `intelligence.draft` (service, policy, store, retention job, propose/read controller), local approval command in `rule.approval` | 19 |
 | P6.4 | Anomalies and recommendations | deterministic detectors, read-only recommendation services, evidence windows, retention | 15 |
 | P6.5 | Evaluation suite | corpus, safety regressions, metrics, thresholds in the gate, injection corpus, reproducibility | 16 |
 | P6.6 | Integrated validation | Phase 3 OFF/ON, full gate, mutation campaign (at least 10), claims audit, forensic review, operator guide, handoff | 8 |
@@ -28,3 +28,9 @@ Order: P6.0, P6.1, P6.2, then P6.3 and P6.4 (independent after P6.2), P6.5, P6.6
 ## Acceptance of the plan
 
 Every scenario has a layer and a pass criterion in the ledger. A slice is complete when its scenarios are COVERED with named tests that ran and passed; deferred items need a recorded reason.
+
+## P6.3 delivered (2026-10-18)
+
+* Migration V42 only (V41 was the latest and no historical migration changed). Two existing tests that assumed the latest version (`TransportSchemaV41Test`) were relaxed to assert what they mean (V41 installed after V40 with a checksum).
+* Decision: the draft is stored outside `rules` (see contract section 7). The ledger text for P6-039 was corrected accordingly.
+* Deviation noted: no separate "generation log" table; the draft row carries the provenance and the append-only decision table carries the audit trail.

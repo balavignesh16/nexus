@@ -29,6 +29,7 @@ class IntelligenceArchitectureTest {
             Pattern.compile("^import\\s+(static\\s+)?com\\.nexus\\.rule\\.(application\\.RuleLifecycleService|engine\\.(RuleMatcher|executor)\\b)", Pattern.MULTILINE),
             Pattern.compile("^import\\s+(static\\s+)?com\\.nexus\\.twin\\.application\\b", Pattern.MULTILINE),
             Pattern.compile("^import\\s+(static\\s+)?com\\.nexus\\.pipeline\\b", Pattern.MULTILINE),
+            Pattern.compile("^import\\s+(static\\s+)?com\\.nexus\\.rule\\.approval\\b", Pattern.MULTILINE),
             Pattern.compile("^import\\s+(static\\s+)?org\\.eclipse\\.paho\\b", Pattern.MULTILINE),
             Pattern.compile("^import\\s+(static\\s+)?org\\.springframework\\.(integration|amqp|kafka)\\b", Pattern.MULTILINE));
 
@@ -103,10 +104,32 @@ class IntelligenceArchitectureTest {
         assertThat(importViolations("import com.nexus.rule.engine.executor.CommandExecutor;")).isNotEmpty();
         assertThat(importViolations("import com.nexus.twin.application.DigitalTwinService;")).isNotEmpty();
         assertThat(importViolations("import com.nexus.pipeline.TelemetryPipeline;")).isNotEmpty();
+        assertThat(importViolations("import com.nexus.rule.approval.DraftApprovalCli;")).isNotEmpty();
         assertThat(importViolations("import java.util.List;\nimport com.nexus.intelligence.evidence.EvidenceBundle;")).isEmpty();
         assertThat(writesThroughStore("repo.save(x);")).isTrue();
         assertThat(writesThroughStore("jdbc.update(\"insert\");")).isTrue();
         assertThat(writesThroughStore("// repo.save(x)\n/* jdbc.execute(1) */ int a = 1;")).isFalse();
         assertThat(writesThroughStore("jdbc.queryForObject(\"select 1\", Integer.class);")).isFalse();
+    }
+
+    private static final Pattern DECISION_ROUTE = Pattern.compile("(?i)(Post|Put|Patch|Delete)Mapping\\s*\\([^)]*(approv|reject|decision|decide|activate)");
+
+    @Test
+    void p6_046_onlyTheLocalApprovalCommandNamesTheDecisionFunctionAndNoRouteMentionsADecision() throws IOException {
+        List<String> namingDecision = new ArrayList<>();
+        List<String> routes = new ArrayList<>();
+        try (Stream<Path> s = Files.walk(MAIN)) {
+            for (Path p : (Iterable<Path>) s.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                String unix = p.toString().replace('\\', '/');
+                String src = Files.readString(p);
+                if (src.contains("ai_draft_decide") || src.contains("ai_rule_draft_decisions")) namingDecision.add(unix.substring(unix.lastIndexOf('/') + 1));
+                boolean controller = src.contains("@RestController") || src.contains("@Controller");
+                if (controller && unix.contains("com/nexus/intelligence") && DECISION_ROUTE.matcher(src).find()) routes.add(unix);
+            }
+        }
+        assertThat(namingDecision).containsExactly("DraftApprovalCli.java");
+        assertThat(routes).isEmpty();
+        assertThat(DECISION_ROUTE.matcher("@PostMapping(\"/{id}/approve\")").find()).isTrue(); // the rule fires on a violating source
+        assertThat(DECISION_ROUTE.matcher("@PostMapping(\"/drafts\")").find()).isFalse();
     }
 }

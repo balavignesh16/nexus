@@ -86,7 +86,8 @@ class TransportSchemaV41Test {
     void p5_111_v41AppliesAfterV40OnAnEmptyDatabaseWithARecordedChecksum() throws Exception {
         try (Connection c = connect()) {
             assertEquals(1, OutboxSql.count(c, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '41' AND success AND checksum IS NOT NULL"));
-            assertEquals(41, OutboxSql.count(c, "SELECT MAX(version::int) FROM flyway_schema_history WHERE version ~ '^[0-9]+$'"));
+            // Phase 6 added V42 after this test was written: what matters is that V41 is installed with a checksum and that nothing precedes it out of order.
+            assertEquals(1, OutboxSql.count(c, "SELECT COUNT(*) FROM flyway_schema_history WHERE success AND version = '41' AND installed_rank = (SELECT installed_rank FROM flyway_schema_history WHERE version = '40') + 1"));
             assertEquals(1, OutboxSql.count(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'transport'"));
             assertEquals(1, OutboxSql.count(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'device_templates' AND column_name = 'default_transport'"));
         }
