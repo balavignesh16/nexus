@@ -78,4 +78,3 @@ class CommandProcessor:
         if result.acknowledges:
             client.publish_acknowledgement(result.command_id, result.status, result.reason)
         return result
-

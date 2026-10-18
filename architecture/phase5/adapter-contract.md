@@ -488,6 +488,10 @@ HTTP status mapping for ingest: `200` accepted or exact duplicate (with `duplica
 
 **Simulator transport.** `adapter.simulator` hosts in-process devices behind the same intake ports and egress capability as any adapter, with no broker. Its eligibility is fail-closed until the dispatcher is routed through the egress router (the same reason as HTTP delivery): an accepted command for such a device would otherwise be published over MQTT.
 
+## 16.3 (P5.6 implementation notes)
+
+**ESP32 library.** `sdk/esp32` implements the device side of the contract for the `esp32-legacy-v1` profile in portable C++ (see its README). Its command pipeline is the firmware's, in the firmware's order, with four documented policy differences (UUID commandId, duplicate names, size bounds, boolean telemetry needs a capabilityKey). Freshness is the absolute 30 s rule shared with the Python SDK, the simulator, the validator and the backend's delivery window; a test pins all five. The library refuses to produce a timestamped message before the clock is plausible (`CLOCK_NOT_SYNCED`), as the firmware skips the cycle. Message ids come from a per-boot 64-bit id and a counter, so a retry of the same sample reuses its id. Host-tested only; no hardware claim.
+
 ## 16. Preserved Phase 4 guarantees (the "do not break" list)
 
 Atomic acceptance; frozen payload and timestamp; claim, lease and fencing; the NOT_SENT-only retry policy; uncertain is never resent and holds later commands; bounded attempts and window; the database clock for lifecycle facts; first-ACK-wins and the persisted ACK timeout; convergence separate from ACK separate from actuation; the messageId inbox semantics; queue caps and the shared publish rate; the read-only lifecycle API; the trace projection. The Phase 3 rule suite must stay green with the outbox OFF and ON. No Phase 5 slice may change an accepted Phase 4 assertion.

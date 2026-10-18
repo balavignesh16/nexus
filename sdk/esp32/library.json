@@ -1,0 +1,25 @@
+{
+  "name": "NexusDeviceSdk",
+  "version": "1.0.0",
+  "description": "Device-side helper library for the NEXUS wire contract 1.0 (esp32-legacy-v1 profile): telemetry and acknowledgement builders, strict command evaluation with the firmware's rules, stable message ids, a reference device. Host-tested; not hardware-validated.",
+  "keywords": "nexus, mqtt, telemetry, iot, esp32",
+  "license": "UNLICENSED",
+  "frameworks": ["arduino", "*"],
+  "platforms": ["espressif32", "native"],
+  "build": {
+    "srcDir": "src",
+    "flags": ["-std=gnu++11"]
+  },
+  "examples": [
+    {
+      "name": "TemperatureNode",
+      "base": "examples/TemperatureNode",
+      "files": ["TemperatureNode.ino"]
+    },
+    {
+      "name": "LedCommandNode",
+      "base": "examples/LedCommandNode",
+      "files": ["LedCommandNode.ino"]
+    }
+  ]
+}

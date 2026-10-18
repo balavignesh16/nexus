@@ -2,7 +2,7 @@
 
 Date: 2026-10-18.
 
-Status: **P5.1, P5.V41, P5.2, P5.3, P5.4 (ingest and credentials; outbound pull deferred) and P5.5 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.6 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.1, P5.V41, P5.2, P5.3, P5.4 (ingest and credentials; outbound pull deferred), P5.5 and P5.6 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.7 and P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
 Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
@@ -108,7 +108,7 @@ Authority: contract 2 (D4), 6, 8, 14. Ledger: section G. Scenarios: 9.
 
 Deliverables: the in-process simulator adapter; `nexus-device-sdk` (publisher with `contractVersion` and stable `messageId`, command and ACK handler, local validation, duplicate-redelivery hook); the freshness fix (30 s, absolute difference) with injected-clock boundary tests; the existing simulator tests adjusted only where they relied on 300 s, each stating why.
 
-### P5.6 ESP32 helper library and reference device
+### P5.6 ESP32 helper library and reference device (IMPLEMENTED 2026-10-18)
 
 Authority: contract 2 (D1), 13. Ledger: section H. Scenarios: 10.
 
