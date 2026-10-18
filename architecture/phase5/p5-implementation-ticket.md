@@ -2,7 +2,7 @@
 
 Date: 2026-10-18.
 
-Status: **P5.1, P5.V41, P5.2, P5.3 and P5.4 (ingest and credentials; outbound pull deferred) IMPLEMENTED (2026-10-18; see the ledger evidence). P5.5 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.1, P5.V41, P5.2, P5.3, P5.4 (ingest and credentials; outbound pull deferred) and P5.5 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.6 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
 Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
@@ -102,7 +102,7 @@ Part 2, outbound pull (D8, D9): **entry condition:** spikes S3 (what Tomcat can 
 
 Gate: negative authentication, impersonation, ingest and credential-CLI tests; fault injection for the five kill points; the Phase 3 suite with the outbox OFF and ON in sequential batches; the Phase 4 suites and the crash smoke unchanged.
 
-### P5.5 Simulator adapter, Python SDK and the freshness correction (D4)
+### P5.5 Simulator adapter, Python SDK and the freshness correction (D4) (IMPLEMENTED 2026-10-18)
 
 Authority: contract 2 (D4), 6, 8, 14. Ledger: section G. Scenarios: 9.
 

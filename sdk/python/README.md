@@ -41,3 +41,24 @@ python -m nexus_contract.corpus --check      # the differential corpus is curren
 ```
 
 Dependencies: `jsonschema` (see `requirements.txt` for the tested pins).
+
+## nexus_device_sdk (P5.5)
+
+A small client library for devices and simulators, built on the validator:
+
+```python
+from nexus_device_sdk import DeviceClient, CommandProcessor, HttpTransport, MqttTransport, InMemoryTransport
+
+client = DeviceClient(device_id, HttpTransport("http://127.0.0.1:8080", device_id, key))   # or MqttTransport(paho_client)
+client.publish_status(True)
+sample = client.publish_telemetry("TEMPERATURE_SENSOR", 24.5, "CELSIUS")   # contractVersion 1.0 and a UUID messageId
+client.redeliver(sample)                                                    # an identical redelivery, like QoS 1
+
+processor = CommandProcessor({"LED": set_led})                              # firmware rules: SET_STATE, 30 s absolute freshness
+processor.respond(command_bytes, client)                                    # applies the command and sends the acknowledgement
+```
+
+- Every message is validated locally with the same validator and fixed codes as the CLI before anything is sent (`ContractViolation`).
+- The clock and the id source are injected; nothing reads the wall clock implicitly in the freshness rule.
+- `HttpTransport` keeps the device key in memory and in the `Authorization` header only; it is never in a URL, a repr or an exception.
+- `MqttTransport` wraps any client with `publish(topic, payload, qos=, retain=)`; the paho package is not imported by the SDK.

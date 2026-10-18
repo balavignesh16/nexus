@@ -86,18 +86,28 @@ def test_the_test_side_model_of_the_firmware_check_is_absolute_and_thirty_second
     assert not firmware_accepts(NOW, NOW + 31), "a timestamp in the future is also stale for the firmware"
 
 
-def test_the_simulator_default_is_deliberately_not_the_firmware_check_and_is_left_unchanged():
-    """The simulator (300 s default, one direction) accepts what the firmware model rejects. That divergence is why the
-    firmware freshness semantics are modelled in the tests, and why simulator evidence is never presented as firmware evidence."""
+def test_the_simulator_default_now_equals_the_firmware_check_in_both_directions():
+    """P5.5 (decision D4) changed this test, on purpose: it used to document that the simulator (300 s default, one direction) accepted what the
+    firmware model rejects. The simulator now applies the firmware's rule (absolute difference, 30 s), so the same commands are accepted and
+    rejected by both. Simulator evidence is still never presented as firmware evidence."""
     device = make_device()
     handler = CommandHandler(device, clock=lambda: NOW)          # DEFAULT stale window
     sixty_seconds_old = retried_payload(timestamp=int(NOW) - 60)
     assert not firmware_accepts(NOW, NOW - 60)
-    assert handler.handle(sixty_seconds_old)[1] == "ACCEPTED", "the simulator default window is 300 s"
-    # and in the other direction the simulator never rejects a future timestamp, which the firmware does
+    assert handler.handle(sixty_seconds_old)[1:] == ("REJECTED", "STALE"), "the simulator default window is now the firmware's 30 s"
+    # and in the other direction the simulator now rejects a future timestamp too, exactly like the firmware
     future = retried_payload(command_id="future", timestamp=int(NOW) + 60)
     assert not firmware_accepts(NOW, NOW + 60)
-    assert handler.handle(future)[1] == "ACCEPTED"
+    assert handler.handle(future)[1:] == ("REJECTED", "STALE")
+    # the boundary is shared: 30 s either side is accepted, 31 s is not
+    for offset in (-30, -29, 0, 29, 30):
+        fresh = retried_payload(command_id=f"fresh-{offset}", timestamp=int(NOW) + offset)
+        assert firmware_accepts(NOW, NOW + offset)
+        assert handler.handle(fresh)[1] == "ACCEPTED", offset
+    for offset in (-31, 31):
+        stale = retried_payload(command_id=f"stale-{offset}", timestamp=int(NOW) + offset)
+        assert not firmware_accepts(NOW, NOW + offset)
+        assert handler.handle(stale)[1:] == ("REJECTED", "STALE"), offset
 
 
 def test_a_command_at_the_backend_window_ceiling_survives_the_firmware_model_with_the_budgeted_margin():

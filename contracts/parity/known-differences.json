@@ -154,43 +154,11 @@
   ],
   "simulatorEntries": [
     {
-      "class": "C",
-      "clause": "adapter-contract.md section 13 item 5, decision D4",
-      "scheduled": "P5.5",
-      "rationale": "The simulator's CommandHandler judges freshness one-sidedly (clock - timestamp > stale_window) with a default window of 300 seconds. The firmware and the approved rule are the absolute difference with a 30-second window. The simulator is corrected in P5.5 (approved), not in P5.1; P5.1 only records the gap.",
+      "class": "D",
+      "clause": "adapter-contract.md section 7 (command), decision D4",
+      "retained": true,
+      "rationale": "Since P5.5 the simulator applies the firmware's freshness rule (absolute 30 s, whole-second clock) and requires a JSON integer timestamp, so the former class C differences are gone. One difference is kept on purpose: the simulator accepts any non-empty string as commandId, because its existing tests and tools use short ids, and the backend always sends UUIDs, so nothing real depends on it. The firmware, the SDK and the validator require canonical UUID text.",
       "cases": {
-        "age-31": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:STALE"
-        },
-        "age-300": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:STALE"
-        },
-        "future-31": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:STALE"
-        },
-        "future-1000": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:STALE"
-        }
-      }
-    },
-    {
-      "class": "C",
-      "clause": "adapter-contract.md section 7 (command), section 8.2 layer 2",
-      "scheduled": "P5.5",
-      "rationale": "The simulator coerces the command timestamp with float(), so a fractional number or a numeric string passes, and it accepts any non-empty string as commandId. The firmware requires a long timestamp and a string, and the contract requires an integer timestamp and a UUID commandId. Corrected with the shared SDK validation in P5.5.",
-      "cases": {
-        "timestamp-float": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:MALFORMED"
-        },
-        "timestamp-numeric-string": {
-          "simulator": "ACCEPT",
-          "validator": "REJECT:MALFORMED"
-        },
         "commandId-not-a-uuid": {
           "simulator": "ACCEPT",
           "validator": "REJECT:MALFORMED"

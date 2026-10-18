@@ -572,6 +572,32 @@ class HttpAdapterIntegrationTest {
         assertEquals("MQTT", jdbc.queryForObject("SELECT source FROM inbound_message_dedupe WHERE device_id = ?", String.class, mqtt));
     }
 
+    @Test
+    void p5_091_aMessageTheSdkRedeliversIsStoredOnceByTheBackend() throws Exception {
+        UUID device = httpDevice();
+        String key = key(device);
+        String sdk = com.nexus.contract.PythonOracle.repositoryRoot().resolve("sdk/python").toString().replace('\\', '/');
+        String program = """
+                import sys, uuid
+                sys.path.insert(0, '%s')
+                from nexus_device_sdk import DeviceClient, InMemoryTransport
+                t = InMemoryTransport()
+                c = DeviceClient('%s', t, clock=lambda: 1767225600, new_id=lambda: uuid.UUID(int=7))
+                c.publish_telemetry('TEMPERATURE_SENSOR', 24.5, 'CELSIUS')
+                c.redeliver_last()
+                c.redeliver_last()
+                for s in t.sent:
+                    print(s.payload.decode())
+                """.formatted(sdk, device);
+        String[] sent = com.nexus.contract.PythonOracle.run(program).strip().split("\\R");
+        assertEquals(3, sent.length);
+        assertEquals(1, new java.util.HashSet<>(List.of(sent)).size(), "the redeliveries are byte-identical");
+        assertTrue(sent[0].contains("\"contractVersion\":\"1.0\"") && sent[0].contains("\"messageId\":\"00000000-0000-0000-0000-000000000007\""));
+        for (String body : sent) assertEquals(200, statusOf(TELEMETRY, device, key, body), "the SDK's bytes pass the strict HTTP decoder and the core");
+        assertEquals(1, count("SELECT COUNT(*) FROM telemetry_history WHERE device_id = ?", device), "one stored row for one logical message");
+        assertEquals(1, count("SELECT COUNT(*) FROM inbound_message_dedupe WHERE device_id = ?", device));
+    }
+
     /** Builds the window and the eligibility rule the way Spring does, over the test's JdbcTemplate (their constructors are package-private on purpose). */
     static final class HttpContactWindowProbe {
         private final JdbcTemplate jdbc;

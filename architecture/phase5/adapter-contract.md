@@ -480,6 +480,14 @@ HTTP status mapping for ingest: `200` accepted or exact duplicate (with `duplica
 
 **Command egress and the dispatcher seam.** `MqttJsonAdapter.deliver` puts the stored bytes verbatim on `nexus/devices/<id>/commands` through the unchanged bounded Paho publisher and states `BROKER_CONFIRMED`. The outbox dispatcher still calls the Paho publisher directly in P5.3: replacing the `BrokerCommandPublisher` seam with a routing bean would make it a second candidate for every Phase 4 test double that substitutes the seam (`@Primary` doubles, `@SpyBean`), so routing the dispatcher through `CommandEgressRouter` is made in P5.4 together with transport-aware candidate selection (an HTTP device's commands are claimed by its pull handler, not by the dispatcher) and the corresponding test wiring. This is a recorded deferral of one ticket sentence, not a hidden gap.
 
+## 16.2 (P5.5 implementation notes)
+
+**Freshness (D4).** The simulator and the Python device SDK now share the firmware's command rule: STALE when `abs(int(now) - timestamp) > 30`, with an injected clock and an integer timestamp; the validator's ESP32 profile, the SDK and the simulator are compared at 13 boundary offsets by tests, and the parity registry keeps only the deliberate commandId leniency of the simulator (class D). The simulator remains a test double: its evidence is not firmware or hardware evidence.
+
+**Device SDK.** `nexus_device_sdk` builds contract 1.0 messages (`contractVersion`, a UUID `messageId` per sample that a replay keeps), validates every message locally with the standalone validator before sending, handles commands with the firmware pipeline, and sends over MQTT (paho-style client) or HTTP (Bearer key in the header only).
+
+**Simulator transport.** `adapter.simulator` hosts in-process devices behind the same intake ports and egress capability as any adapter, with no broker. Its eligibility is fail-closed until the dispatcher is routed through the egress router (the same reason as HTTP delivery): an accepted command for such a device would otherwise be published over MQTT.
+
 ## 16. Preserved Phase 4 guarantees (the "do not break" list)
 
 Atomic acceptance; frozen payload and timestamp; claim, lease and fencing; the NOT_SENT-only retry policy; uncertain is never resent and holds later commands; bounded attempts and window; the database clock for lifecycle facts; first-ACK-wins and the persisted ACK timeout; convergence separate from ACK separate from actuation; the messageId inbox semantics; queue caps and the shared publish rate; the read-only lifecycle API; the trace projection. The Phase 3 rule suite must stay green with the outbox OFF and ON. No Phase 5 slice may change an accepted Phase 4 assertion.

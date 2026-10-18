@@ -13,14 +13,21 @@ MALFORMED, UNSUPPORTED, STALE.
 """
 
 import json
+import logging
 import time
 from collections import OrderedDict
 
 from .actuators import ActuatorValidationError
 
 SUPPORTED_COMMAND = "SET_STATE"
-DEFAULT_STALE_WINDOW_SECONDS = 300.0
+# P5.5 (decision D4): the firmware's COMMAND_STALENESS_WINDOW_SECONDS. A command is STALE when the ABSOLUTE difference between the device
+# clock (whole seconds, like the firmware's time(nullptr)) and the command timestamp is greater than the window, so a command dated in the
+# future by more than the window is as stale as an old one. The former default was 300 seconds and one-sided; simulator evidence is therefore
+# now comparable with the firmware's behaviour, still never presented as firmware or hardware evidence.
+DEFAULT_STALE_WINDOW_SECONDS = 30.0
 DEFAULT_MAX_COMMAND_HISTORY = 500
+
+log = logging.getLogger(__name__)
 
 
 class CommandHandler:
@@ -30,6 +37,9 @@ class CommandHandler:
     def __init__(self, device, stale_window_seconds: float = DEFAULT_STALE_WINDOW_SECONDS,
                  max_history: int = DEFAULT_MAX_COMMAND_HISTORY, clock=time.time):
         self.device = device
+        if stale_window_seconds > DEFAULT_STALE_WINDOW_SECONDS:
+            log.warning("Command staleness window set to %.1f s, larger than the firmware's %.1f s: simulated commands the firmware would "
+                        "reject as STALE will be accepted (an explicit choice, not the default)", stale_window_seconds, DEFAULT_STALE_WINDOW_SECONDS)
         self.stale_window_seconds = stale_window_seconds
         self.max_history = max_history
         self._clock = clock
@@ -78,12 +88,11 @@ class CommandHandler:
         if command != SUPPORTED_COMMAND:
             return self._finish(command_id, "REJECTED", "UNSUPPORTED")
 
-        try:
-            timestamp_value = float(timestamp)
-        except (TypeError, ValueError):
+        # The firmware accepts only a JSON integer here (ArduinoJson is<long>()): a fractional number, a numeric string or a boolean is MALFORMED.
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
             return self._finish(command_id, "REJECTED", "MALFORMED")
 
-        if self._clock() - timestamp_value > self.stale_window_seconds:
+        if abs(int(self._clock()) - timestamp) > self.stale_window_seconds:
             return self._finish(command_id, "REJECTED", "STALE")
 
         try:

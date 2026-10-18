@@ -1,7 +1,6 @@
 """Simulator parity (ledger P5-157, class C). The simulator's own CommandHandler is run, unmodified, against the same
 command payloads and clock offsets as the ESP32 profile of the validator. Every disagreement must be a registered class C
-difference in contracts/parity/known-differences.json (simulatorEntries); the 300-second one-sided freshness rule is
-corrected in P5.5, not here, and this test then fails on the stale entries so the registry is cleaned up with it."""
+difference in contracts/parity/known-differences.json (simulatorEntries). Since P5.5 only one is left, kept on purpose (commandId leniency)."""
 
 from __future__ import annotations
 
@@ -73,8 +72,8 @@ class SimulatorParity(unittest.TestCase):
         registry = json.loads((support.CONTRACTS / "parity" / "known-differences.json").read_text(encoding="utf-8"))
         registered = {}
         for entry in registry["simulatorEntries"]:
-            self.assertEqual("C", entry["class"])
-            self.assertEqual("P5.5", entry["scheduled"], "the simulator corrections belong to P5.5")
+            self.assertIn(entry["class"], ("C", "D"))
+            self.assertTrue(entry["class"] == "D" and entry.get("retained") or entry.get("scheduled"), "a simulator gap is either retained on purpose or scheduled")
             for case, verdicts in entry["cases"].items():
                 registered[case] = verdicts
         observed = {}
@@ -99,9 +98,11 @@ class SimulatorParity(unittest.TestCase):
 
     def test_freshness_rules_are_what_the_sources_say(self):
         payload, _ = CASES["fresh"]
-        self.assertEqual("ACCEPT", _simulator(payload, T + 300), "simulator window is 300 s")
-        self.assertEqual("REJECT:STALE", _simulator(payload, T + 301))
-        self.assertEqual("ACCEPT", _simulator(payload, T - 100000), "simulator is one-sided: future commands are never stale")
+        self.assertEqual("ACCEPT", _simulator(payload, T + 30), "the simulator window is the firmware's 30 s since P5.5")
+        self.assertEqual("REJECT:STALE", _simulator(payload, T + 31))
+        self.assertEqual("REJECT:STALE", _simulator(payload, T + 300), "the former 300-second window is gone")
+        self.assertEqual("REJECT:STALE", _simulator(payload, T - 100000), "the simulator is absolute now: a future command is stale too")
+        self.assertEqual("ACCEPT", _simulator(payload, T - 30))
         self.assertEqual("REJECT:STALE", _validator(payload, T + 31), "firmware window is 30 s")
         self.assertEqual("REJECT:STALE", _validator(payload, T - 31), "firmware rule is absolute")
 
