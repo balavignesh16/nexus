@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexus_contract"
+version = "1.0.0"
+description = "Standalone validator for the NEXUS device wire contract (telemetry, command, acknowledgement, status)"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.26,<5"
+]
+
+[tool.setuptools.packages.find]
+include = ["nexus_contract*"]
+
+# The schemas are NOT packaged: contracts/ at the repository root is the single authority and is located at run time
+# (override with the NEXUS_CONTRACTS_DIR environment variable). Tested with the pins in requirements.txt.

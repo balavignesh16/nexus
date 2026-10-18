@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.invalid/contracts/v1/command.schema.json",
+  "title": "NEXUS command message (generic contract 1.0 and legacy-v1)",
+  "description": "NEXUS to device, published on nexus/devices/<deviceId>/commands. Structural layer only. The capability-specific meaning of value (boolean for LED, FAN and BUZZER; integer 0..180 for SERVO; a channel/state object for RELAY) is layer 5 and needs a capability profile. This schema is deliberately not narrowed to the LED-only ESP32 firmware (see command.esp32-legacy.schema.json).",
+  "type": "object",
+  "required": ["commandId", "capability", "command", "value", "timestamp"],
+  "properties": {
+    "contractVersion": { "type": "string" },
+    "requires": { "type": "array", "maxItems": 8, "items": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}(?![\\s\\S])" } },
+    "commandId": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])" },
+    "capability": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "command": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "value": { "not": { "type": ["null", "array"] } },
+    "timestamp": { "type": "integer" }
+  },
+  "x-nexus-rules": [
+    "freshness (layer 4): the command age is judged against the window of the selected profile with an injected reference time, never against an implicit clock",
+    "capability semantics (layer 5): SET_STATE with a boolean (LED, FAN, BUZZER), an integer 0..180 (SERVO) or an object with an integer channel and a boolean state (RELAY; channel membership needs the binding's channels)"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.invalid/contracts/v1/status.schema.json",
+  "title": "NEXUS device status (plain text)",
+  "description": "The MQTT status payload is bare text, not JSON: online (retained birth) or offline (retained last will). The validator decodes the bytes as UTF-8, applies String.trim() semantics (strip characters up to U+0020 at both ends) and checks the result against this schema as a JSON string. The comparison is CASE-SENSITIVE exactly like DeviceStatusMessageHandler. The production payload is never wrapped, enveloped or versioned.",
+  "type": "string",
+  "enum": ["online", "offline"],
+  "x-nexus-rules": [
+    "preprocessing: UTF-8 decode, then trim characters <= U+0020 from both ends (java.lang.String.trim)",
+    "no contractVersion and no JSON envelope; status always resolves to legacy-v1 semantics"
+  ]
+}

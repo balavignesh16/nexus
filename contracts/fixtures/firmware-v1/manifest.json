@@ -1,0 +1,577 @@
+{
+  "schemaVersion": 1,
+  "description": "Frozen golden fixtures. Extended only by addition; a change to an existing fixture is a reviewed contract change recorded in the ledger (adapter-contract.md section 13).",
+  "baseline": {
+    "firmwareCommit": "e29e215e5138de4460e9891e05859a61a098c3aa",
+    "firmwareTreeHash": "bda5d9bc20574660d87b5cf30004ef0203176fbd",
+    "firmwareSourceBlob": "c70e045d4d4875bb127bdf0682368ee4dc84d246",
+    "derivation": "Read from the source at the baseline; the firmware is never edited, flashed or executed. Fixture bytes are what the code builds (ArduinoJson compact output) with fixed ids and times."
+  },
+  "constants": {
+    "deviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+    "otherDeviceId": "9b1d3e57-2c44-4a0f-a6d8-71e5c0b3f492",
+    "commandId": "a1b2c3d4-e5f6-4789-8abc-def012345678",
+    "referenceEpoch": 1767225600
+  },
+  "freshnessCases": {
+    "fixture": "command-led-on",
+    "profile": "esp32-legacy-v1",
+    "windowSeconds": 30,
+    "offsetsSeconds": [
+      -31,
+      -30,
+      -29,
+      0,
+      29,
+      30,
+      31
+    ],
+    "note": "referenceTime = command timestamp + offset. Absolute rule: abs(offset) > 30 is STALE, so a command up to 30 s in the future is fresh.",
+    "expectStale": [
+      -31,
+      31
+    ]
+  },
+  "fixtures": [
+    {
+      "id": "telemetry-temperature",
+      "kind": "telemetry",
+      "file": "telemetry-temperature.json",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "doc[\"sensorType\"] = \"TEMPERATURE_SENSOR\""
+      },
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "note": "The five legacy fields in the order the firmware builds them: no messageId, no contractVersion, seconds-precision Z timestamp, float value.",
+      "sha256": "a505bbc1a5980b99f163f6d8eb57dce40a9d0af4a8c3af33e8ee1274b15c8f80"
+    },
+    {
+      "id": "ack-accepted",
+      "kind": "acknowledgement",
+      "file": "ack-accepted.json",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "ackDoc[\"status\"] = status"
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "ca9eaa2f55e6edcf9377558c6893ec86d4c2028187a36d4b1b148e3f8016acbe"
+    },
+    {
+      "id": "ack-rejected-malformed",
+      "kind": "acknowledgement",
+      "file": "ack-rejected-malformed.json",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "publishAck(commandId, \"REJECTED\", \"MALFORMED\")"
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "5e42a65f4a88724589afe20c0202caf25bbde48f172fd8f466139c511d5524ad"
+    },
+    {
+      "id": "ack-rejected-unsupported",
+      "kind": "acknowledgement",
+      "file": "ack-rejected-unsupported.json",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "publishAck(commandId, \"REJECTED\", \"UNSUPPORTED\")"
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "fad5833002ca33da32fe4d44656a446fa83e53beed2e5c0fda38361fa93ef88c"
+    },
+    {
+      "id": "ack-rejected-stale",
+      "kind": "acknowledgement",
+      "file": "ack-rejected-stale.json",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "publishAck(commandId, \"REJECTED\", \"STALE\")"
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "fe60f6da891cb7ff3c270191802d7b2e2bf8d8ba6bbfdc95f8d30307583ea40f"
+    },
+    {
+      "id": "status-online",
+      "kind": "status",
+      "file": "status-online.txt",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "publish(deviceStatusTopic, \"online\""
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "f6fc84c9f21c24907d6bee6eec38cabab5fa9a7be8c4a7827fe9e56f245bd2d5"
+    },
+    {
+      "id": "status-offline",
+      "kind": "status",
+      "file": "status-offline.txt",
+      "origin": "firmware",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "setWill(deviceStatusTopic.c_str(), \"offline\""
+      },
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "8e2c7ac508139a02af859de64a4743c1f3946837279332c35ec8f5ddf20654ae"
+    },
+    {
+      "id": "command-led-on",
+      "kind": "command",
+      "file": "command-led-on.json",
+      "origin": "firmware (parsed shape) and backend emitter",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "strcmp(capability, \"LED\")"
+      },
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ],
+        "profile": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "0f8d2a06b3caf3e5d6b1e6e117b353342095bb9a5967d42bc8e360c7f6ffc3a0"
+    },
+    {
+      "id": "command-led-off",
+      "kind": "command",
+      "file": "command-led-off.json",
+      "origin": "firmware (parsed shape) and backend emitter",
+      "source": {
+        "file": "firmware/src/main.cpp",
+        "anchor": "strcmp(command, \"SET_STATE\")"
+      },
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ],
+        "profile": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "589712b58b9645314c6a2c19132d3466fa4b04f28a05196f52511f66340719a7"
+    },
+    {
+      "id": "telemetry-simulator-legacy",
+      "kind": "telemetry",
+      "file": "telemetry-simulator-legacy.json",
+      "origin": "simulator",
+      "source": {
+        "file": "simulator/src/nexus_simulator/mqtt_publisher.py",
+        "anchor": "\"messageId\": message_id if message_id is not None else str(uuid.uuid4())"
+      },
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "note": "Python isoformat() produces microseconds and a +00:00 offset, not Z.",
+      "sha256": "454c380b35cd0f7c59a457112eb86fcddcc745a69030a564208b12f6fd46f28d"
+    },
+    {
+      "id": "telemetry-simulator-generic-bool",
+      "kind": "telemetry",
+      "file": "telemetry-simulator-generic-bool.json",
+      "origin": "simulator",
+      "source": {
+        "file": "simulator/src/nexus_simulator/mqtt_publisher.py",
+        "anchor": "payload[\"capabilityKey\"] = capability_key"
+      },
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "note": "Generic shape: capabilityKey with a boolean value.",
+      "sha256": "60bb1e1bc93c35002768fbffb220da94cf3010ecfc0b43a81972f09b338744fb"
+    },
+    {
+      "id": "telemetry-simulator-readback",
+      "kind": "telemetry",
+      "file": "telemetry-simulator-readback.json",
+      "origin": "simulator",
+      "source": {
+        "file": "simulator/src/nexus_simulator/mqtt_publisher.py",
+        "anchor": "payload[\"readbackCommandId\"] = readback_command_id"
+      },
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ]
+      },
+      "sha256": "dc9f885357cf23ba70ae77c58d9cfc604145d0b6fa509f1ac5a366b1e2f6a188"
+    },
+    {
+      "id": "telemetry-malformed-json",
+      "kind": "telemetry",
+      "file": "telemetry-malformed-json.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "MALFORMED_JSON"
+        ],
+        "1.0": [
+          "REJECT",
+          "MALFORMED_JSON"
+        ]
+      },
+      "sha256": "d73296973b3174db0b555b31b749533a81056ba97c1e12e4affdd863409a28f3"
+    },
+    {
+      "id": "telemetry-missing-deviceId",
+      "kind": "telemetry",
+      "file": "telemetry-missing-deviceId.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "fbd98e46bcc3ae07420de806b0f28c2135f13661c0130e0e3ef308c24026cef7"
+    },
+    {
+      "id": "telemetry-non-uuid-deviceId",
+      "kind": "telemetry",
+      "file": "telemetry-non-uuid-deviceId.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "MALFORMED_JSON"
+        ],
+        "1.0": [
+          "REJECT",
+          "MALFORMED_JSON"
+        ]
+      },
+      "sha256": "f1de49ec2bcccc96639929d3011e046a7a060c7b007984f97da53b72b536c87a"
+    },
+    {
+      "id": "telemetry-legacy-string-value",
+      "kind": "telemetry",
+      "file": "telemetry-legacy-string-value.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_LEGACY_PAYLOAD"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_LEGACY_PAYLOAD"
+        ]
+      },
+      "sha256": "024ae7129e27d765b096889987b2095e79c06e18365ba0583f908233c5632cc2"
+    },
+    {
+      "id": "telemetry-legacy-missing-unit",
+      "kind": "telemetry",
+      "file": "telemetry-legacy-missing-unit.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_LEGACY_PAYLOAD"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_LEGACY_PAYLOAD"
+        ]
+      },
+      "sha256": "3194b0cb217156fe1df42eecbe61bf3c6545c0af7e6bf9e3132e300188e7107a"
+    },
+    {
+      "id": "telemetry-topic-mismatch",
+      "kind": "telemetry",
+      "file": "telemetry-topic-mismatch.json",
+      "origin": "derived",
+      "topicDeviceId": "9b1d3e57-2c44-4a0f-a6d8-71e5c0b3f492",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "TOPIC_DEVICE_MISMATCH"
+        ],
+        "1.0": [
+          "REJECT",
+          "TOPIC_DEVICE_MISMATCH"
+        ]
+      },
+      "sha256": "a505bbc1a5980b99f163f6d8eb57dce40a9d0af4a8c3af33e8ee1274b15c8f80"
+    },
+    {
+      "id": "telemetry-bad-messageId",
+      "kind": "telemetry",
+      "file": "telemetry-bad-messageId.json",
+      "origin": "derived",
+      "topicDeviceId": "3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_MESSAGE_ID"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_MESSAGE_ID"
+        ]
+      },
+      "sha256": "96a8ea568df3487cb768c68648f11f045406b6cf873fc34bcad69269784f8998"
+    },
+    {
+      "id": "ack-lowercase-status",
+      "kind": "acknowledgement",
+      "file": "ack-lowercase-status.json",
+      "origin": "derived",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "d232dc5df1287a194cc96a15ef071d3336a092e22b7482f48dc767ca2f2eb57a"
+    },
+    {
+      "id": "ack-float-timestamp",
+      "kind": "acknowledgement",
+      "file": "ack-float-timestamp.json",
+      "origin": "derived",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "61bca24f675560120afc79aaa5899fcb05938059dce3a16d48b58020232b61b7"
+    },
+    {
+      "id": "ack-numeric-commandId",
+      "kind": "acknowledgement",
+      "file": "ack-numeric-commandId.json",
+      "origin": "derived",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "8e36b2ad4de28058d3a3c0213e4df13294cba40d9d8891630a2d83fe003a3965"
+    },
+    {
+      "id": "status-uppercase",
+      "kind": "status",
+      "file": "status-uppercase.txt",
+      "origin": "derived",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "ac7e24813998d31d5e116002bcd241061b59884f2db9167c1b976e9c151b8e1e"
+    },
+    {
+      "id": "status-json-envelope",
+      "kind": "status",
+      "file": "status-json-envelope.txt",
+      "origin": "derived",
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "89aab18cf5bc3c9d18086d537efe50cb29fb193c99aac895502cd0d95f630faa"
+    },
+    {
+      "id": "command-float-timestamp",
+      "kind": "command",
+      "file": "command-float-timestamp.json",
+      "origin": "derived",
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ],
+        "1.0": [
+          "REJECT",
+          "INVALID_FIELDS"
+        ]
+      },
+      "sha256": "fa5539f3a074b8b679bd6de61bef4339adff1dcefca77c1f9bc5e44dba633de4"
+    },
+    {
+      "id": "command-servo-angle",
+      "kind": "command",
+      "file": "command-servo-angle.json",
+      "origin": "backend emitter",
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ],
+        "profile": [
+          "REJECT",
+          "MALFORMED"
+        ]
+      },
+      "note": "Valid under the generic contract; the ESP32 profile (boolean value only) rejects it as the firmware would.",
+      "sha256": "265751edf5bc6ce7ee81ea6904d1b330f818092bfc421be6c45c9f4c5fd406aa"
+    },
+    {
+      "id": "command-relay-object",
+      "kind": "command",
+      "file": "command-relay-object.json",
+      "origin": "backend emitter",
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ],
+        "profile": [
+          "REJECT",
+          "MALFORMED"
+        ]
+      },
+      "sha256": "264045288b8b0600bc153489f13b1bd3355a3c7e6a10ad3359f1e7d2663471a5"
+    },
+    {
+      "id": "command-fan-boolean",
+      "kind": "command",
+      "file": "command-fan-boolean.json",
+      "origin": "backend emitter",
+      "profile": "esp32-legacy-v1",
+      "referenceTime": 1767225600,
+      "expect": {
+        "legacy-v1": [
+          "ACCEPT"
+        ],
+        "1.0": [
+          "ACCEPT"
+        ],
+        "profile": [
+          "REJECT",
+          "UNSUPPORTED"
+        ]
+      },
+      "note": "Structurally the firmware shape, but the firmware's closed allowlist accepts LED only.",
+      "sha256": "64d0e75383f2dac5d693c5c5b26eefb6481bfaeab3d6077e8a98fedcd9c69dff"
+    }
+  ]
+}

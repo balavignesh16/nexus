@@ -78,6 +78,9 @@ def main() -> int:
     checks: list[Check] = []
     py = sys.executable
     checks.append(execute("repository tooling tests", [py, "-m", "unittest", "discover", "-s", "tests", "-v"], rt.ROOT, 180, a.verbose))
+    # P5.1: the standalone wire-contract validator (schemas, fixtures, drift detector, CLI, parity registry). Standard library plus jsonschema only;
+    # no Spring, PostgreSQL, Mosquitto or network. The backend differential test (WireContractParityTest) runs inside the backend batches.
+    checks.append(execute("wire contract validator tests (nexus_contract)", [py, "-m", "unittest", "discover", "-s", "sdk/python/tests", "-t", "sdk/python"], rt.ROOT, 300, a.verbose))
     checks.append(execute("Python tooling syntax", [py, "-m", "py_compile", "start_nexus.py", "stop_nexus.py",
                                                    "stop_script.py", "validate_nexus.py", "nexus_runtime.py", "phase4_enablement_check.py", "backend_batches.py"], rt.ROOT, 60, a.verbose))
     mvnw = str(rt.ROOT / "backend" / ("mvnw.cmd" if os.name == "nt" else "mvnw"))

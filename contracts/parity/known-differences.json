@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "description": "Registered, classified differences between the real backend decoders and the Python validator (adapter-contract.md section 8.3/8.4). A difference not listed here fails WireContractParityTest; a listed one that no longer differs also fails. Classes: B existing backend/firmware inconsistency, C simulator parity gap, D intentional legacy compatibility, E unsupported input requiring rejection. Class A (a schema mistake) is never registered.",
+  "entries": [
+    {
+      "class": "E",
+      "clause": "adapter-contract.md section 8, 8.4",
+      "rationale": "A message is exactly one UTF-8 JSON document without a byte-order mark and with unique member names. The backend (Jackson readValue/readTree) tolerates a BOM, trailing content and repeated member names. The validator rejects them because they make a document ambiguous. No real producer sends them; the backend is unchanged in P5.1 and its tolerance is not a promise.",
+      "cases": {
+        "ack:payload-bom": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:payload-duplicate-key": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:payload-trailing-garbage": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "telemetry:payload-bom": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:payload-duplicate-key-same-value": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:payload-trailing-garbage": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:payload-trailing-second-object": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        }
+      }
+    },
+    {
+      "class": "E",
+      "clause": "adapter-contract.md section 7 (field types), 8.4",
+      "rationale": "The contract types these members as text. Jackson coerces a JSON number or boolean to text for String members (sensorType, unit, capabilityKey) and the ACK handler reads reason with asText(), so the backend accepts values and lengths the contract does not define. The firmware and the simulator only send text of at most 9 characters. Legacy-v1 consumers keep today's tolerance because the backend is unchanged.",
+      "cases": {
+        "telemetry:capabilityKey-number": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_LEGACY_PAYLOAD"
+        },
+        "telemetry:sensorType-boolean": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_LEGACY_PAYLOAD"
+        },
+        "telemetry:sensorType-number": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_LEGACY_PAYLOAD"
+        },
+        "telemetry:unit-number": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_LEGACY_PAYLOAD"
+        },
+        "ack:reason-array": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:reason-boolean": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:reason-number": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:reason-object": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "ack:reason-long-1000": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        }
+      }
+    },
+    {
+      "class": "E",
+      "clause": "adapter-contract.md section 7 (identifier and timestamp forms), 8.4",
+      "rationale": "The contract defines identifiers as canonical 8-4-4-4-12 UUID text (java.util.UUID.fromString also accepts 1-1-1-1-1), readbackCommandId as a UUID or absent (Jackson turns an empty string into null) and telemetry timestamps as ISO-8601 instants with an upper-case T and Z/offset (Jackson also accepts a numeric epoch, lower-case designators and surrounding whitespace, because it trims UUID and Instant text). The firmware and the simulator send only the defined forms.",
+      "cases": {
+        "ack:commandId-java-short-form": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        },
+        "telemetry:readbackCommandId-empty": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:INVALID_FIELDS"
+        },
+        "telemetry:timestamp-epoch-fraction": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:timestamp-epoch-integer": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:timestamp-lowercase-tz": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:deviceId-trailing-newline": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        },
+        "telemetry:timestamp-trailing-newline": {
+          "backend": "ACCEPT",
+          "validator": "REJECT:MALFORMED_JSON"
+        }
+      }
+    },
+    {
+      "class": "B",
+      "clause": "adapter-contract.md section 8.4 (backend robustness, defect candidates)",
+      "rationale": "The backend decoder throws instead of rejecting and dropping the message. DeviceCommandAckMessageHandler.parseTimestampOrNull calls Instant.ofEpochSecond for any integral timestamp, so a value outside the Instant range raises DateTimeException; TelemetryMQTTListener validates a null request after readValue returns null for the JSON text null, raising IllegalArgumentException. Both escape the handler unacknowledged, so the broker redelivers the same poison message. Recorded, not fixed in P5.1 (the Phase 4 safety semantics are frozen); the validator rejects them with a fixed code.",
+      "defectCandidate": true,
+      "cases": {
+        "ack:timestamp-beyond-int64": {
+          "backend": "EXCEPTION:DateTimeException",
+          "validator": "REJECT"
+        },
+        "ack:timestamp-instant-max-plus-one": {
+          "backend": "EXCEPTION:DateTimeException",
+          "validator": "REJECT"
+        },
+        "ack:timestamp-instant-min-minus-one": {
+          "backend": "EXCEPTION:DateTimeException",
+          "validator": "REJECT"
+        },
+        "ack:timestamp-int64-max": {
+          "backend": "EXCEPTION:DateTimeException",
+          "validator": "REJECT"
+        },
+        "telemetry:payload-json-null": {
+          "backend": "EXCEPTION:IllegalArgumentException",
+          "validator": "REJECT:MALFORMED_JSON"
+        }
+      }
+    },
+    {
+      "class": "B",
+      "clause": "adapter-contract.md section 8.2 layer 5 (capability semantics), 8.4",
+      "rationale": "CommandValueValidator.requireWholeNumber ends with number.intValue(), which narrows a 64-bit integer to 32 bits before the 0..180 range check, so the SERVO value 4294967386 (2^32 + 90) is accepted as angle 90. The validator compares the unnarrowed number and rejects it. Recorded, not fixed in P5.1.",
+      "defectCandidate": true,
+      "cases": {
+        "command:semantic-servo-int32-overflow-wraps-to-valid": {
+          "backend": "ACCEPT",
+          "validator": "REJECT"
+        }
+      }
+    }
+  ],
+  "simulatorEntries": [
+    {
+      "class": "C",
+      "clause": "adapter-contract.md section 13 item 5, decision D4",
+      "scheduled": "P5.5",
+      "rationale": "The simulator's CommandHandler judges freshness one-sidedly (clock - timestamp > stale_window) with a default window of 300 seconds. The firmware and the approved rule are the absolute difference with a 30-second window. The simulator is corrected in P5.5 (approved), not in P5.1; P5.1 only records the gap.",
+      "cases": {
+        "age-31": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:STALE"
+        },
+        "age-300": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:STALE"
+        },
+        "future-31": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:STALE"
+        },
+        "future-1000": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:STALE"
+        }
+      }
+    },
+    {
+      "class": "C",
+      "clause": "adapter-contract.md section 7 (command), section 8.2 layer 2",
+      "scheduled": "P5.5",
+      "rationale": "The simulator coerces the command timestamp with float(), so a fractional number or a numeric string passes, and it accepts any non-empty string as commandId. The firmware requires a long timestamp and a string, and the contract requires an integer timestamp and a UUID commandId. Corrected with the shared SDK validation in P5.5.",
+      "cases": {
+        "timestamp-float": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:MALFORMED"
+        },
+        "timestamp-numeric-string": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:MALFORMED"
+        },
+        "commandId-not-a-uuid": {
+          "simulator": "ACCEPT",
+          "validator": "REJECT:MALFORMED"
+        }
+      }
+    }
+  ]
+}

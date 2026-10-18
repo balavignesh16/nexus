@@ -1,0 +1,1 @@
+{"deviceId":"3f2c8a54-9d1e-4b7a-8c61-0e5d2a7f9b13","timestamp":"2026-10-17T12:00:00+00:00","sensorType":"LED","value":true,"unit":"BOOLEAN","messageId":"readback:1","capabilityKey":"led","readbackCommandId":"a1b2c3d4-e5f6-4789-8abc-def012345678"}

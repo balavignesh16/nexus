@@ -1,0 +1,4 @@
+fixtures/** -text
+parity/*.json text eol=lf
+v1/*.json text eol=lf
+*.md text eol=lf

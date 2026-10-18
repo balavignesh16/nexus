@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.invalid/contracts/v1/acknowledgement.schema.json",
+  "title": "NEXUS command acknowledgement (contract 1.0 and legacy-v1)",
+  "description": "Device to NEXUS, published on nexus/devices/<deviceId>/commands/ack. A device claim, never used for latency. status is exactly ACCEPTED or REJECTED (case-sensitive); timestamp is an integer epoch-second; reason is optional.",
+  "type": "object",
+  "required": ["commandId", "status", "timestamp"],
+  "properties": {
+    "contractVersion": { "type": "string" },
+    "requires": { "type": "array", "maxItems": 8, "items": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}(?![\\s\\S])" } },
+    "commandId": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])" },
+    "status": { "enum": ["ACCEPTED", "REJECTED"] },
+    "timestamp": { "type": "integer", "minimum": -31557014167219200, "maximum": 31556889864403199, "description": "Epoch seconds; the bounds are the range of java.time.Instant, outside which the backend handler throws instead of dropping the message." },
+    "reason": { "type": ["string", "null"], "maxLength": 256 }
+  },
+  "x-nexus-rules": [
+    "identity (layer 3): the device id in the topic is checked against the stored command by the core, not by the wire contract",
+    "reason vocabulary the shipped devices use: MALFORMED, UNSUPPORTED, STALE (not enforced: the backend stores any text)"
+  ]
+}
