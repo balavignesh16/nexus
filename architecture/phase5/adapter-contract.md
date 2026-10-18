@@ -97,11 +97,13 @@ There is no single "DeviceAdapter" with every method. An adapter declares the ca
 |---|---|---|---|---|---|
 | `AdapterDescriptor` (mandatory) | `id()`, `supportedContractMajors()`, `capabilities()`, `diagnostics()` | Identity, versions, declared capabilities, a read-only health and counter snapshot | yes | yes | yes |
 | `AdapterLifecycle` | `start()`, `stop()` | Own the connection or listener (connect and disconnect) | yes (Paho client) | yes (servlet endpoints; start and stop gate acceptance only) | yes (in-process) |
-| `TelemetryDecoder` | `decode(RawMessage) -> Decoded<TelemetryPayload> \| Rejection` | Bytes and transport metadata to a typed payload, never throws for bad input | yes | yes | yes |
-| `AcknowledgementDecoder` | `decode(RawMessage) -> Decoded<AckPayload> \| Rejection` | Bytes to a typed ACK | yes | yes | yes |
-| `ConnectivitySource` | `decode(RawMessage) -> Decoded<ConnectivityObservation> \| Rejection` | Transport-observed presence (MQTT retained birth and will), delivered to the core as an internal `ConnectivityObservation`. This is a core-facing value, **not a wire message**: the MQTT wire format is the plain-text status of section 7 and no JSON connectivity message exists or is introduced. HTTP has none: its eligibility signal is not connectivity (section 10.8) | yes | no | yes |
+| `TelemetryDecoder` | `decodeTelemetry(RawMessage) -> Decoded<TelemetryPayload> \| Rejection` | Bytes and transport metadata to a typed payload, never throws for bad input | yes | yes | yes |
+| `AcknowledgementDecoder` | `decodeAcknowledgement(RawMessage) -> Decoded<AckPayload> \| Rejection` | Bytes to a typed ACK | yes | yes | yes |
+| `ConnectivitySource` | `decodeConnectivity(RawMessage) -> Decoded<ConnectivityObservation> \| Rejection` | Transport-observed presence (MQTT retained birth and will), delivered to the core as an internal `ConnectivityObservation`. This is a core-facing value, **not a wire message**: the MQTT wire format is the plain-text status of section 7 and no JSON connectivity message exists or is introduced. HTTP has none: its eligibility signal is not connectivity (section 10.8) | yes | no | yes |
 | `CommandEgress` | `deliver(CommandEnvelope, Duration) -> Attempt` | Put one already-accepted, already-leased command on the transport; classify the outcome | yes | **only after section 10 is approved**; otherwise the capability is not declared | yes |
 | `DeviceAuthenticator` | `authenticate(RawMessage) -> AuthenticatedDevice \| Rejection` | Transport-level identity of the sender | no (broker-level; topic scoping) | yes (section 9) | no |
+
+The three decode methods have different names on purpose (P5.3): one adapter class implements several capabilities, and Java cannot overload a method by return type alone.
 
 Rules:
 
@@ -456,6 +458,16 @@ A reusable kit takes an adapter factory and runs the same scenarios for each dec
 | Verification, Twin, rules, AI | core | untouched | untouched | untouched |
 
 HTTP status mapping for ingest: `200` accepted or exact duplicate (with `duplicate: true`, as P4.5), `400` malformed, `401` unauthenticated, `403` forbidden device or transport, `409` conflicting duplicate, `413` too large, `415` wrong content type, `422` invalid fields, `429` bounded concurrency exceeded, `503` transient core failure (the device should retry). A `4xx` is permanent for that message; a `5xx` or `429` is retryable.
+
+## 16. (P5.3 implementation notes)
+
+**What moved and what did not.** The MQTT telemetry decoding (Jackson mapping, Bean Validation, the legacy-shape check, the topic/payload device comparison) moved verbatim into `adapter.mqtt.MqttJsonDecoder`; `TelemetryMQTTListener` remains the Paho callback and acknowledges, drops or throws exactly as before, but asks the decoder instead of decoding inline. A differential test against a byte-for-byte reference copy of the pre-extraction listener (git blob `d7ea813` at `e29e215`) over 500 real and mutated messages shows identical calls to the core, identical acknowledge-or-drop decisions, identical `nexus.telemetry.permanent.rejections` reasons and identical thrown exceptions, with **one deliberate difference**: the JSON text `null` used to make the listener throw `IllegalArgumentException` out of the MQTT callback (a poison message the broker redelivered); it is now `MALFORMED_JSON`, acknowledged and dropped. The status and acknowledgement topics still reach `DeviceStatusMessageHandler.handle` and `DeviceCommandAckMessageHandler.handle` with the same bytes; the adapter's acknowledgement and connectivity decoders exist for the SPI and are proven equal to those handlers on the whole parity corpus, but are not on the production path (the handlers parse and apply in one step).
+
+**The transport guard.** The listener, when the application supplies it, asks `TransportGuard` whether the device of the topic is assigned to `MQTT_JSON` before processing telemetry, status or acknowledgements; a mismatch is acknowledged, counted (`nexus.telemetry.permanent.rejections{reason=TRANSPORT_MISMATCH}`, an additive reason value) and dropped. A device nobody assigned is `MQTT_JSON` by the V41 default, so legacy devices are unaffected. A failing assignment lookup is an infrastructure failure: not acknowledged, redelivered.
+
+**Lifecycle.** One Paho connection carries telemetry, status, acknowledgements and command publication (the Tier 5B decision), and `MQTTConfiguration`, `MqttReconnectController` and the listener keep owning it; `MqttJsonAdapter.start/stop` only mark the adapter as serving and the diagnostics report the live connection state.
+
+**Command egress and the dispatcher seam.** `MqttJsonAdapter.deliver` puts the stored bytes verbatim on `nexus/devices/<id>/commands` through the unchanged bounded Paho publisher and states `BROKER_CONFIRMED`. The outbox dispatcher still calls the Paho publisher directly in P5.3: replacing the `BrokerCommandPublisher` seam with a routing bean would make it a second candidate for every Phase 4 test double that substitutes the seam (`@Primary` doubles, `@SpyBean`), so routing the dispatcher through `CommandEgressRouter` is made in P5.4 together with transport-aware candidate selection (an HTTP device's commands are claimed by its pull handler, not by the dispatcher) and the corresponding test wiring. This is a recorded deferral of one ticket sentence, not a hidden gap.
 
 ## 16. Preserved Phase 4 guarantees (the "do not break" list)
 

@@ -1,7 +1,16 @@
 package com.nexus.infrastructure.mqtt;
 
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nexus.adapter.core.AdapterMetrics;
+import com.nexus.adapter.core.TransportGuard;
+import com.nexus.adapter.mqtt.MqttJsonAdapter;
+import com.nexus.adapter.mqtt.MqttJsonDecoder;
+import com.nexus.adapter.mqtt.MqttTopics;
+import com.nexus.adapter.spi.Decoded;
+import com.nexus.adapter.spi.RawMessage;
+import com.nexus.adapter.spi.RejectionCode;
+import com.nexus.adapter.spi.TelemetryPayload;
+import com.nexus.adapter.spi.TransportKind;
 import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
@@ -21,6 +30,7 @@ import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -67,6 +77,31 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     private final AtomicLong lastMessageAtEpochMillis = new AtomicLong(0);
     private Counter subscribeFailures;
 
+    // P5.3: telemetry decoding is the MQTT adapter's (extracted verbatim, differential-tested against the pre-extraction code). A listener built
+    // by hand uses its own decoder over the same mapper and validator; in the application the adapter's decoder is used so that the adapter's
+    // diagnostics see the production traffic. The transport guard (a device is served by the transport the server assigned it) and the adapter
+    // meters are optional collaborators, exactly like the other late-injected ones in this codebase.
+    private MqttJsonDecoder decoder;
+    private MqttJsonAdapter adapter;
+    private TransportGuard transportGuard;
+    private AdapterMetrics adapterMetrics;
+
+    @Autowired(required = false)
+    void setMqttAdapter(MqttJsonAdapter adapter) {
+        this.adapter = adapter;
+        this.decoder = adapter.decoder();
+    }
+
+    @Autowired(required = false)
+    void setTransportGuard(TransportGuard transportGuard) {
+        this.transportGuard = transportGuard;
+    }
+
+    @Autowired(required = false)
+    void setAdapterMetrics(AdapterMetrics adapterMetrics) {
+        this.adapterMetrics = adapterMetrics;
+    }
+
     public TelemetryMQTTListener(MqttClient mqttClient,
                                  TelemetryService telemetryService,
                                  ObjectMapper objectMapper,
@@ -82,6 +117,7 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         this.telemetryService = telemetryService;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.decoder = new MqttJsonDecoder(objectMapper, validator);
         this.telemetryTopic = telemetryTopic;
         this.reconnectController = reconnectController;
         this.meterRegistry = meterRegistry;
@@ -189,63 +225,24 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
             return;
         }
 
-        // 1. Deserialize. A payload that cannot be parsed - malformed JSON
-        // syntax, or a JSON value of the wrong type for a field - can never
-        // become valid through broker redelivery. Treat it as permanently
-        // invalid input: acknowledge and drop it rather than letting the
-        // broker retry it forever.
-        TelemetryRequest request;
-        try {
-            request = objectMapper.readValue(message.getPayload(), TelemetryRequest.class);
-        } catch (IOException e) {
-            boolean badMessageId = e instanceof JsonMappingException mapping
-                    && mapping.getPath().stream().anyMatch(reference -> "messageId".equals(reference.getFieldName()));
-            log.error("Malformed MQTT telemetry payload on topic {}{}. Acknowledging and dropping (not retryable).", topic,
-                    badMessageId ? " (messageId is not a JSON string)" : "", e);
-            rejectedPermanently(badMessageId ? REASON_INVALID_MESSAGE_ID : REASON_MALFORMED_JSON);
+        // 1. to 3. Decode. The MQTT adapter's decoder performs, in this order and with the same classification as before the extraction:
+        // Jackson mapping (malformed JSON, or a JSON value of the wrong type for a field), Bean Validation (BEFORE any field is dereferenced, so a
+        // missing required field is permanently invalid input rather than a NullPointerException), the legacy-shape check, and the topic/payload
+        // device comparison. Anything it refuses can never become valid through broker redelivery: acknowledge and drop it.
+        Decoded<TelemetryPayload> decoded = decoder.decodeTelemetry(new RawMessage(message.getPayload(), topic));
+        if (decoded instanceof Decoded.Refused<TelemetryPayload> refused) {
+            RejectionCode code = refused.rejection().code();
+            logRefusal(topic, code);
+            rejectedPermanently(code.name());
+            if (adapter != null) adapter.recordTelemetry(false);
+            adapterRejected(code);
             acknowledgeQuietly(message);
             return;
         }
-
-        // 2. Bean Validation. This runs BEFORE any field of `request` is
-        // dereferenced - in particular before the topic/payload device-id
-        // comparison below - so a payload with a missing/null required field
-        // (e.g. no "deviceId" at all) is rejected here as permanently invalid
-        // input instead of causing a NullPointerException further down.
-        Set<ConstraintViolation<TelemetryRequest>> violations = validator.validate(request);
-        if (!violations.isEmpty()) {
-            log.warn("Invalid telemetry payload on topic {}: {}. Acknowledging and dropping (not retryable).", topic, violations);
-            rejectedPermanently(violations.stream().anyMatch(v -> "messageId".equals(v.getPropertyPath().toString()))
-                    ? REASON_INVALID_MESSAGE_ID : REASON_INVALID_FIELDS);
-            acknowledgeQuietly(message);
-            return;
-        }
-
-        // Preserve the established legacy wire contract while allowing the
-        // additive generic shape. Legacy payloads remain numeric and require
-        // sensorType/unit; generic payloads identify capabilityKey and are
-        // type-checked centrally after runtime resolution.
-        boolean generic = request.capabilityKey() != null && !request.capabilityKey().isBlank();
-        if (!generic && (request.sensorType() == null || request.sensorType().isBlank()
-                || request.unit() == null || request.unit().isBlank()
-                || !(request.value() instanceof Number))) {
-            log.warn("Invalid legacy telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
-            rejectedPermanently(REASON_INVALID_LEGACY_PAYLOAD);
-            acknowledgeQuietly(message);
-            return;
-        }
-
-        // 3. Topic vs Payload Validation
-        String[] parts = topic.split("/");
-        if (parts.length >= 3) {
-            String topicDeviceId = parts[2];
-            if (!topicDeviceId.equals(request.deviceId().toString())) {
-                log.warn("Device ID mismatch! Topic ID: {}, Payload ID: {}. Acknowledging and dropping.", topicDeviceId, request.deviceId());
-                rejectedPermanently(REASON_TOPIC_DEVICE_MISMATCH);
-                acknowledgeQuietly(message);
-                return;
-            }
-        }
+        TelemetryPayload payload = ((Decoded.Accepted<TelemetryPayload>) decoded).value();
+        TelemetryRequest request = new TelemetryRequest(payload.deviceId(), payload.timestamp(), payload.sensorType(), payload.value(),
+                payload.unit(), payload.capabilityKey(), payload.readbackCommandId(), payload.messageId());
+        if (adapter != null) adapter.recordTelemetry(true);
 
         // 4. TelemetryService Processing (Authoritative Persistence) and
         // 5. Manual ACK ONLY AFTER successful persistence. An identical duplicate (same messageId, same payload) returns
@@ -254,6 +251,7 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
         // redelivers this QoS 1 message later. Only the explicit, deterministic payload failures below are permanent
         // (decision A1); an arbitrary IllegalArgumentException from deeper layers is deliberately NOT one of them.
         try {
+            if (transportRefused(request.deviceId(), topic, message)) return;
             long processingStarted = System.nanoTime();
             try {
                 telemetryService.processTelemetry(request, TelemetrySource.MQTT);
@@ -310,6 +308,7 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
      */
     private void handleStatusMessage(String topic, MqttMessage message) {
         try {
+            if (transportRefusedByTopic(topic, message)) return;
             deviceStatusMessageHandler.handle(topic, message.getPayload());
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
         } catch (Exception e) {
@@ -329,11 +328,55 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
      */
     private void handleCommandAck(String topic, MqttMessage message) {
         try {
+            if (transportRefusedByTopic(topic, message)) return;
             deviceCommandAckMessageHandler.handle(topic, message.getPayload());
             mqttClient.messageArrivedComplete(message.getId(), message.getQos());
         } catch (Exception e) {
             log.error("Error processing command-ack message from topic {}. Did NOT ack. Message will be retried.", topic, e);
             throw new RuntimeException("Command-ack processing failed, triggering retry", e);
+        }
+    }
+
+    static final String REASON_TRANSPORT_MISMATCH = "TRANSPORT_MISMATCH";
+
+    /**
+     * A device is served by the transport the server assigned it (decision D3). A message that arrives over MQTT for a device assigned to
+     * another transport is permanently invalid input: acknowledged, counted and dropped, never processed. A device with no assignment (an
+     * unknown device) is passed through, so the core refuses it with its existing wording. Without a guard (a hand-built listener) this is a
+     * no-op, which is the behaviour before the assignment existed.
+     */
+    private boolean transportRefused(java.util.UUID deviceId, String topic, MqttMessage message) {
+        if (transportGuard == null) return false;
+        if (transportGuard.checkTransport(deviceId, TransportKind.MQTT_JSON).isEmpty()) return false;
+        log.warn("Message on topic {} refused: the device is assigned to another transport. Acknowledging and dropping (not retryable).", topic);
+        rejectedPermanently(REASON_TRANSPORT_MISMATCH);
+        adapterRejected(RejectionCode.TRANSPORT_MISMATCH);
+        acknowledgeQuietly(message);
+        return true;
+    }
+
+    /** The same check for status and acknowledgement topics, whose device is the one in the topic; a topic without one is left to the handler. */
+    private boolean transportRefusedByTopic(String topic, MqttMessage message) {
+        if (transportGuard == null) return false;
+        java.util.Optional<java.util.UUID> device = MqttTopics.anyDevice(topic);
+        return device.isPresent() && transportRefused(device.get(), topic, message);
+    }
+
+    private void adapterRejected(RejectionCode code) {
+        if (adapterMetrics == null) return;
+        adapterMetrics.received(MqttJsonAdapter.ID, "rejected");
+        adapterMetrics.rejected(MqttJsonAdapter.ID, code);
+    }
+
+    /** One log line per refusal, with the wording the listener always used (no payload text). */
+    private void logRefusal(String topic, RejectionCode code) {
+        switch (code) {
+            case MALFORMED_JSON -> log.error("Malformed MQTT telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
+            case INVALID_MESSAGE_ID -> log.error("Malformed MQTT telemetry payload on topic {} (invalid messageId). Acknowledging and dropping (not retryable).", topic);
+            case INVALID_FIELDS -> log.warn("Invalid telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
+            case INVALID_LEGACY_PAYLOAD -> log.warn("Invalid legacy telemetry payload on topic {}. Acknowledging and dropping (not retryable).", topic);
+            case TOPIC_DEVICE_MISMATCH -> log.warn("Device ID mismatch on topic {}. Acknowledging and dropping.", topic);
+            default -> log.warn("Refused telemetry on topic {} ({}). Acknowledging and dropping.", topic, code);
         }
     }
 

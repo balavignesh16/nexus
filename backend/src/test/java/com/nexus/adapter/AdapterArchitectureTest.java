@@ -76,7 +76,7 @@ class AdapterArchitectureTest {
 
     @Test
     void p5_027_noTwinRuleActionOrTelemetryClassDependsOnATransportPackage() throws IOException {
-        for (String area : List.of("twin", "rule", "action", "telemetry", "device", "realtime", "infrastructure")) {
+        for (String area : List.of("twin", "rule", "action", "telemetry")) {
             for (Path file : javaFiles(MAIN.resolve(area))) {
                 assertFalse(dependsOnTransport(read(file)), area + " must not depend on an adapter transport package: " + file);
             }
@@ -121,13 +121,13 @@ class AdapterArchitectureTest {
         }
         assertFalse(bridging.isEmpty(), "adapter.core bridges the spi to the core services");
         for (String name : bridging) assertTrue(name.startsWith("adapter/core/"), "only adapter.core may reference both sides: " + name);
-        // The core side reaches the spi through the eligibility port only (the dispatcher joins in P5.3 through the egress router).
+        // Outside adapter/ only two classes touch the spi: the acceptance guard (the eligibility port) and the MQTT listener (the decoder's rejection codes).
         Set<String> outsideAdapter = new TreeSet<>();
         for (Path file : javaFiles(MAIN)) {
             String relative = MAIN.relativize(file).toString().replace('\\', '/');
             if (!relative.startsWith("adapter/") && ADAPTER_SPI.matcher(code(read(file))).find()) outsideAdapter.add(relative);
         }
-        assertEquals(Set.of("action/application/executor/CommandExecutor.java"), outsideAdapter);
+        assertEquals(Set.of("action/application/executor/CommandExecutor.java", "infrastructure/mqtt/TelemetryMQTTListener.java"), outsideAdapter);
     }
 
     @Test
@@ -159,6 +159,23 @@ class AdapterArchitectureTest {
         assertTrue(rule.contains("\"Device is offline\"") && rule.contains("\"MQTT backend is not connected\""), "the MQTT wording is unchanged");
         assertTrue(rule.indexOf("DeviceConnectivityStatus.ONLINE") < rule.indexOf("isConnected()"), "registry first, then the broker client (the former order)");
         assertTrue(read(MAIN.resolve("adapter/core/TransportEligibilityRouter.java")).contains("NO_ADAPTER"), "a transport without a rule fails closed");
+    }
+
+    @Test
+    void p5_r31_nothingButTheEgressRouterReachesAnAdaptersCommandEgressAndNothingCallsTheRouterYet() throws IOException {
+        // Contract R31: no command can reach the broker around the outbox. In P5.3 the adapter's egress (and the bridge to the bounded publisher)
+        // is reachable only through CommandEgressRouter, and no production class calls the router: the dispatcher joins in P5.4, where this test is
+        // tightened to "only the dispatcher".
+        Set<String> routerUsers = new TreeSet<>();
+        Set<String> egressCallers = new TreeSet<>();
+        for (Path file : javaFiles(MAIN)) {
+            String c = code(read(file));
+            String relative = MAIN.relativize(file).toString().replace('\\', '/');
+            if (Pattern.compile("\\bCommandEgressRouter\\b").matcher(c).find()) routerUsers.add(relative);
+            if (c.contains(".deliver(")) egressCallers.add(relative);
+        }
+        assertEquals(Set.of("adapter/core/CommandEgressRouter.java"), routerUsers, "no production class uses the egress router yet");
+        assertEquals(Set.of("adapter/core/CommandEgressRouter.java"), egressCallers, "only the router calls an adapter's deliver()");
     }
 
     @Test

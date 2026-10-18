@@ -23,6 +23,15 @@ public class TransportGuard {
         this.assignments = assignments;
     }
 
+    /** The transport half of the rule alone, for callers whose device identity comes from a topic that they check themselves (MQTT). */
+    public Optional<Rejection> checkTransport(UUID deviceId, TransportKind transport) {
+        Optional<TransportKind> assigned = assignments.assignedTo(deviceId);
+        if (assigned.isPresent() && assigned.get() != transport) {
+            return Optional.of(Rejection.permanent(RejectionCode.TRANSPORT_MISMATCH));
+        }
+        return Optional.empty();
+    }
+
     public Optional<Rejection> check(TransportContext context, UUID payloadDeviceId) {
         Optional<TransportKind> assigned = assignments.assignedTo(context.deviceId());
         if (assigned.isPresent() && assigned.get() != context.transport()) {

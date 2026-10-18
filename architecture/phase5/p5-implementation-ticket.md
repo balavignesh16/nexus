@@ -2,7 +2,7 @@
 
 Date: 2026-10-18.
 
-Status: **P5.1, P5.V41 and P5.2 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.3 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
+Status: **P5.1, P5.V41, P5.2 and P5.3 IMPLEMENTED (2026-10-18; see the ledger evidence). P5.4 to P5.8 are authorised in sequence by the owner's execution authorisation of 2026-10-18 and are not yet started.** The remainder of this paragraph is the P5.0 amendment text: P5.0 AMENDED (second revision, 2026-10-18; documentation only). Decisions D7 to D10 and the contract-version refinement are resolved (section 6); the design spikes that must run first are listed with P5.1 and in contract section 20. Production work needs a separate authorisation after the 2026-10-20 review and the integration of the Phase 4 branches into `main` in the order P4.5, P4.6, P4-FINAL.
 
 Normative authority: [adapter-contract.md](adapter-contract.md). Acceptance authority: [p5-acceptance-ledger.md](p5-acceptance-ledger.md) (158 scenarios, all PLANNED: the original 128 unchanged, 24 added by the amendment and 6 by the P5.1 preparation decisions). This ticket owns slices, dependencies, estimates and the risk register; it does not override contract clauses.
 
@@ -84,7 +84,7 @@ Constraint: wiring only. No existing class changes behaviour; the dispatcher sti
 
 Gate: architecture tests; the whole existing backend suite unchanged; Phase 3 suite OFF and ON.
 
-### P5.3 Move MQTT JSON onto the SPI
+### P5.3 Move MQTT JSON onto the SPI (IMPLEMENTED 2026-10-18; dispatcher routing deferred to P5.4, see contract 16)
 
 Authority: contract 4, 5, 15, 16. Ledger: section D, K (parts). Scenarios: 13.
 

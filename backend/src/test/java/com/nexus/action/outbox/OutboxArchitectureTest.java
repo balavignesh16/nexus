@@ -155,7 +155,9 @@ class OutboxArchitectureTest {
     @Test
     void onlyTheDispatcherUsesTheBoundedPublisher() throws IOException {
         Set<String> users = namesOfFilesMatching(Pattern.compile("\\bBrokerCommandPublisher\\b"));
-        assertEquals(Set.of("BrokerCommandPublisher.java", "CommandOutboxDispatcher.java", "PahoBrokerCommandPublisher.java"), users);
+        // P5.3: BrokerPublisherBridge is the adapter-side end of the seam (it adapts the publisher to the MQTT adapter's port). It is reachable only
+        // through CommandEgressRouter, which nothing but the dispatcher may call (AdapterArchitectureTest.p5_r31_...), so no command can bypass the outbox.
+        assertEquals(Set.of("BrokerCommandPublisher.java", "BrokerPublisherBridge.java", "CommandOutboxDispatcher.java", "PahoBrokerCommandPublisher.java"), users);
     }
 
     @Test

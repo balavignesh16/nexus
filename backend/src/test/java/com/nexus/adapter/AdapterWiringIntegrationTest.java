@@ -131,9 +131,9 @@ class AdapterWiringIntegrationTest {
     @Test
     void theAdapterCoreIsWiredAndTheRouterIsTheEligibilityTheExecutorUses() {
         assertInstanceOf(TransportEligibilityRouter.class, eligibility, "the primary TransportEligibility is the router");
-        assertEquals(1, registry.reports().size());
-        assertEquals("http-webhook", registry.reports().get(0).id());
-        assertTrue(registry.reports().get(0).ingestOnly());
+        assertEquals(java.util.List.of("http-webhook", "mqtt-json"), registry.reports().stream().map(AdapterRegistry.Report::id).toList());
+        assertTrue(registry.reports().stream().filter(r -> r.id().equals("http-webhook")).findFirst().orElseThrow().ingestOnly());
+        assertFalse(registry.reports().stream().filter(r -> r.id().equals("mqtt-json")).findFirst().orElseThrow().ingestOnly());
     }
 
     @Test
@@ -249,6 +249,7 @@ class AdapterWiringIntegrationTest {
     void theDiagnosticsEndpointListsAdaptersWithoutCredentialMaterial() throws Exception {
         mvc.perform(get("/api/v1/adapters")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("http-webhook")).andExpect(jsonPath("$[0].ingestOnly").value(true))
-                .andExpect(jsonPath("$[0].transport").value("HTTP_WEBHOOK")).andExpect(jsonPath("$[0].capabilities[0]").value("TELEMETRY_DECODER"));
+                .andExpect(jsonPath("$[0].transport").value("HTTP_WEBHOOK")).andExpect(jsonPath("$[0].capabilities[0]").value("TELEMETRY_DECODER"))
+                .andExpect(jsonPath("$[1].id").value("mqtt-json")).andExpect(jsonPath("$[1].ingestOnly").value(false));
     }
 }

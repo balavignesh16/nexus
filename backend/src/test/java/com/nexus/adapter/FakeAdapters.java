@@ -45,7 +45,7 @@ final class FakeAdapters {
         @Override public Map<String, Long> diagnostics() { return Map.of("decoded", decoded.get()); }
 
         @Override
-        public Decoded<TelemetryPayload> decode(RawMessage message) {
+        public Decoded<TelemetryPayload> decodeTelemetry(RawMessage message) {
             decoded.incrementAndGet();
             return Decoded.refused(RejectionCode.MALFORMED_JSON);
         }
@@ -74,7 +74,7 @@ final class FakeAdapters {
         @Override public Map<String, Long> diagnostics() { return Map.of("deliveries", (long) deliveries.get()); }
         @Override public void start() { starts.incrementAndGet(); }
         @Override public void stop() { stops.incrementAndGet(); }
-        @Override public Decoded<AckPayload> decode(RawMessage message) { return Decoded.refused(RejectionCode.INVALID_FIELDS); }
+        @Override public Decoded<AckPayload> decodeAcknowledgement(RawMessage message) { return Decoded.refused(RejectionCode.INVALID_FIELDS); }
 
         @Override
         public Attempt deliver(CommandEnvelope command, Duration timeout) {
