@@ -1,0 +1,27 @@
+{
+  "description": "Rule non-match scenarios run against a real PostgreSQL with the real dry-run engine. 'require' lists statements by tier and fragment; 'forbid' lists fragments that must appear in no claim. Every scenario also forbids cause attribution (a fault, a reason for silence) because a non-match is explained only by the evaluated facts. 'abstain' means the explainer must decline and make no FACT claim.",
+  "scenarios": [
+    {"id": "M-01", "category": "VALUE_BELOW_THRESHOLD", "kind": "BELOW", "value": 5,
+     "require": [{"tier": "FACT", "fragment": "evaluation of the CURRENT persisted state"}, {"tier": "FACT", "fragment": "outcome is NOT_MATCHED"}, {"tier": "FACT", "fragment": "actual value is 5"}, {"tier": "INFERENCE", "fragment": "does not match because 1 condition(s) are not satisfied"}], "forbid": []},
+    {"id": "M-02", "category": "VALUE_AT_THE_BOUNDARY", "kind": "BELOW", "value": 10,
+     "require": [{"tier": "FACT", "fragment": "outcome is NOT_MATCHED"}, {"tier": "FACT", "fragment": "actual value is 10"}], "forbid": []},
+    {"id": "M-03", "category": "VALUE_JUST_BELOW", "kind": "BELOW", "value": 9.9,
+     "require": [{"tier": "FACT", "fragment": "outcome is NOT_MATCHED"}, {"tier": "FACT", "fragment": "actual value is 9.9"}], "forbid": []},
+    {"id": "M-04", "category": "WOULD_MATCH", "kind": "ABOVE", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "MATCHED"}], "forbid": ["outcome is NOT_MATCHED", "does not match because"]},
+    {"id": "M-05", "category": "NO_VALUE_IN_THE_TWIN", "kind": "NO_VALUE",
+     "require": [{"tier": "FACT", "fragment": "the persisted state holds no value for it"}], "forbid": ["actual value is"]},
+    {"id": "M-06", "category": "STALE_INPUT", "kind": "STALE", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "input quality is STALE"}, {"tier": "FACT", "fragment": "not because of a comparison"}], "forbid": ["is not satisfied because the value"]},
+    {"id": "M-07", "category": "OFFLINE_DEVICE", "kind": "OFFLINE", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "input quality is OFFLINE"}], "forbid": []},
+    {"id": "M-08", "category": "PAUSED_RULE", "kind": "PAUSED", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "not executable in production: lifecycle PAUSED"}], "forbid": []},
+    {"id": "M-09", "category": "TRIGGER_NOT_SUBSCRIBED", "kind": "WRONG_TRIGGER", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "does not subscribe to the trigger CONNECTIVITY_CHANGED"}], "forbid": []},
+    {"id": "M-10", "category": "COOLDOWN_AFTER_A_REAL_MATCH", "kind": "COOLDOWN", "value": 25,
+     "require": [{"tier": "FACT", "fragment": "inside its cooldown window"}], "forbid": [], "summaryContains": "does not match now"},
+    {"id": "M-11", "category": "UNKNOWN_DEVICE", "kind": "UNKNOWN_DEVICE", "abstain": true, "require": [], "forbid": []},
+    {"id": "M-12", "category": "LEGACY_RULE_WITHOUT_TRIGGER", "kind": "LEGACY_NO_TRIGGER", "abstain": true, "require": [], "forbid": []}
+  ]
+}

@@ -437,12 +437,13 @@ public final class ScenarioLibrary {
                     deviceId, domainEvent(seed, deviceId), List.of(action(seed, "CREATE_ALERT", "SUCCESS")));
             String raw = candidateEnvelope(factClaimJson("The motor turned on.", "actions[0].status", "\"SUCCESS\""));
             scenarios.add(new EvaluationScenario(seed,
-                    "SEMANTIC RUBRIC CANDIDATE (Level 2 ONLY - not a Level 1 failure): evidenceRef 'actions[0].status' "
-                            + "structurally resolves and assertedValue 'SUCCESS' matches, so GroundingChecker accepts this claim. "
-                            + "The prose 'The motor turned on.' converts a software execution status into an implied physical "
-                            + "outcome - this can only be caught by human semantic review (see semantic-rubric.md), never by "
-                            + "structural grounding. This scenario is EXPECTED to survive Level 1 - that is the point.",
-                    ctx, true, Optional.of(raw), EvaluationScenario.ExpectedOutcome.derivedFrom(ctx, "AI")));
+                    "PHYSICAL-ACTUATION PROSE (safety class, closed in P6.5): evidenceRef 'actions[0].status' structurally "
+                            + "resolves and assertedValue 'SUCCESS' matches, but the prose 'The motor turned on.' converts a software "
+                            + "execution status into a physical outcome that no recorded evidence establishes. Before P6.5 this scenario "
+                            + "was EXPECTED to survive Level 1; the deterministic UnsupportedAssertionGuard now refuses the claim, no AI claim "
+                            + "survives, and the platform falls back to the deterministic explanation. The guard is a closed word list, not "
+                            + "a semantic verifier: paraphrases outside it still need the human rubric (semantic-rubric.md).",
+                    ctx, true, Optional.of(raw), EvaluationScenario.ExpectedOutcome.derivedFrom(ctx, "DETERMINISTIC_FALLBACK")));
         }
 
         return List.copyOf(scenarios);

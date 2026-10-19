@@ -234,10 +234,10 @@ class RuleMatchExplanationEvaluationTest {
             }
         }
         if (id.equals("22-status-physical-implication")) {
-            // Deliberately NOT a failure: this claim is structurally valid and MUST survive Level 1.
-            boolean survivedAsExpected = "AI".equals(explanation.generatedBy())
-                    && hasClaimTextContaining(explanation, "The motor turned on.");
-            scorecard.record("Grounding: evidence-reference resolvability & FACT-value correctness (semantic-review boundary case)", survivedAsExpected);
+            // Closed in P6.5: a physical-actuation sentence must NOT reach the user even though its citation resolves and its value matches.
+            boolean refused = "DETERMINISTIC_FALLBACK".equals(explanation.generatedBy())
+                    && !hasClaimTextContaining(explanation, "The motor turned on.");
+            scorecard.record("Safety - Wording: physical-actuation prose with a valid citation is refused (P6.5 guard)", refused);
         }
     }
 

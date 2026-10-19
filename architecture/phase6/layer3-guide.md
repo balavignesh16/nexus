@@ -30,9 +30,9 @@ The window is split into a **baseline** `[from, split)` and a **recent** part `[
 | Detector | Observed when | Refuses (INSUFFICIENT_EVIDENCE) when |
 |---|---|---|
 | FLATLINE | every recent reading is equal within the series' own **reading step** (the smallest positive gap between distinct baseline values) over at least 5 reporting intervals, while the baseline varied | baseline < 100 readings, recent < 10, baseline has fewer than 3 distinct values (a setpoint-like quantity is flat by nature), span too short |
-| OUTLIER | modified z-score `0.6745 · |x − median| / MAD` of a recent reading against the baseline exceeds **k = 4.0** (mean-absolute-deviation form when MAD is 0) and the deviation is at least 3 reading steps | baseline < 100, no recent readings, baseline has no variation (scale undefined) |
+| OUTLIER | modified z-score `0.6745 · |x − median| / MAD` of a recent reading against the **most recent quarter of the baseline** (never fewer than 100 readings, so a slowly drifting quantity is compared with where it was a few hours ago, not with the whole window) exceeds **k = 4.0** (mean-absolute-deviation form when MAD is 0) and the deviation is at least 3 reading steps | baseline < 100, no recent readings, baseline has no variation (scale undefined) |
 | SPIKE | the same robust score applied to the **change between consecutive readings** (pairs no wider than 3 reporting intervals) exceeds **k = 5.0** and is at least 3 reading steps | baseline < 100, fewer than 50 baseline changes, no recent consecutive pair, no variation |
-| GAP | a silence longer than **5 x the device's own median reporting interval** (and at least 60 s) between recent readings, or since the last reading, when the baseline cadence is regular (MAD/median of intervals ≤ 0.5) | baseline < 9 readings, cadence undefined or irregular |
+| GAP | a silence longer than **5 x the device's own median reporting interval** (and at least 60 s) between recent readings, or since the last reading, when the baseline cadence is regular (MAD/median of intervals ≤ 0.3) | baseline < 9 readings, cadence undefined or irregular |
 
 A GAP finding is worded as "no reading with an event time after X is persisted". It never says the device is offline: connectivity is a separate fact, and a device clock error shifts the silence.
 
@@ -41,7 +41,7 @@ A GAP finding is worded as "no reading with an event time after X is persisted".
 * **k = 4.0, not the textbook 3.5.** On clean Gaussian noise, 3.5 flags about one series in twenty when ~120 recent readings are judged; 4.0 about one in a hundred.
 * **Minimum baseline 100**, from a measurement (`BaselineSizeSweepTest`, clean Gaussian noise, 600 series per row, 16 recent readings):
 
-| baseline readings | outlier false flags | spike false flags |
+| reference readings the scale is estimated from | outlier false flags | spike false flags |
 |---|---|---|
 | 20 | 9.3 % | 2.7 % |
 | 30 | 5.5 % | 1.2 % |
@@ -82,7 +82,13 @@ Every query has a window and a row limit; telemetry reads use the existing `(dev
 
 ## 7. Optional model help
 
-`explain=true` asks the P6.2 gateway (enabled gate, separate device-evidence consent, bounded context, strict JSON) to put the RECOMMENDED items in a reading order and write a short summary. The answer is accepted only if the order is exactly a permutation of what it was shown, the summary is at most 600 characters, every number in it appears in the facts it was shown, and it contains no probability, certainty, fault or failure-prediction wording; otherwise the answer is REJECTED with a fixed reason and the deterministic list stands alone. A disabled, unconsented or failing model gives `UNAVAILABLE`. This is a narrower check than the Layer 1 claim grounding (it grounds numbers and wording, not per-claim evidence references), and it is not a defence against a model that writes a misleading but number-free sentence.
+`explain=true` asks the P6.2 gateway (enabled gate, separate device-evidence consent, bounded context, strict JSON) to put the RECOMMENDED items in a reading order and choose a short summary. **The model does not write the summary.** Whether a model sentence is faithful to the evidence cannot be verified automatically, and a sentence with no invented number can still invent a fault, a reason for silence, a success, a receipt or an approval. So the summary is accepted only if every sentence (at most three, at most 600 characters) is copied word for word from the platform's own recommendation statements, and the order is exactly a permutation of the recommendations it was shown; otherwise the answer is REJECTED with a fixed reason (`RANKING_NOT_A_PERMUTATION`, `SUMMARY_TOO_LONG`, `SUMMARY_NOT_A_SHORT_SELECTION`, `UNSUPPORTED_SENTENCE`) and the deterministic list stands alone. A disabled, unconsented or failing model gives `UNAVAILABLE`. Limit: a true sentence can still be shown out of its context (the observation without its caveat), which is why the full statements are always returned beside the selection. The evaluation (architecture/phase6/evaluation) offers 67 model replies, including every fabrication class, and none was accepted.
+
+## 7a. What the P6.5 evaluation added to this layer
+
+* A pre-registered evaluation of 2,300 seeded series found two defects that are fixed here: slow drift of 0.5 degrees a day made the outlier detector flag 18% of clean series (now the reference is the most recent quarter of the baseline), and one bursty series in 100 was not treated as irregular (cut-off 0.5 to 0.3). Both were re-checked on held-out seeds.
+* Measured per detector on the evaluation corpus: recall 1.00 (flatline), 1.00 (outlier), 0.965 (spike), 1.00 (gap); pooled false-positive rate on clean families 0.00, 0.02, 0.00, 0.00; abstention on sparse, constant and irregular series 100%.
+* **Not good:** heavy-tailed noise makes the outlier detector flag 96% of clean series and the spike detector 26%; a 5-sigma step is found by the spike detector in 4% of series. These are limits of a median/MAD method and are reported, not hidden.
 
 ## 8. Limits stated plainly
 

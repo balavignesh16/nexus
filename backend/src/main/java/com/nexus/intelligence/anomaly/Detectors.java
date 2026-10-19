@@ -184,11 +184,16 @@ public final class Detectors {
     // ---------------------------------------------------------------- outliers
 
     static Finding outlier(Context c) {
-        Map<String, Object> rule = rule("OUTLIER: modified z-score 0.6745 |x - median| / MAD against the baseline exceeds k (mean-absolute-deviation form when MAD is 0)",
-                "k", c.s.outlierK(), "minBaselineSamples", c.s.minBaselineSamples(), "minDeviationReadingSteps", 3);
+        Map<String, Object> rule = rule("OUTLIER: modified z-score 0.6745 |x - median| / MAD against the most recent quarter of the baseline (never fewer than the minimum) exceeds k (mean-absolute-deviation form when MAD is 0)",
+                "k", c.s.outlierK(), "minBaselineSamples", c.s.minBaselineSamples(), "referenceFraction", 0.25, "minDeviationReadingSteps", 3);
         if (c.baseline.size() < c.s.minBaselineSamples()) return c.insufficient(Category.OUTLIER, "BASELINE_TOO_SMALL", Map.of("baselineSamples", c.baseline.size()), rule);
         if (c.recent.isEmpty()) return c.insufficient(Category.OUTLIER, "NO_RECENT_READINGS", Map.of(), rule);
-        RobustStats.Scale scale = RobustStats.scale(values(c.baseline));
+        // The reference is the most recent quarter of the baseline (at least the minimum): a quantity that drifts slowly is compared with where it was a few hours
+        // ago, not with its average over the whole window. A real level shift is still far from the reference. (Found by the P6.5 evaluation: whole-baseline
+        // reference gave 18 percent false positives on a 0.5-degree drift per day.)
+        int refSize = Math.min(c.baseline.size(), Math.max(c.s.minBaselineSamples(), c.baseline.size() / 4));
+        List<Sample> reference = c.baseline.subList(c.baseline.size() - refSize, c.baseline.size());
+        RobustStats.Scale scale = RobustStats.scale(values(reference));
         if (!scale.defined()) return c.insufficient(Category.OUTLIER, "BASELINE_NOT_VARYING", Map.of("baselineMedian", scale.median()), rule);
         double resolution = resolution(c.baseline);
         List<Map<String, Object>> flagged = new ArrayList<>();
@@ -204,6 +209,7 @@ public final class Detectors {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("baselineMedian", round(scale.median()));
         stats.put("baselineMad", round(scale.mad()));
+        stats.put("referenceReadings", refSize);
         stats.put("scaleForm", scale.form());
         stats.put("recentReadings", c.recent.size());
         stats.put("flaggedReadings", flaggedSamples.size());
@@ -272,7 +278,7 @@ public final class Detectors {
 
     static Finding gap(Context c) {
         Map<String, Object> rule = rule("GAP: silence longer than gapFactor x the device's own median reporting interval (and at least minGapSeconds), when the baseline cadence is regular",
-                "gapFactor", c.s.gapFactor(), "minGapSeconds", c.s.minGapSeconds(), "minBaselineIntervals", 8, "maxCadenceIrregularity", 0.5);
+                "gapFactor", c.s.gapFactor(), "minGapSeconds", c.s.minGapSeconds(), "minBaselineIntervals", 8, "maxCadenceIrregularity", 0.3);
         if (c.baseline.size() < 9) return c.insufficient(Category.GAP, "BASELINE_TOO_SMALL", Map.of("baselineSamples", c.baseline.size()), rule);
         List<Double> intervals = intervalsSeconds(c.baseline);
         double cadence = RobustStats.median(intervals);
@@ -281,7 +287,7 @@ public final class Detectors {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("baselineCadenceSeconds", round(cadence));
         stats.put("cadenceIrregularity", round(irregularity));
-        if (irregularity > 0.5) return c.insufficient(Category.GAP, "IRREGULAR_CADENCE", stats, rule);
+        if (irregularity > 0.3) return c.insufficient(Category.GAP, "IRREGULAR_CADENCE", stats, rule);
         double limit = Math.max(c.s.gapFactor() * cadence, c.s.minGapSeconds());
         stats.put("silenceLimitSeconds", round(limit));
         List<Map<String, Object>> gaps = new ArrayList<>();

@@ -40,3 +40,10 @@ Every scenario has a layer and a pass criterion in the ledger. A slice is comple
 * No migration (V42 is the latest). Nothing is persisted: findings and recommendations are recomputed with stable ids from existing tables and indexes, which satisfies "no duplicate durable recommendations" by having none. The contract's earlier idea of a retention policy for transient recommendations therefore applies to no rows.
 * Packages `com.nexus.intelligence.anomaly` (cleaner, four detectors, read-only reader, service, settings) and `com.nexus.intelligence.recommend` (facts reader, service, optional narrator); `AnomalyController` (GET only).
 * Findings during the slice (recorded, not hidden): the default minimum baseline of 20 produced false outlier flags on ordinary noise and was raised to 100 from a measurement; command history is stamped by the database clock, so its window must use the database clock (a backend-clock window missed the newest fact).
+
+## P6.5 delivered (2026-10-19)
+
+* Evaluation system: corpus `p6-eval-corpus-v1` (300 cases, hashed manifest), nine required suites and one optional real-model suite under `com.nexus.intelligence.eval`, the gate `tests/p6_eval_gate.py` and its baseline, the manifest tool `tests/p6_eval_manifest.py`, and a Phase 6 claims audit. See `evaluation/README.md`.
+* Behaviour changes made because the evaluation found defects (recorded, not hidden): a deterministic wording guard on the rule-match explanation path (claims, summary) and on draft rationales; the recommendation narrator accepts only sentences copied from platform statements; the outlier detector's reference is the most recent quarter of the baseline; the gap detector's irregularity cut-off is 0.3; the rule-match explanation response carries `provenance` (closes P6-016).
+* Whole-system failure isolation (P6-011) now has an integration test; it is no longer inferred from structure.
+* The release gate is INCOMPLETE until mutual-exclusion constraints (P6-043) are implemented and evaluated; that decision belongs to P6.6.

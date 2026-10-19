@@ -349,9 +349,11 @@ class AnomalyEvidenceIntegrationTest extends TypedTriggerSupport {
         for (int i = n; i >= 1; i--) order.add("\"R" + i + "\"");
         String reversed = "[" + String.join(",", order) + "]";
         // a grounded answer is accepted and only reorders
-        reply.set("{\"ranking\":" + reversed + ",\"summary\":\"Review the recorded readings.\"}");
+        String sentence = recs.getFirst().statement().split("(?<=[.!?])\\s+")[0];
+        reply.set("{\"ranking\":" + reversed + ",\"summary\":" + mapper.writeValueAsString(sentence) + "}");
         RecommendationNarrator.Narration ok = narrator.narrate(recs);
         assertThat(ok.status()).isEqualTo("ACCEPTED");
+        assertThat(ok.summary()).isEqualTo(sentence);
         assertThat(ok.rankedIds()).containsExactlyInAnyOrderElementsOf(recs.stream().map(Recommendation::id).toList());
         assertThat(ok.rankedIds().getFirst()).isEqualTo(recs.getLast().id());
         assertThat(ok.generatedBy().providerId()).isEqualTo("fake");
@@ -359,9 +361,9 @@ class AnomalyEvidenceIntegrationTest extends TypedTriggerSupport {
         String[][] bad = {
                 {"{\"ranking\":[\"R1\"],\"summary\":\"x\"}", "RANKING_NOT_A_PERMUTATION"},
                 {"{\"ranking\":" + reversed.replace("\"R1\"", "\"R9\"") + ",\"summary\":\"x\"}", "RANKING_NOT_A_PERMUTATION"},
-                {"{\"ranking\":" + reversed + ",\"summary\":\"There is a 90% probability the sensor will fail soon.\"}", "UNSUPPORTED_CLAIM"},
-                {"{\"ranking\":" + reversed + ",\"summary\":\"The sensor is faulty.\"}", "UNSUPPORTED_CLAIM"},
-                {"{\"ranking\":" + reversed + ",\"summary\":\"The device reported 4721 readings.\"}", "UNGROUNDED_NUMBER"},
+                {"{\"ranking\":" + reversed + ",\"summary\":\"There is a 90% probability the sensor will fail soon.\"}", "UNSUPPORTED_SENTENCE"},
+                {"{\"ranking\":" + reversed + ",\"summary\":\"The sensor is faulty.\"}", "UNSUPPORTED_SENTENCE"},
+                {"{\"ranking\":" + reversed + ",\"summary\":\"The device reported 4721 readings.\"}", "UNSUPPORTED_SENTENCE"},
                 {"{\"ranking\":" + reversed + ",\"summary\":\"" + "word ".repeat(150) + "\"}", "SUMMARY_TOO_LONG"}};
         for (String[] b : bad) {
             reply.set(b[0]);

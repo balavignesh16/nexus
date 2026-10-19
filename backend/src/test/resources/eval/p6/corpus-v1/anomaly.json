@@ -1,0 +1,37 @@
+{
+  "protocol": {
+    "registeredBeforeResults": true,
+    "amendment": "Run 1 (saved as evidence) failed two gated measures: OUTLIER false positives on SLOW_NORMAL_DRIFT (0.18) and GAP abstention on IRREGULAR_CADENCE (0.99). The outlier detector now takes its reference from the most recent quarter of the baseline and the GAP irregularity cut-off was tightened from 0.5 to 0.3. The families marked heldOut, with fresh seeds, were added AFTER run 1 to check those two changes; the original families SLOW_NORMAL_DRIFT and IRREGULAR_CADENCE are no longer independent evidence for those behaviours. No threshold was changed. INJECTED_GAP_WITH_FUTURE_DATED_ROWS, INJECTED_GAP_OUT_OF_ORDER and INJECTED_SPIKE_OUT_OF_ORDER were added after the mutation campaign because removing the future-dated-reading exclusion or the time ordering from the cleaner was not detected by any earlier family (mutants A06 and A07 survived).",
+    "thresholds": "Taken unchanged from the approved contract (section 10): recall >= 0.9 on injected anomalies, false-positive rate <= 0.05 on clean noisy series, abstention on insufficient evidence = 100 percent. Nothing here was tuned after results were viewed; where the contract is silent (heavy-tailed noise, large drift, weak injections) the family is reported and NOT gated, with the proposed bound stated.",
+    "gatedNormal": "A series from a family with role NORMAL and gated=true must not be OBSERVED by any detector listed in normalFor. FPR = flagged / series, per family and pooled, per detector.",
+    "recall": "A series from an INJECTED family must be OBSERVED by its own detector. Recall = observed / series, per detector.",
+    "abstention": "A series from an ABSTAIN family must be INSUFFICIENT_EVIDENCE for every detector in abstainFor. Abstention is never counted as a detection and never as a pass for recall.",
+    "claim": "These are rates on seeded SYNTHETIC series. They say nothing general about real sensors.",
+    "series": "One reading a minute for 24 hours (1440 readings), baseline mean 21.0, evaluation instant fixed; amplitudes are multiples of the family's noise standard deviation."
+  },
+  "families": [
+    {"id": "GAUSSIAN", "role": "NORMAL", "gated": true, "seedStart": 1000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "QUANTIZED", "role": "NORMAL", "gated": true, "seedStart": 2000, "count": 100, "noise": "gaussian", "sd": 0.4, "step": 0.5, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "DUPLICATE_OUT_OF_ORDER", "role": "NORMAL", "gated": true, "seedStart": 3000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "duplicateFraction": 0.05, "shuffle": true, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "CLOCK_SKEW_FUTURE_ROWS", "role": "NORMAL", "gated": true, "seedStart": 4000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "futureRows": 5, "futureMinutes": 10, "futureValue": 90.0, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "SLOW_NORMAL_DRIFT", "role": "NORMAL", "gated": true, "seedStart": 5000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "driftTotal": 0.5, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "HEAVY_TAILED", "role": "NORMAL", "gated": false, "proposedBound": 0.05, "seedStart": 6000, "count": 100, "noise": "student_t", "df": 3, "sd": 0.3, "step": 0.1, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "DRIFT_LARGE_AMBIGUOUS", "role": "AMBIGUOUS", "gated": false, "seedStart": 7000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "driftTotal": 3.0, "reportOnly": true},
+    {"id": "SPARSE", "role": "ABSTAIN", "gated": true, "seedStart": 8000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "readings": 60, "abstainFor": ["FLATLINE", "OUTLIER", "SPIKE"]},
+    {"id": "CONSTANT", "role": "ABSTAIN", "gated": true, "seedStart": 9000, "count": 100, "constantValue": 22.0, "abstainFor": ["FLATLINE", "OUTLIER", "SPIKE"], "normalFor": ["GAP"]},
+    {"id": "IRREGULAR_CADENCE", "role": "ABSTAIN", "gated": true, "seedStart": 10000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "irregular": true, "abstainFor": ["GAP"], "normalFor": ["FLATLINE", "OUTLIER", "SPIKE"]},
+    {"id": "INJECTED_OUTLIER", "role": "INJECTED", "gated": true, "detector": "OUTLIER", "seedStart": 11000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "magnitudeSigma": 10},
+    {"id": "INJECTED_SPIKE", "role": "INJECTED", "gated": true, "detector": "SPIKE", "seedStart": 12000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "magnitudeSigma": 10},
+    {"id": "INJECTED_FLATLINE", "role": "INJECTED", "gated": true, "detector": "FLATLINE", "seedStart": 13000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1},
+    {"id": "INJECTED_GAP", "role": "INJECTED", "gated": true, "detector": "GAP", "seedStart": 14000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "silenceMinutes": 40},
+    {"id": "INJECTED_OUTLIER_WEAK", "role": "INJECTED", "gated": false, "detector": "OUTLIER", "seedStart": 15000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "magnitudeSigma": 5},
+    {"id": "INJECTED_SPIKE_WEAK", "role": "INJECTED", "gated": false, "detector": "SPIKE", "seedStart": 16000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "magnitudeSigma": 5},
+    {"id": "HELDOUT_GAUSSIAN", "role": "NORMAL", "gated": true, "heldOut": true, "seedStart": 19000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "HELDOUT_SLOW_NORMAL_DRIFT", "role": "NORMAL", "gated": true, "heldOut": true, "seedStart": 17000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "driftTotal": 0.5, "normalFor": ["FLATLINE", "OUTLIER", "SPIKE", "GAP"]},
+    {"id": "HELDOUT_IRREGULAR_CADENCE", "role": "ABSTAIN", "gated": true, "heldOut": true, "seedStart": 18000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "irregular": true, "abstainFor": ["GAP"], "normalFor": ["FLATLINE", "OUTLIER", "SPIKE"]},
+    {"id": "HELDOUT_INJECTED_OUTLIER_ON_DRIFT", "role": "INJECTED", "gated": true, "heldOut": true, "detector": "OUTLIER", "seedStart": 21000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "driftTotal": 0.5, "magnitudeSigma": 10},
+    {"id": "INJECTED_GAP_WITH_FUTURE_DATED_ROWS", "role": "INJECTED", "gated": true, "heldOut": true, "detector": "GAP", "seedStart": 22000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "silenceMinutes": 40, "futureRows": 3, "futureMinutes": 10, "futureValue": 21.0},
+    {"id": "INJECTED_GAP_OUT_OF_ORDER", "role": "INJECTED", "gated": true, "heldOut": true, "detector": "GAP", "seedStart": 23000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "silenceMinutes": 40, "duplicateFraction": 0.05, "shuffle": true},
+    {"id": "INJECTED_SPIKE_OUT_OF_ORDER", "role": "INJECTED", "gated": true, "heldOut": true, "detector": "SPIKE", "seedStart": 24000, "count": 100, "noise": "gaussian", "sd": 0.3, "step": 0.1, "magnitudeSigma": 10, "duplicateFraction": 0.05, "shuffle": true}
+  ]
+}

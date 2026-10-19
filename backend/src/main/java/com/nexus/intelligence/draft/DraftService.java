@@ -126,9 +126,15 @@ public class DraftService {
         validation.put("validatedAt", clock.instant().toString());
         validation.put("validator", "RuleCapabilityValidator+DraftPolicy");
         validation.put("promptTemplate", PROMPT_TEMPLATE);
+        // The rationale is model prose shown to the approver. If it asserts actuation, receipt, approval, a fault or a cause it is not stored at all.
+        String rationale = candidate.rationale();
+        if (rationale != null && com.nexus.rule.ai.UnsupportedAssertionGuard.violation(rationale) != null) {
+            validation.put("rationaleDropped", com.nexus.rule.ai.UnsupportedAssertionGuard.violation(rationale).name());
+            rationale = null;
+        }
         String definition = write(rule);
         List<String> refs = new ArrayList<>(cited.stream().map(id -> "device:" + id).toList());
-        String hash = store.insert(draftId, valid, definition, completed.identity(), sha256(goal), candidate.rationale(), refs, write(validation));
+        String hash = store.insert(draftId, valid, definition, completed.identity(), sha256(goal), rationale, refs, write(validation));
         if (valid) store.supersede(draftId);
         return new DraftOutcome.Created(draftId, valid ? "PENDING_APPROVAL" : "INVALID", valid, hash, all, warnings);
     }

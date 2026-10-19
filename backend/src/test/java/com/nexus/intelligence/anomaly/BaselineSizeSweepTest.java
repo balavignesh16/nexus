@@ -22,7 +22,9 @@ class BaselineSizeSweepTest {
         for (int i = 0; i < baseline; i++) rows.add(new RawRow("b" + i, DetectorsTest.W.split().minus(Duration.ofMinutes(baseline - i)), "NUMBER", Math.round((21 + 0.3 * r.nextGaussian()) * 10) / 10.0, "CELSIUS"));
         for (int i = 0; i < recent; i++) rows.add(new RawRow("r" + i, DetectorsTest.W.split().plus(Duration.ofMinutes(i)), "NUMBER", Math.round((21 + 0.3 * r.nextGaussian()) * 10) / 10.0, "CELSIUS"));
         CleanedSeries s = SeriesCleaner.clean(rows, DetectorsTest.NOW, 300, false);
-        AnomalySettings st = new AnomalySettings(24, 120, 10, 10, 4.0, 5.0, 5.0, 60, 300, 5000, 20, 10);
+        // the minimum equals the size under test, so the outlier reference (the most recent quarter of the baseline, never fewer than the minimum) is the whole baseline:
+        // the table is therefore keyed by the number of REFERENCE readings the scale is estimated from
+        AnomalySettings st = new AnomalySettings(24, 120, Math.max(10, baseline), 10, 4.0, 5.0, 5.0, 60, 300, 5000, 20, 10);
         return Detectors.analyse(DetectorsTest.DEVICE, "temperature", s, DetectorsTest.W, DetectorsTest.NOW, st);
     }
 
@@ -37,7 +39,7 @@ class BaselineSizeSweepTest {
 
     @Test
     void p6_059_p6_068_theFalseFlagRateFallsWithBaselineSizeAndTheDocumentedMinimumKeepsItUnderTwoPercent() {
-        StringBuilder table = new StringBuilder("baseline | outlier | spike\n");
+        StringBuilder table = new StringBuilder("reference | outlier | spike\n");
         double outlierAtMin = 0, spikeAtMin = 0;
         int min = AnomalySettings.defaults().minBaselineSamples();
         for (int n : new int[] {20, 30, 50, 100, 300}) {

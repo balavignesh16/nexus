@@ -53,6 +53,14 @@ public class AiExplanationController {
         this.metrics = metrics;
     }
 
+    private com.nexus.intelligence.model.ModelProvider modelProvider;
+
+    /** Optional: names the provider that wrote an AI explanation. Absent in unit tests that build the controller directly. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setModelProvider(com.nexus.intelligence.model.ModelProvider modelProvider) {
+        this.modelProvider = modelProvider;
+    }
+
     @GetMapping("/rule-match/{matchId}")
     public ResponseEntity<RuleMatchExplanationResponse> explainRuleMatch(@PathVariable UUID matchId,
                                                                           HttpServletRequest request) {
@@ -79,7 +87,7 @@ public class AiExplanationController {
             long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
             metrics.recordOutcome(outcome.reason(), latencyMs);
             log.info("AI explanation served for match {}: outcome={}, latencyMs={}", matchId, outcome.reason(), latencyMs);
-            return ResponseEntity.ok(RuleMatchExplanationResponse.from(outcome.explanation()));
+            return ResponseEntity.ok(RuleMatchExplanationResponse.from(outcome.explanation(), modelProvider == null ? null : modelProvider.identity()));
         } finally {
             rateLimiter.release();
         }

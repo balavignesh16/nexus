@@ -57,6 +57,16 @@ public class GroundingChecker {
             reasons.add("claims must be non-empty");
         }
 
+        // The summary is model prose too and reaches the user unchanged: a summary that asserts actuation, receipt or execution, human approval or a fault or
+        // cause is not accepted at all (no claim of the candidate survives), exactly like a candidate for another match.
+        UnsupportedAssertionGuard.Kind summaryViolation = UnsupportedAssertionGuard.violation(candidate.summary());
+        if (summaryViolation != null) {
+            reasons.add("summary asserts " + summaryViolation + ", which no recorded evidence establishes in words");
+            RuleMatchExplanation empty = new RuleMatchExplanation(
+                    context.matchId(), candidate.summary(), List.of(), enforcedActionNote, candidate.generatedBy());
+            return new GroundingResult(empty, sourceClaims.size(), reasons);
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> tree = objectMapper.convertValue(context, Map.class);
 
@@ -117,11 +127,20 @@ public class GroundingChecker {
 
         List<String> supporting = claim.supportingEvidenceRefs();
 
-        return switch (claim.tier()) {
+        String structural = switch (claim.tier()) {
             case FACT -> validateFact(claim, tree, supporting);
             case UNKNOWN -> validateUnknown(claim, supporting);
             case INFERENCE -> validateInference(claim, tree, supporting);
         };
+        if (structural != null) return structural;
+
+        // A valid citation proves the cited fact, not the sentence built around it: refuse wording that asserts actuation, receipt or execution, human
+        // approval, or a fault or cause (see UnsupportedAssertionGuard for what this is and is not).
+        UnsupportedAssertionGuard.Kind unsupported = UnsupportedAssertionGuard.violation(claim.text());
+        if (unsupported != null) {
+            return "claim asserts " + unsupported + ", which no recorded evidence establishes in words: " + claim.text();
+        }
+        return null;
     }
 
     /**
