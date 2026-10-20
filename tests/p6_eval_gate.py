@@ -29,7 +29,9 @@ REQUIRED_SUITES = ["narrator", "prose", "injection", "anomaly", "drafts", "lifec
 # Run only when someone explicitly configures a real model; reported as NOT_EVALUATED (never as a pass) when absent, and included when present.
 OPTIONAL_SUITES = ["realmodel"]
 # Timing-dependent suites and measures are reported but not compared exactly with the baseline: their figures vary by machine and run.
-NOT_COMPARED_SUITES = {"performance"}
+# The real-model suite is machine- and model-specific and not deterministic: it is judged on its own gated measures and never compared with the baseline.
+NOT_COMPARED_SUITES = {"performance", "realmodel"}
+HELDOUT_MANIFEST = ROOT / "architecture/phase6/evaluation/heldout/p6-heldout-v1.manifest.json"
 NOT_COMPARED_MEASURES = {"isolation.ingestion_max_latency_ms"}
 VERDICTS = ("PASS", "FAIL", "NOT_EVALUATED", "INCONCLUSIVE")
 
@@ -91,6 +93,13 @@ def evaluate(results: dict[str, dict | None], baseline: dict | None, corpus_issu
         if data is None:
             (missing if suite in REQUIRED_SUITES else optional_not_evaluated).append(suite)
             continue
+        if suite == "realmodel":
+            frozen = json.loads(HELDOUT_MANIFEST.read_text(encoding="utf-8"))["sha256"] if HELDOUT_MANIFEST.exists() else None
+            if data.get("run", {}).get("heldOutCorpusSha256") != frozen:
+                problems.append("the real-model run was not made on the frozen held-out corpus (its recorded hash differs from the manifest)")
+            for needed in ("model", "modelDigest", "configurationHash", "contractHash", "evaluatedAt"):
+                if not data.get("run", {}).get(needed):
+                    problems.append(f"the real-model run does not record {needed}")
         versions.add(data.get("run", {}).get("corpusVersion"))
         providers.add(data.get("run", {}).get("provider"))
         for m in data["measures"]:

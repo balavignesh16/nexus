@@ -104,11 +104,39 @@ class OptionalRealModel(unittest.TestCase):
         self.assertEqual("PASS", r["overall"], "an optional evaluation that was not configured does not block")
         self.assertIn("No real model was called", gate.markdown(r))
 
+    @staticmethod
+    def real_run(*measures, sha=None, drop=None):
+        frozen = json.loads(gate.HELDOUT_MANIFEST.read_text(encoding="utf-8"))["sha256"]
+        run = {"corpusVersion": "p6-eval-corpus-v1", "provider": "ollama-local", "model": "m", "modelDigest": "d", "configurationHash": "c", "contractHash": "h", "evaluatedAt": "2026-10-20T00:00:00Z",
+               "heldOutCorpusSha256": sha or frozen}
+        if drop:
+            run.pop(drop)
+        return {"suite": "realmodel", "run": run, "measures": list(measures), "characterisations": [], "failures": []}
+
     def test_a_present_real_model_run_is_judged_like_any_other_suite(self):
-        bad = suite_result(measure("realmodel.bad", observed=2))
+        bad = self.real_run(measure("realmodel.bad", observed=2))
         r = gate.evaluate(complete(realmodel=bad), None, [])
         self.assertEqual("BLOCKED", r["overall"])
         self.assertEqual([], r["optionalNotEvaluated"])
+
+    def test_a_real_model_run_with_passing_gated_and_failing_informational_measures_does_not_block_and_discloses_the_failures(self):
+        run = self.real_run(measure("realmodel.safe"), measure("realmodel.accuracy", kind="AT_LEAST", observed=0.1, threshold=0.7, gated=False))
+        r = gate.evaluate(complete(realmodel=run), None, [])
+        self.assertEqual("PASS", r["overall"])
+        self.assertIn("realmodel.accuracy", r["informationalFailures"])
+
+    def test_a_real_model_run_on_another_corpus_or_without_its_identity_blocks(self):
+        self.assertEqual("BLOCKED", gate.evaluate(complete(realmodel=self.real_run(measure("realmodel.safe"), sha="0" * 64)), None, [])["overall"])
+        for missing in ("model", "modelDigest", "configurationHash", "contractHash", "evaluatedAt"):
+            r = gate.evaluate(complete(realmodel=self.real_run(measure("realmodel.safe"), drop=missing)), None, [])
+            self.assertEqual("BLOCKED", r["overall"], missing)
+            self.assertTrue(any(missing in p for p in r["problems"]), missing)
+
+    def test_the_real_model_suite_is_never_compared_with_the_deterministic_baseline(self):
+        baseline = gate.baseline_from(gate.evaluate(complete(), None, []))
+        r = gate.evaluate(complete(realmodel=self.real_run(measure("realmodel.safe"))), baseline, [])
+        self.assertEqual([], r["regressions"])
+        self.assertEqual("PASS", r["overall"])
 
 
 class BaselineComparison(unittest.TestCase):
