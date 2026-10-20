@@ -20,7 +20,7 @@ import java.util.UUID;
  * <pre>
  *   list
  *   show    --draft &lt;uuid&gt;
- *   approve --draft &lt;uuid&gt; --hash &lt;definition hash from show&gt; --reason &lt;text&gt;
+ *   approve --draft &lt;uuid&gt; --hash &lt;definition hash from show&gt; --reason &lt;text&gt; [--acknowledge-conflicts yes]
  *   reject  --draft &lt;uuid&gt; --hash &lt;definition hash from show&gt; --reason &lt;text&gt;
  * </pre>
  * Approval creates an INACTIVE rule version bound to the reviewed content. It never activates it: activation stays the existing lifecycle operation, whose
@@ -83,11 +83,21 @@ public final class DraftApprovalCli {
                 }
                 default -> {
                     String decision = operation.equals("approve") ? "APPROVED" : "REJECTED";
+                    String reasonText = options.get("reason");
+                    if (decision.equals("APPROVED")) {
+                        String status = conflictStatus(c, draft);
+                        boolean clean = status.equals("CLEAR") || status.equals("NOT_APPLICABLE");
+                        if (!clean && !"yes".equals(options.get("acknowledge-conflicts"))) {
+                            err.println("refused: the conflict analysis of this draft is " + status + " (run show to read it); approve again with --acknowledge-conflicts yes to record that you read it");
+                            return 1;
+                        }
+                        if (!clean) reasonText = (reasonText + " [conflict analysis " + status + " acknowledged]");
+                    }
                     try (PreparedStatement p = c.prepareStatement("SELECT ai_draft_decide(?,?,?,?,?)")) {
                         p.setObject(1, draft);
                         p.setString(2, options.get("hash"));
                         p.setString(3, decision);
-                        p.setString(4, options.get("reason"));
+                        p.setString(4, reasonText.length() > 600 ? reasonText.substring(0, 600) : reasonText);
                         p.setString(5, account);
                         try (ResultSet r = p.executeQuery()) {
                             r.next();
@@ -103,6 +113,17 @@ public final class DraftApprovalCli {
         } catch (SQLException e) {
             err.println("refused: " + message(e.getSQLState()));
             return 1;
+        }
+    }
+
+    /** CLEAR, NOT_APPLICABLE, CONFLICTS, UNRESOLVED, or NOT_ANALYSED for a draft stored before the analysis existed. */
+    private static String conflictStatus(Connection c, UUID draft) throws SQLException {
+        try (PreparedStatement p = c.prepareStatement("SELECT validation #>> '{conflictAnalysis,status}' FROM ai_rule_drafts WHERE draft_id = ?")) {
+            p.setObject(1, draft);
+            try (ResultSet r = p.executeQuery()) {
+                String status = r.next() ? r.getString(1) : null;
+                return status == null ? "NOT_ANALYSED" : status;
+            }
         }
     }
 
@@ -126,7 +147,7 @@ public final class DraftApprovalCli {
 
     private static boolean show(Connection c, UUID draft, PrintStream out) throws SQLException {
         try (PreparedStatement p = c.prepareStatement("SELECT state, valid, definition_hash, created_at, expires_at, provider_id, model_id, config_hash, rationale, evidence_refs::text AS refs,"
-                + " validation::text AS validation, jsonb_pretty(definition) AS definition FROM ai_rule_drafts WHERE draft_id = ?")) {
+                + " validation #>> '{conflictAnalysis,status}' AS conflict, ai_conflict_stale(draft_id) AS stale, validation::text AS validation, jsonb_pretty(definition) AS definition FROM ai_rule_drafts WHERE draft_id = ?")) {
             p.setObject(1, draft);
             try (ResultSet r = p.executeQuery()) {
                 if (!r.next()) return false;
@@ -137,6 +158,8 @@ public final class DraftApprovalCli {
                 out.println("produced by  provider " + r.getString("provider_id") + ", model " + r.getString("model_id") + ", configuration " + r.getString("config_hash"));
                 out.println("evidence     " + r.getString("refs"));
                 out.println("rationale    " + r.getString("rationale"));
+                out.println("conflicts    " + (r.getString("conflict") == null ? "NOT_ANALYSED" : r.getString("conflict")) + "   (approve needs --acknowledge-conflicts yes unless CLEAR or NOT_APPLICABLE)");
+                out.println("freshness    " + (r.getBoolean("stale") ? "STALE (approval and activation will be refused; create the draft again)" : "CURRENT"));
                 out.println("validation   " + r.getString("validation"));
                 out.println("definition   " + r.getString("definition"));
                 return true;
@@ -147,6 +170,7 @@ public final class DraftApprovalCli {
     private static String message(String sqlState) {
         if (sqlState == null) return "the database refused the request";
         return switch (sqlState) {
+            case "P0A01" -> "stale conflict analysis: the rules or exclusion groups this draft was checked against have changed since it was created; create the draft again";
             case "42501" -> "this database login is not allowed to decide drafts";
             case "40001" -> "the draft changed since it was reviewed; show it again";
             case "55000" -> "the draft is not pending (already decided, expired or superseded)";
@@ -159,14 +183,14 @@ public final class DraftApprovalCli {
     private static Map<String, String> options(String[] args) {
         Map<String, String> out = new java.util.HashMap<>();
         for (int i = 1; i < args.length; i++) {
-            if (!args[i].startsWith("--") || i + 1 >= args.length || !Set.of("draft", "hash", "reason").contains(args[i].substring(2))) throw new IllegalArgumentException(args[i]);
+            if (!args[i].startsWith("--") || i + 1 >= args.length || !Set.of("draft", "hash", "reason", "acknowledge-conflicts").contains(args[i].substring(2))) throw new IllegalArgumentException(args[i]);
             if (out.put(args[i].substring(2), args[++i]) != null) throw new IllegalArgumentException(args[i]);
         }
         return out;
     }
 
     private static int usage(PrintStream err) {
-        err.println("usage: nexus-approve list | show --draft <uuid> | approve --draft <uuid> --hash <sha256> --reason <text> | reject --draft <uuid> --hash <sha256> --reason <text>");
+        err.println("usage: nexus-approve list | show --draft <uuid> | approve --draft <uuid> --hash <sha256> --reason <text> [--acknowledge-conflicts yes] | reject --draft <uuid> --hash <sha256> --reason <text>");
         return 2;
     }
 }

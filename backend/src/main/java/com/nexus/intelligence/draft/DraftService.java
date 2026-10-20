@@ -55,15 +55,17 @@ public class DraftService {
     private final DraftStore store;
     private final RuleCapabilityValidator validator;
     private final RuleVersionStore rules;
+    private final DraftConflictAnalyzer conflicts;
     private final ObjectMapper mapper;
     private final ObjectMapper strict;
     private final Clock clock;
 
-    public DraftService(ModelGateway gateway, DraftStore store, RuleCapabilityValidator validator, RuleVersionStore rules, ObjectMapper mapper, Clock clock) {
+    public DraftService(ModelGateway gateway, DraftStore store, RuleCapabilityValidator validator, RuleVersionStore rules, DraftConflictAnalyzer conflicts, ObjectMapper mapper, Clock clock) {
         this.gateway = gateway;
         this.store = store;
         this.validator = validator;
         this.rules = rules;
+        this.conflicts = conflicts;
         this.mapper = mapper;
         this.strict = mapper.copy().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         this.clock = clock;
@@ -114,8 +116,14 @@ public class DraftService {
             return new DraftOutcome.Refused(DraftRefusal.VALIDATOR_UNAVAILABLE, null);
         }
         List<Map<String, Object>> warnings = overlaps(rule);
+        // P6-043: mutual-exclusion and arbitration comparison against the persisted active rules. It only reads. When it cannot decide, the draft is not
+        // declared safe: it is stored INVALID with an explicit diagnostic.
+        Map<String, Object> conflictAnalysis = analyseConflicts(rule);
         List<Map<String, Object>> all = new ArrayList<>(policy);
         all.addAll(diagnostics);
+        if ("UNRESOLVED".equals(conflictAnalysis.get("status"))) {
+            all.add(Map.of("code", "CONFLICT_ANALYSIS_UNRESOLVED", "unresolvedCode", String.valueOf(conflictAnalysis.get("unresolvedCode")), "reason", String.valueOf(conflictAnalysis.get("reason"))));
+        }
         boolean valid = all.isEmpty();
 
         Map<String, Object> validation = new LinkedHashMap<>();
@@ -123,6 +131,7 @@ public class DraftService {
         validation.put("policyViolations", policy);
         validation.put("validatorDiagnostics", diagnostics);
         validation.put("warnings", warnings);
+        validation.put("conflictAnalysis", conflictAnalysis);
         validation.put("validatedAt", clock.instant().toString());
         validation.put("validator", "RuleCapabilityValidator+DraftPolicy");
         validation.put("promptTemplate", PROMPT_TEMPLATE);
@@ -137,6 +146,19 @@ public class DraftService {
         String hash = store.insert(draftId, valid, definition, completed.identity(), sha256(goal), rationale, refs, write(validation));
         if (valid) store.supersede(draftId);
         return new DraftOutcome.Created(draftId, valid ? "PENDING_APPROVAL" : "INVALID", valid, hash, all, warnings);
+    }
+
+    private Map<String, Object> analyseConflicts(Rule rule) {
+        try {
+            return conflicts.analyze(rule);
+        } catch (RuntimeException failed) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("status", "UNRESOLVED");
+            out.put("unresolvedCode", "ANALYSIS_FAILED");
+            out.put("reason", "the conflict analysis failed (" + failed.getClass().getSimpleName() + "). The draft is not declared free of conflicts.");
+            out.put("findings", List.of());
+            return out;
+        }
     }
 
     private record Candidate(String name, int priority, Integer cooldown, List<RuleCondition> conditions, List<RuleAction> actions, List<String> refs, String rationale) {}

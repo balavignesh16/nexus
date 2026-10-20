@@ -33,6 +33,7 @@ public class RuleExclusionGroupService {
 
     @Transactional
     public Group setMember(UUID groupId, UUID ruleId, Integer rank) {
+        ConflictStateLock.shared(jdbc);
         lock(groupId);
         if (rank == null || rank < 0) throw new RuleMutationException(400, "A member needs an explicit non-negative integer rank");
         var rule = jdbc.queryForList("SELECT lifecycle FROM rules WHERE rule_id=? FOR SHARE", ruleId);
@@ -44,6 +45,7 @@ public class RuleExclusionGroupService {
 
     @Transactional
     public Group removeMember(UUID groupId, UUID ruleId) {
+        ConflictStateLock.shared(jdbc);
         lock(groupId);
         if (jdbc.update("DELETE FROM rule_exclusion_members WHERE group_id=? AND rule_id=?", groupId, ruleId) == 0) throw new RuleMutationException(404, "The rule is not a member of this group");
         return get(groupId);
@@ -51,6 +53,7 @@ public class RuleExclusionGroupService {
 
     @Transactional
     public void delete(UUID groupId) {
+        ConflictStateLock.shared(jdbc);
         lock(groupId);
         if (jdbc.queryForObject("SELECT count(*) FROM rule_exclusion_members WHERE group_id=?", Integer.class, groupId) > 0)
             throw new RuleMutationException(409, "Remove the members first: a restriction is never dropped implicitly");

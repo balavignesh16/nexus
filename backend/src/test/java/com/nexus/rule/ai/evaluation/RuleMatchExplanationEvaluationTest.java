@@ -228,9 +228,9 @@ class RuleMatchExplanationEvaluationTest {
             failures.add(id + ": expected explanation to state the observed value 34.7");
         }
         if (id.equals("21-supported-inference")) {
-            boolean hasInference = explanation.claims().stream().anyMatch(c -> c.tier() == com.nexus.rule.ai.ClaimTier.INFERENCE);
-            if (!hasInference) {
-                failures.add(id + ": expected a surviving INFERENCE claim");
+            boolean modelInferenceShown = explanation.claims().stream().anyMatch(c -> c.text() != null && c.text().contains("exceeded the configured threshold for this condition"));
+            if (modelInferenceShown) {
+                failures.add(id + ": model-written inference text must never reach the user");
             }
         }
         if (id.equals("22-status-physical-implication")) {

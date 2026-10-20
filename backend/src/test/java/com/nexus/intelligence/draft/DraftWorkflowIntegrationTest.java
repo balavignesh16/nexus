@@ -45,6 +45,8 @@ class DraftWorkflowIntegrationTest extends TypedTriggerSupport {
 
     @MockBean ModelProvider provider;
     @Autowired DraftService drafts;
+    @org.springframework.boot.test.mock.mockito.SpyBean DraftConflictAnalyzer conflictAnalyzer;
+    @Autowired com.nexus.rule.application.RuleExclusionGroupService exclusionGroups;
     @Autowired com.nexus.intelligence.draft.store.DraftStore store;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;

@@ -138,6 +138,102 @@ class DraftEvaluationIntegrationTest extends TypedTriggerSupport {
     }
 
     // ------------------------------------------------------------------ the evaluation
+    @Autowired com.nexus.intelligence.draft.DraftConflictAnalyzer conflictAnalyzer;
+    @Autowired com.nexus.rule.application.RuleExclusionGroupService exclusionGroups;
+
+    private long revision(UUID rule) { return sql.queryForObject("SELECT row_revision FROM rules WHERE rule_id=?", Long.class, rule); }
+
+    /** [detected, detectionCases, falseAlarms, falseAlarmCases, unresolvedAsClear, unresolvedCases] */
+    private int[] mutualExclusionCases() {
+        var telemetry = List.of(new com.nexus.rule.domain.TriggerSubscription(com.nexus.rule.domain.TriggerType.ACCEPTED_TELEMETRY));
+        int detected = 0, detectionCases = 0, falseAlarms = 0, falseAlarmCases = 0, unresolvedAsClear = 0, unresolvedCases = 0;
+        java.util.function.Function<UUID, Rule> draftOn = t -> new Rule(UUID.randomUUID(), "draft", false, 5, List.of(), List.of(ledCommand(t, false)), Map.of(), 60, null, null);
+        java.util.function.BiFunction<UUID, Integer, UUID> active = (t, priority) -> typedRule(device(), "mx rule " + UUID.randomUUID(), priority, telemetry, List.of(temperatureAbove("40")), List.of(ledCommand(t, true)));
+
+        // matching group
+        UUID t1 = device();
+        UUID r1 = active.apply(t1, 1), r1b = active.apply(device(), 1);
+        var g1 = exclusionGroups.create("mx-1-" + UUID.randomUUID());
+        exclusionGroups.setMember(g1.groupId(), r1, 1);
+        exclusionGroups.setMember(g1.groupId(), r1b, 2);
+        detectionCases++;
+        if (governedBy(conflictAnalyzer.analyze(draftOn.apply(t1)), r1, g1.groupId())) detected++;
+        // several overlapping rules in two groups
+        UUID t2 = device();
+        UUID r2a = active.apply(t2, 1), r2b = active.apply(t2, 2);
+        var g2a = exclusionGroups.create("mx-2a-" + UUID.randomUUID());
+        var g2b = exclusionGroups.create("mx-2b-" + UUID.randomUUID());
+        exclusionGroups.setMember(g2a.groupId(), r2a, 1);
+        exclusionGroups.setMember(g2b.groupId(), r2b, 1);
+        Map<String, Object> two = conflictAnalyzer.analyze(draftOn.apply(t2));
+        detectionCases++;
+        if (governedBy(two, r2a, g2a.groupId())) detected++;
+        detectionCases++;
+        if (governedBy(two, r2b, g2b.groupId())) detected++;
+        // a rule edited onto the target after joining a group; the superseded target is no longer governed
+        UUID trigger3 = device(), oldTarget = device(), newTarget = device();
+        UUID r3 = typedRule(trigger3, "mx edited " + UUID.randomUUID(), 1, telemetry, List.of(temperatureAbove("40")), List.of(ledCommand(oldTarget, true)));
+        var g3 = exclusionGroups.create("mx-3-" + UUID.randomUUID());
+        exclusionGroups.setMember(g3.groupId(), r3, 1);
+        lifecycle.legacySave(new Rule(r3, "mx edited", true, 1, List.of(new com.nexus.rule.domain.RuleCondition(com.nexus.rule.domain.RuleField.DEVICE_ID, com.nexus.rule.domain.RuleOperator.EQ, trigger3.toString()), temperatureAbove("40")),
+                List.of(ledCommand(newTarget, true)), Map.of(), null, null, new com.nexus.rule.domain.RuleRuntime(telemetry, null, null)), revision(r3));
+        detectionCases++;
+        if (governedBy(conflictAnalyzer.analyze(draftOn.apply(newTarget)), r3, g3.groupId())) detected++;
+        falseAlarmCases++;
+        if (anyGoverned(conflictAnalyzer.analyze(draftOn.apply(oldTarget)))) falseAlarms++;
+        // a different target, a paused member and an archived member
+        UUID r4 = active.apply(device(), 1);
+        var g4 = exclusionGroups.create("mx-4-" + UUID.randomUUID());
+        exclusionGroups.setMember(g4.groupId(), r4, 1);
+        falseAlarmCases++;
+        if (anyGoverned(conflictAnalyzer.analyze(draftOn.apply(device())))) falseAlarms++;
+        UUID t5 = device();
+        UUID r5 = active.apply(t5, 1);
+        exclusionGroups.setMember(exclusionGroups.create("mx-5-" + UUID.randomUUID()).groupId(), r5, 1);
+        lifecycle.transition(r5, "pause", revision(r5));
+        falseAlarmCases++;
+        if (anyGoverned(conflictAnalyzer.analyze(draftOn.apply(t5)))) falseAlarms++;
+        UUID t6 = device();
+        UUID r6 = active.apply(t6, 1);
+        exclusionGroups.setMember(exclusionGroups.create("mx-6-" + UUID.randomUUID()).groupId(), r6, 1);
+        lifecycle.transition(r6, "archive", revision(r6));
+        falseAlarmCases++;
+        if (anyGoverned(conflictAnalyzer.analyze(draftOn.apply(t6)))) falseAlarms++;
+        // comparison impossible: unreadable rules, unreadable groups, an uncomputable target
+        UUID t7 = UUID.randomUUID();
+        var down = new com.nexus.intelligence.draft.DraftConflictAnalyzer.ConflictFacts() {
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.ActiveRule> activeRules() { throw new IllegalStateException("down"); }
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.Membership> groupsOf(java.util.Collection<UUID> ids) { return List.of(); }
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.InactiveRule> nonActiveRules() { return List.of(); }
+            public String stateFingerprint(java.util.Collection<String> targetKeys, UUID excludedRule) { return "fake"; }
+        };
+        unresolvedCases++;
+        if ("CLEAR".equals(new com.nexus.intelligence.draft.DraftConflictAnalyzer(down).compare(draftOn.apply(t7)).get("status"))) unresolvedAsClear++;
+        var groupsDown = new com.nexus.intelligence.draft.DraftConflictAnalyzer.ConflictFacts() {
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.ActiveRule> activeRules() { return List.of(new com.nexus.intelligence.draft.DraftConflictAnalyzer.ActiveRule(UUID.randomUUID(), UUID.randomUUID(), 1, draftOn.apply(t7))); }
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.Membership> groupsOf(java.util.Collection<UUID> ids) { throw new IllegalStateException("down"); }
+            public List<com.nexus.intelligence.draft.DraftConflictAnalyzer.InactiveRule> nonActiveRules() { return List.of(); }
+            public String stateFingerprint(java.util.Collection<String> targetKeys, UUID excludedRule) { return "fake"; }
+        };
+        unresolvedCases++;
+        if ("CLEAR".equals(new com.nexus.intelligence.draft.DraftConflictAnalyzer(groupsDown).compare(draftOn.apply(t7)).get("status"))) unresolvedAsClear++;
+        Rule uncomputable = new Rule(UUID.randomUUID(), "bad", false, 5, List.of(), List.of(new com.nexus.rule.domain.RuleAction("SEND_COMMAND", Map.of("deviceId", t7.toString(), "command", "SET_STATE"))), Map.of(), 60, null, null);
+        unresolvedCases++;
+        if ("CLEAR".equals(conflictAnalyzer.analyze(uncomputable).get("status"))) unresolvedAsClear++;
+        return new int[] {detected, detectionCases, falseAlarms, falseAlarmCases, unresolvedAsClear, unresolvedCases};
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean governedBy(Map<String, Object> analysis, UUID rule, UUID group) {
+        return ((List<Map<String, Object>>) analysis.get("findings")).stream().anyMatch(f -> "MUTUAL_EXCLUSION_TARGET_GOVERNED".equals(f.get("code")) && rule.toString().equals(f.get("ruleId"))
+                && group.toString().equals(f.get("exclusionGroupId")) && String.valueOf(f.get("reason")).contains(rule.toString()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean anyGoverned(Map<String, Object> analysis) {
+        return ((List<Map<String, Object>>) analysis.get("findings")).stream().anyMatch(f -> "MUTUAL_EXCLUSION_TARGET_GOVERNED".equals(f.get("code")));
+    }
+
 
     @Test
     void p6_073_p6_074_p6_078_p6_082_p6_084_draftsAreProposalsOnlyAndNoReplyOfAnyKindActivatesApprovesPublishesOrPassesAsValidWhenItIsNot() throws Exception {
@@ -303,7 +399,12 @@ class DraftEvaluationIntegrationTest extends TypedTriggerSupport {
         suite.add(Eval.Measure.atLeast("drafts.hash_integrity", "P6-078 version and hash integrity", "approvals whose recorded version hash equals the recomputed hash of the created version, whose draft hash equals the recomputed draft hash, with AI_DRAFT provenance and no activation", integrityOk, integrityChecks, 1.0, 3, true, null));
         suite.add(Eval.Measure.atLeast("drafts.provenance_recorded", "P6-016 provenance", "stored drafts that record provider, model, configuration hash, request digest and definition hash", provenanceOk, created, 1.0, 10, true, null));
         suite.add(Eval.Measure.atLeast("drafts.rationale_assertions_dropped", "P6-079 wording safety", "model rationales asserting approval or a fault that were dropped instead of shown to the approver", rationaleOk, rationaleChecks, 1.0, 2, true, null));
-        suite.add(Eval.Measure.notEvaluated("drafts.mutual_exclusion", "P6-043 mutual-exclusion constraints", "drafts compared with mutual-exclusion groups", "NOT_EVALUATED: exclusion-group comparison is not implemented (ledger P6-043 stays PLANNED); only overlap with an active rule's command target is reported as a warning"));
+        // P6-043: drafts compared with the persisted exclusion groups (the same analyzer DraftService runs while proposing)
+        int[] mx = mutualExclusionCases();
+        suite.add(Eval.Measure.atLeast("drafts.mutual_exclusion_detected", "P6-043 mutual-exclusion constraints", "drafts whose command target is governed by an active rule in an exclusion group that were reported with that rule and group (matching group, two overlapping groups, a group entered after an edit)", mx[0], mx[1], 1.0, 4, true,
+                "each case builds real rules and groups on PostgreSQL; the group and rule named in the finding are compared with the ones created"));
+        suite.add(Eval.Measure.zero("drafts.mutual_exclusion_false_alarms", "P6-043 mutual-exclusion constraints", "drafts reported as governed although no active group member commands the target (different target, paused member, archived member, superseded version)", mx[2], mx[3], null));
+        suite.add(Eval.Measure.zero("drafts.conflict_unresolved_declared_clear", "P6-043 unresolved is not safe", "cases where the comparison could not be made (unreadable rules, unreadable groups, uncomputable target) that were reported CLEAR", mx[4], mx[5], null));
 
         Map<String, Object> perCategory = new LinkedHashMap<>();
         byCategory.forEach((k, v) -> perCategory.put(k, Eval.mapOf("cases", v[0], "asExpected", v[1])));

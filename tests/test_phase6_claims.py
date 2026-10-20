@@ -78,7 +78,8 @@ class ClaimsAudit(unittest.TestCase):
         self.assertIn("not a guarantee against hallucination, prompt injection or missed anomalies in general", readme)
         self.assertIn("no real model was called", readme)
         self.assertRegex(readme, r"300 cases")
-        self.assertRegex(readme, r"INCOMPLETE")
+        self.assertRegex(readme, r"INCOMPLETE")   # the README still states the P6.5 history
+        self.assertRegex(readme, r"\*\*PASS\*\*")
         report = (ROOT / "architecture/phase6/evaluation/report-v1.md").read_text(encoding="utf-8")
         self.assertIn("not a guarantee", report)
 

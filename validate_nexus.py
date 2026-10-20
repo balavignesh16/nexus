@@ -85,7 +85,8 @@ def main() -> int:
     # no Spring, PostgreSQL, Mosquitto or network. The backend differential test (WireContractParityTest) runs inside the backend batches.
     checks.append(execute("wire contract validator and device SDK tests (nexus_contract, nexus_device_sdk)", [py, "-m", "unittest", "discover", "-s", "sdk/python/tests", "-t", "sdk/python"], rt.ROOT, 300, a.verbose))
     checks.append(execute("Python tooling syntax", [py, "-m", "py_compile", "start_nexus.py", "stop_nexus.py",
-                                                   "stop_script.py", "validate_nexus.py", "nexus_runtime.py", "phase4_enablement_check.py", "backend_batches.py"], rt.ROOT, 60, a.verbose))
+                                                   "stop_script.py", "validate_nexus.py", "nexus_runtime.py", "phase4_enablement_check.py", "backend_batches.py",
+                                                   "tests/p6_eval_gate.py", "tests/p6_eval_manifest.py"], rt.ROOT, 60, a.verbose))
     mvnw = str(rt.ROOT / "backend" / ("mvnw.cmd" if os.name == "nt" else "mvnw"))
     if a.full:
         # Wall-clock budget of the complete backend suite only (real PostgreSQL and Mosquitto containers, 190+ test classes). The suite measured
@@ -94,6 +95,10 @@ def main() -> int:
         # P4-FINAL: the same set of test classes, run as deterministic sequential bounded batches (backend_batches.py) because one Maven process holding every
         # container and Spring context exhausted the machine's memory. The budget covers all batches; completeness is proven from the reports.
         checks.append(backend_batches_check(mvnw, a.verbose))
+        # Phase 6 (ledger P6-086, P6-089): the deterministic evaluation suites run inside the batches above and write their result files; the gate then
+        # RECOMPUTES every verdict from those files (it does not trust them), requires every required suite, checks the corpus against its manifest and compares
+        # the deterministic measures with the committed baseline. Only PASS exits 0; the optional real-model suite is NOT_EVALUATED and is disclosed, not hidden.
+        checks.append(execute("phase 6 deterministic evaluation gate (PASS required)", [py, "tests/p6_eval_gate.py"], rt.ROOT, 120, a.verbose))
     else:
         checks.append(execute("backend compile", [mvnw, "-q", "-DskipTests", "test"], rt.ROOT / "backend", 300, a.verbose))
     npm = "npm.cmd" if os.name == "nt" else "npm"

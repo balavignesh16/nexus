@@ -148,8 +148,67 @@ public class RuleMatchExplanationService {
             return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_GROUNDING_REJECTION);
         }
 
-        log.debug("AI explanation for match {} accepted with {} validated claim(s), {} rejected",
-                matchId, groundingResult.validated().claims().size(), groundingResult.rejectedClaimCount());
-        return new ExplanationOutcome(groundingResult.validated(), REASON_AI_SUCCESS);
+        // The model's words never reach the user. What it contributed is a choice and an order of grounded evidence; every sentence shown is a
+        // platform-owned statement (see platformRendered).
+        RuleMatchExplanation rendered = platformRendered(context, groundingResult.validated());
+        if (rendered == null) {
+            log.info("AI candidate for match {} selected no grounded fact; falling back to deterministic explanation", matchId);
+            return new ExplanationOutcome(fallbackRenderer.render(context), REASON_AI_GROUNDING_REJECTION);
+        }
+        log.debug("AI explanation for match {} accepted: {} grounded claim(s) rendered from platform statements, {} rejected",
+                matchId, rendered.claims().size(), groundingResult.rejectedClaimCount());
+        return new ExplanationOutcome(rendered, REASON_AI_SUCCESS);
+    }
+
+    /**
+     * CONSTRAINED OUTPUT (P6.6). Model prose cannot be verified automatically, and a closed word list cannot make it faithful: ten of ten meaning-equivalent
+     * unsupported sentences passed the wording guard in the P6.5 evaluation. So the user never sees model-written text. A grounded FACT is replaced by the
+     * platform's own statement for the same evidence and value (the deterministic renderer's sentence, or a fixed template naming the evidence and value
+     * when the renderer has none); model INFERENCE claims and model UNKNOWN claims are dropped (the platform's own UNKNOWN statements are kept); the summary is
+     * the platform's. Nothing the model wrote becomes an authoritative fact, and it can choose neither the wording nor an unrecorded claim. Returns null when
+     * no grounded fact is left, in which case the caller uses the deterministic explanation.
+     */
+    private RuleMatchExplanation platformRendered(RuleMatchExplanationContext context, RuleMatchExplanation validated) {
+        RuleMatchExplanation deterministic = fallbackRenderer.render(context);
+        java.util.Map<String, Claim> platformFacts = new java.util.LinkedHashMap<>();
+        java.util.Set<String> platformUnknown = new java.util.HashSet<>();
+        for (Claim c : deterministic.claims()) {
+            if (c.tier() == ClaimTier.FACT && c.evidenceRef() != null) platformFacts.putIfAbsent(factKey(c.evidenceRef(), c.assertedValue()), c);
+            if (c.tier() == ClaimTier.UNKNOWN) platformUnknown.add(c.text());
+        }
+        java.util.List<Claim> out = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        int facts = 0;
+        for (Claim c : validated.claims()) {
+            Claim chosen = null;
+            if (c.tier() == ClaimTier.FACT) {
+                chosen = platformFacts.get(factKey(c.evidenceRef(), c.assertedValue()));
+                if (chosen == null) {
+                    chosen = new Claim(ClaimTier.FACT, "The recorded evidence " + c.evidenceRef() + " has the value " + c.assertedValue() + ".", c.evidenceRef(), c.assertedValue(), java.util.List.of());
+                }
+            } else if (c.tier() == ClaimTier.UNKNOWN && platformUnknown.contains(c.text())) {
+                chosen = c;
+            }
+            if (chosen != null && seen.add(chosen.tier() + "|" + chosen.text())) {
+                out.add(chosen);
+                if (chosen.tier() == ClaimTier.FACT) facts++;
+            }
+        }
+        if (facts == 0) return null;
+        return new RuleMatchExplanation(context.matchId(), deterministic.summary(), out, validated.actionNote(), validated.generatedBy());
+    }
+
+    private static String factKey(String ref, Object value) {
+        String v;
+        if (value instanceof Number n) {
+            try {
+                v = new java.math.BigDecimal(n.toString()).stripTrailingZeros().toPlainString();
+            } catch (NumberFormatException notFinite) {
+                v = String.valueOf(value);
+            }
+        } else {
+            v = String.valueOf(value);
+        }
+        return ref + "=" + v;
     }
 }

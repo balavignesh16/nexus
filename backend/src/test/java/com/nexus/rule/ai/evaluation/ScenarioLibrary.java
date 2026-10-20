@@ -424,8 +424,10 @@ public final class ScenarioLibrary {
                     List.of("evaluationEvidence.evaluatedConditions[0].actualValue",
                             "evaluationEvidence.evaluatedConditions[0].expectedValue")));
             scenarios.add(new EvaluationScenario(seed,
-                    "SEMANTIC RUBRIC CANDIDATE: INFERENCE claim supported by two valid facts, structurally accepted",
-                    ctx, true, Optional.of(raw), EvaluationScenario.ExpectedOutcome.derivedFrom(ctx, "AI")));
+                    "MODEL INFERENCE IS NOT SHOWN (P6.6): the INFERENCE claim is supported by two valid facts and is structurally accepted, but model-written "
+                            + "inference prose cannot be verified, so it is dropped; a candidate that selects no grounded FACT contributes nothing and the "
+                            + "platform's deterministic explanation is used",
+                    ctx, true, Optional.of(raw), EvaluationScenario.ExpectedOutcome.derivedFrom(ctx, "DETERMINISTIC_FALLBACK")));
         }
 
         // 22. structurally-valid action status paired with physical-implication prose (semantic rubric candidate)

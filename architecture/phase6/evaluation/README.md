@@ -1,6 +1,6 @@
 # Phase 6.5 evaluation and safety gate
 
-Status: P6.5 (2026-10-19). Corpus `p6-eval-corpus-v1`. The gate verdict at this commit is **INCOMPLETE**, not PASS (section 5). Everything below is a measurement of a finite, synthetic or scripted corpus. It is not a guarantee against hallucination, prompt injection or missed anomalies in general, and no real model was called.
+Status: P6.6 (2026-10-19; first written at P6.5). Corpus `p6-eval-corpus-v1`. The deterministic gate verdict at this commit is **PASS** (section 5); it was INCOMPLETE at P6.5. Everything below is a measurement of a finite, synthetic or scripted corpus. It is not a guarantee against hallucination, prompt injection or missed anomalies in general, and no real model was called.
 
 ## 1. What it is
 
@@ -58,7 +58,7 @@ The contract (section 10) fixes them and they were not changed: safety violation
 | drafts | rules activated, approvals recorded, rows in the command, outbox, Twin or publication tables during generation (64) | 0 |
 | drafts | approval or activation bypass attempts that worked (12) | 0 |
 | drafts | prompts containing a planted key, device name, description or serial (63) | 0 |
-| drafts | mutual-exclusion constraints | **NOT_EVALUATED** (not implemented; P6-043) |
+| drafts | mutual-exclusion: governed targets reported with rule and group (4 cases) / false alarms (4) / unresolved declared clear (3) | 4 of 4 / 0 / 0 |
 | lifecycle | citation resolution / claim support (240 refs, 145 facts) | 100% / 100% |
 | lifecycle | correct reason (24 views) | 24 of 24 |
 | lifecycle | uncertain delivery reported as success (4 views) / fabricated publication or ACK (72 checks) / asserted actuation, receipt, approval or fault (240 sentences) | 0 / 0 / 0 |
@@ -74,9 +74,9 @@ The contract (section 10) fixes them and they were not changed: safety violation
 
 Performance, measured on one machine in one run (a second run gave somewhat different figures; these are the latest) and not gated except for failures and bounds: ingestion alone p50 27 ms, p95 35 ms; with four concurrent analysts p50 43 ms, p95 71 ms; anomaly analysis p50 40 ms, p95 58 ms, p99 67 ms; recommendation p50 46 ms, p95 73 ms; pool 6 of 10 connections active at peak, none ever waiting; heap 123 MB before, 314 MB peak, 284 MB after; largest response 87,567 bytes; at most 5,000 rows read per capability; with the shared limiter at 2 concurrent requests, 24 concurrent requests were served 2 and refused 22 as 429, never as an error. Under hostile AI traffic six callers raised active pool connections from 2 to 8 of 10 (nothing waited).
 
-## 5. Gate verdict: INCOMPLETE
+## 5. Gate verdict: PASS (deterministic gate)
 
-Every gated measure passes except one that **was not evaluated**: mutual-exclusion constraints, which do not exist yet (P6-043 stays PLANNED). The gate therefore exits non-zero. It is also INCOMPLETE rather than PASS for the optional real-model evaluation only in the sense that it is reported `NOT_EVALUATED (optional)`; that does not block.
+At P6.6 the required deterministic gate returns **PASS** (110 measures: 107 PASS and 3 ungated FAIL, no NOT_EVALUATED among the required suites, nine required suites present, corpus manifest intact, no regression against the re-recorded baseline `results-baseline-v1.json`). The three ungated failures are the adverse-distribution findings below, reported and not hidden. The optional real-model evaluation remains **NOT_EVALUATED** (no real model was called) and is disclosed, not counted as a pass. This verdict is a measurement on a finite corpus, not a guarantee of anything beyond it. It was INCOMPLETE at P6.5 solely because mutual exclusion (P6-043) was not evaluated.
 
 ## 6. What the evaluation found (and what was done)
 
@@ -95,9 +95,13 @@ Findings are recorded because hiding them would make the scores meaningless.
 
 ## 8. Remaining limitations
 
-* The gate is INCOMPLETE until mutual-exclusion constraints exist and are tested (P6-043).
-* Free prose on the rule-match explanation path remains partly unverified: the guard stops listed wordings; paraphrases pass. That path is off unless the AI explanation is enabled and device evidence consented to.
+* Mutual exclusion is compared at draft creation only (P6-043); a rule or group changed afterwards is not seen until the draft is created again.
+* Free prose on the rule-match explanation path: since P6.6 the model's text is never shown (the model only selects and orders grounded evidence; the user sees platform statements). The closed word list alone still lets all 10 meaning-equivalent paraphrases through; this no longer reaches the user on that path. The draft rationale (stored for the approver) and the P6.4 narrator keep their own protections: the wording guard on the rationale, and extractive-only selection for the narrator.
 * Detector figures are for seeded synthetic series. Heavy-tailed sensors will be flagged far more often; the method is not claimed for them.
 * Latency and pool figures are one machine, one run. F1 (connection-pool exhaustion) is **not** fixed; AI callers do take connections.
 * No real model was called. The optional hook records provider, model, configuration hash and corpus version when someone configures it.
 * The authorisation model is unchanged: no HTTP route authenticates callers, and nothing here claims otherwise.
+
+## 9. P6.6 additions
+
+Mutual exclusion is now evaluated: `drafts.mutual_exclusion_detected` 4 of 4, `drafts.mutual_exclusion_false_alarms` 0 of 4, `drafts.conflict_unresolved_declared_clear` 0 of 3. The prose suite now drives the real explanation service: `prose.model_text_reaching_user` 0 of 264 trials, `prose.paraphrase_regression_reaching_user` 0 of 40 (the 10 paraphrases that passed the wording guard in P6.5, in four channels), while the wording guard alone still passes all 10 (`prose.guard_alone_paraphrase_pass`, a characterisation of the limit of a word list). Mutation evidence at P6.6: P6.6 set 31 of 31 killed, P6.5 set rerun 40 of 40 killed, P6.4 set rerun 26 of 28 killed (two obsolete). The three ungated adverse-distribution failures are unchanged.

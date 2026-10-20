@@ -94,7 +94,7 @@ Every query has a window and a row limit; telemetry reads use the existing `(dev
 
 1. Readings carry the device's own timestamps. A device whose clock is wrong cannot be told from silence or from a level change.
 2. Offline **frequency** is not available: only the current connectivity status is persisted. Verification trouble is a current-state count, not a history.
-3. Mutual-exclusion groups are not compared (P6-043 stays PLANNED); conflict recommendations use arbitration suppression records only.
+3. Conflict recommendations use arbitration suppression records only. Mutual-exclusion groups are compared for DRAFT rules (P6-043, `DraftConflictAnalyzer`), not for recommendations.
 4. False-flag figures are for synthetic Gaussian noise; heavy-tailed sensors will exceed them. No calibration was done, so no confidence is reported.
 5. A request is not load-tested beyond the single concurrent-ingestion check; F1 remains an unresolved carry-forward.
 6. The HTTP API does not authenticate callers; rate limiting is not identity.
