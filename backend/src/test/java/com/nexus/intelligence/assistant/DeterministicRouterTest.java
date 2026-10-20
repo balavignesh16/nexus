@@ -158,4 +158,45 @@ class DeterministicRouterTest {
         assertThat(types(latest)).containsExactly(LookupType.LATEST_TELEMETRY);
         assertThat(latest.calls().get(0).request().capabilityKey()).isEqualTo("temperature");
     }
+
+    @Test
+    void p6_202_p6_203_aRequestForADraftIsADraftIntentWhileCreatingApprovingOrActivatingStaysRefused() {
+        Plan hard = route("Draft a hard limit rule for Boiler 1 temperature at 100 celsius");
+        assertThat(hard.kind()).isEqualTo(Kind.DRAFT);
+        assertThat(hard.draft().hardLimit()).isEqualTo(new DeterministicRouter.HardLimitSpec("Boiler 1", "temperature", 100.0, "CELSIUS"));
+        assertThat(hard.mentionsChange()).isFalse();
+        Plan percent = route("Please suggest a hard limit rule for Server rack humidity humidity above 80 percent");
+        assertThat(percent.draft().hardLimit().unit()).isEqualTo("PERCENT");
+        Plan free = route("Suggest a rule that turns the Boiler room fan on when it is hot");
+        assertThat(free.kind()).isEqualTo(Kind.DRAFT);
+        assertThat(free.draft().hardLimit()).isNull();
+        assertThat(free.draft().goal()).contains("Boiler room fan");
+        Plan activating = route("Draft a hard limit rule for Pump 3 temperature at 90 C and activate it");
+        assertThat(activating.kind()).isEqualTo(Kind.DRAFT);
+        assertThat(activating.draft().mentionsActivation()).isTrue();
+        assertThat(activating.mentionsChange()).isTrue();
+        for (String q : List.of("Create a rule that turns off Pump 3 at 90", "Approve draft " + COMMAND, "Activate rule " + RULE, "Make a hard limit rule for Boiler 1 temperature at 100 celsius", "Add an automation for Pump 3",
+                "Enable the draft rule")) {
+            assertThat(route(q).kind()).as(q).isEqualTo(Kind.WRITE);
+        }
+        assertThat(route("What would you suggest for Boiler room fan?").kind()).as("advice is not a draft").isEqualTo(Kind.TOOLS);
+        assertThat(route("Suggest what I should check on Compressor sensor").kind()).as("suggest without a rule is advice, not a draft").isEqualTo(Kind.TOOLS);
+    }
+
+    @Test
+    void p6_202_aHardLimitRequestMissingAnythingAsksAndNeverGuessesAUnitOrADevice() {
+        Plan noUnit = route("Draft a hard limit rule for Boiler 1 temperature at 100");
+        assertThat(noUnit.kind()).isEqualTo(Kind.CLARIFY);
+        assertThat(noUnit.clarification()).contains("unit").contains("never assumed");
+        assertThat(route("Draft a hard limit rule for temperature at 100 celsius").clarification()).contains("the device");
+        assertThat(route("Draft a hard limit rule for Boiler 1 at 100 celsius").clarification()).contains("the capability");
+        assertThat(route("Draft a hard limit rule for Boiler 1 temperature celsius").clarification()).contains("the limit value");
+    }
+
+    @Test
+    void p6_201_adviceQuestionsAreReadOnlyRoutesToSuggestionsAndObservations() {
+        Plan p = route("What should I do about Compressor sensor?");
+        assertThat(p.kind()).isEqualTo(Kind.TOOLS);
+        assertThat(types(p)).containsExactlyInAnyOrder(LookupType.RECOMMENDATIONS, LookupType.ANOMALIES);
+    }
 }

@@ -56,12 +56,21 @@ public class AssistantService {
     private final ConversationStore conversations;
     private final Clock clock;
 
-    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, Clock clock) {
+    private final SuggestionService suggestions;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, SuggestionService suggestions, Clock clock) {
         this.retrieval = retrieval;
         this.trends = trends;
         this.gateway = gateway;
+        this.suggestions = suggestions;
         this.clock = clock;
         this.conversations = new ConversationStore(clock);
+    }
+
+    /** Without the drafting capability: a request for a draft is answered with a notice and nothing is stored. */
+    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, Clock clock) {
+        this(retrieval, trends, gateway, null, clock);
     }
 
     public AssistantAnswer ask(String conversationId, String question) {
@@ -78,6 +87,9 @@ public class AssistantService {
         switch (plan.kind()) {
             case WRITE -> {
                 notices.add("This assistant only reads stored facts. It cannot change, control, send, approve, activate or delete anything. Use the normal rule and approval workflow for that.");
+                String asked = q.toLowerCase(java.util.Locale.ROOT);
+                if ((asked.contains("rule") || asked.contains("automation")) && (asked.contains("create") || asked.contains("make") || asked.contains("add") || asked.contains("set up")))
+                    notices.add("I can draft a rule for review instead: say draft a rule that ..., or draft a hard limit rule for <device> <capability> at <value> <unit>.");
                 int turn = conversation.record(q, context, now);
                 return finish(conversation, turn, AssistantAnswer.Status.REFUSED_WRITE, "DETERMINISTIC", "DETERMINISTIC", List.of(), List.of(), List.of(), List.of(), notices, null);
             }
@@ -85,6 +97,17 @@ public class AssistantService {
                 notices.add("I can only answer questions about the stored state of devices, rules, commands, readings, anomalies and suggestions in this platform.");
                 int turn = conversation.record(q, context, now);
                 return finish(conversation, turn, AssistantAnswer.Status.OUT_OF_SCOPE, "DETERMINISTIC", "DETERMINISTIC", List.of(), List.of(), List.of(), List.of(), notices, null);
+            }
+            case DRAFT -> {
+                if (suggestions == null) {
+                    notices.add("Drafting rules is not available in this configuration. Nothing was stored.");
+                    int turn = conversation.record(q, context, now);
+                    return finish(conversation, turn, AssistantAnswer.Status.DRAFT_NOT_STORED, "DETERMINISTIC", "DETERMINISTIC", List.of("DRAFT"), List.of(), List.of(), List.of(), notices, null);
+                }
+                SuggestionService.Outcome drafted = suggestions.draft(plan.draft());
+                notices.addAll(drafted.notices());
+                int turn = conversation.record(q, context, now);
+                return finish(conversation, turn, drafted.status(), "DETERMINISTIC", "DETERMINISTIC", List.of(plan.draft().hardLimit() != null ? "DRAFT_HARD_LIMIT" : "DRAFT_FROM_GOAL"), drafted.statements(), List.of(), drafted.sources(), notices, null);
             }
             case CLARIFY -> {
                 String clarification = plan.clarification() + (names.isEmpty() ? "" : " Known devices include: " + String.join(", ", names.subList(0, Math.min(10, names.size()))) + ".");

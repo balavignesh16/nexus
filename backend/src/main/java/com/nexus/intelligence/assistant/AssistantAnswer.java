@@ -12,7 +12,7 @@ import java.util.List;
  */
 public record AssistantAnswer(String conversationId, int turn, Status status, String routedBy, String orderedBy, List<String> plan, List<Statement> statements, List<Statement> additional,
                               List<EvidenceItem> sources, List<String> notices, String clarification, Instant evaluatedAt) {
-    public enum Status { ANSWERED, NEEDS_CLARIFICATION, REFUSED_WRITE, OUT_OF_SCOPE, NO_EVIDENCE, UNAVAILABLE }
+    public enum Status { ANSWERED, NEEDS_CLARIFICATION, REFUSED_WRITE, OUT_OF_SCOPE, NO_EVIDENCE, UNAVAILABLE, DRAFT_STORED, DRAFT_NOT_STORED }
 
     public enum Kind { FACT, LIMIT, NOTICE }
 

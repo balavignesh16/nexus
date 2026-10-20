@@ -23,14 +23,26 @@ import java.util.regex.Pattern;
 public final class DeterministicRouter {
     private DeterministicRouter() {}
 
-    public enum Kind { TOOLS, WRITE, SCOPE, CLARIFY }
+    public enum Kind { TOOLS, WRITE, SCOPE, CLARIFY, DRAFT }
 
     /** One fixed tool call. {@code trend} is the trend analysis tool; otherwise {@code request} is one of the twelve lookups. */
     public record Call(String label, LookupRequest request, boolean trend, Integer windowHours) {}
 
-    public record Plan(Kind kind, List<Call> calls, String clarification, boolean mentionsChange) {
+    /**
+     * A request to DRAFT a rule for review (never to create, approve or activate one): either a hard-limit rule parsed from the question ({@code hardLimit}) or a free-form
+     * goal for the model-based draft workflow. {@code mentionsActivation} is true when the question also asked for approval or activation, which is refused in a notice.
+     */
+    public record DraftRequest(String goal, HardLimitSpec hardLimit, boolean mentionsActivation) {}
+
+    public record HardLimitSpec(String deviceName, String capabilityKey, double value, String unit) {}
+
+    public record Plan(Kind kind, List<Call> calls, String clarification, boolean mentionsChange, DraftRequest draft) {
         public Plan {
             calls = List.copyOf(calls);
+        }
+
+        public Plan(Kind kind, List<Call> calls, String clarification, boolean mentionsChange) {
+            this(kind, calls, clarification, mentionsChange, null);
         }
     }
 
@@ -46,7 +58,8 @@ public final class DeterministicRouter {
             "show", "list", "tell", "give", "explain", "describe", "any", "anything", "check", "look", "read", "see", "get", "find", "display", "report", "summarize", "summarise");
     private static final Set<String> WRITE_VERBS = Set.of("turn", "switch", "set", "send", "start", "stop", "open", "close", "approve", "reject", "activate", "deactivate", "delete", "remove", "change",
             "update", "create", "configure", "enable", "disable", "restart", "reboot", "execute", "toggle", "shut", "pause", "resume", "add", "edit", "modify", "raise", "lower", "increase",
-            "decrease", "reset", "clear", "publish", "run", "launch", "unlock", "lock", "drop", "install", "write", "override", "ignore");
+            "decrease", "reset", "clear", "publish", "run", "launch", "unlock", "lock", "drop", "install", "write", "override", "ignore", "make", "build", "schedule", "rename", "replace", "grant",
+            "revoke", "allow", "block", "deploy", "apply", "adjust", "tune", "calibrate", "push", "force", "bypass", "mute", "silence", "assign", "register", "deregister", "unregister", "setup");
     /** Words that may stand before the real verb of a request ("could you please restart ...", "I want you to turn off ..."). */
     private static final Set<String> POLITE = Set.of("please", "pls", "kindly", "hey", "hi", "ok", "okay", "now", "just", "then", "and", "you", "can", "could", "would", "will", "i", "want", "need", "like", "to",
             "we", "let", "lets", "us", "me", "also");
@@ -71,6 +84,8 @@ public final class DeterministicRouter {
         }
         String full = name == null ? original : original.replace(name.toLowerCase(Locale.ROOT), " device ");
         List<String> words = words(full);
+        Plan draft = draftPlan(q, original, full, words, name);
+        if (draft != null) return draft;
         boolean change = containsWriteVerb(words);
         String first = firstContentWord(words);
         boolean readStarter = first != null && READ_STARTERS.contains(first);
@@ -141,6 +156,7 @@ public final class DeterministicRouter {
         // device facts
         if (haveDevice) {
             if (anomalies) add(calls, seen, "anomalies", LookupRequest.of(LookupType.ANOMALIES).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
+            if (recommendations && hasAny(lower, "what should", "what to do", "do about", "fix", "wrong")) add(calls, seen, "anomalies", LookupRequest.of(LookupType.ANOMALIES).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
             if (recommendations) add(calls, seen, "recommendations", LookupRequest.of(LookupType.RECOMMENDATIONS).withDevice(fd).withDeviceName(fn), false, null);
             if (trend && fcap != null) add(calls, seen, "trend", LookupRequest.of(LookupType.TELEMETRY_HISTORY).withDevice(fd).withDeviceName(fn).withCapability(fcap), true, window);
             else if (history && fcap != null) add(calls, seen, "telemetry history", LookupRequest.of(LookupType.TELEMETRY_HISTORY).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
@@ -217,5 +233,47 @@ public final class DeterministicRouter {
             out.append(m.find() ? sentence.substring(0, m.start()) : sentence).append(' ');
         }
         return out.toString().strip();
+    }
+
+    private static final Pattern LIMIT_VALUE = Pattern.compile("(?:\\bat\\b|\\babove\\b|\\bover\\b|\\bexceeds?\\b|\\breaches?\\b|\\bhits?\\b|>=|>)\\s*(-?\\d+(?:\\.\\d+)?)\\s*(?:degrees?\\s*)?(°?\\s*[a-z%]{1,12})?");
+
+    /**
+     * "Draft a rule ...", "suggest a rule ...", "propose an automation ...": a request for a DRAFT, answered through the draft workflow. Words in the goal such as
+     * "turn on" describe the rule, they are not commands to the assistant; a request to approve or activate is refused in a notice. "Create a rule" is not a draft
+     * request: it is a change request and stays refused.
+     */
+    private static Plan draftPlan(String q, String original, String full, List<String> words, String deviceName) {
+        String first = firstContentWord(words);
+        if (first == null || !(first.equals("draft") || first.equals("suggest") || first.equals("propose"))) return null;
+        if (!(words.contains("rule") || words.contains("rules") || words.contains("automation") || words.contains("automations"))) return null;
+        boolean activation = Pattern.compile("\\b(activate|approve|enable|deploy|publish|apply|go live)\\b").matcher(full).find();
+        boolean hardLimit = full.contains("limit") || full.contains("cutoff") || full.contains("cut-off") || full.contains("cut off");
+        if (!hardLimit) return new Plan(Kind.DRAFT, List.of(), null, activation, new DraftRequest(q, null, activation));
+        String capability = null;
+        for (String c : CAPABILITIES) if (full.contains(c)) {
+            capability = c;
+            break;
+        }
+        Matcher m = LIMIT_VALUE.matcher(full);
+        Double value = null;
+        String unit = null;
+        if (m.find()) {
+            value = Double.parseDouble(m.group(1));
+            String u = m.group(2) == null ? "" : m.group(2).replace("°", "").strip();
+            unit = switch (u) {
+                case "c", "celsius", "degc" -> "CELSIUS";
+                case "f", "fahrenheit", "degf" -> "FAHRENHEIT";
+                case "%", "percent", "pct" -> "PERCENT";
+                case "" , "and", "or", "for", "the", "on", "then", "to", "when", "if" -> null;
+                default -> u.toUpperCase(Locale.ROOT);
+            };
+        }
+        List<String> missing = new ArrayList<>();
+        if (deviceName == null) missing.add("the device (named exactly as registered)");
+        if (capability == null) missing.add("the capability (for example temperature)");
+        if (value == null) missing.add("the limit value");
+        if (value != null && unit == null) missing.add("the unit of the limit (for example CELSIUS); a unit is never assumed");
+        if (!missing.isEmpty()) return new Plan(Kind.CLARIFY, List.of(), "To draft a hard-limit rule I still need " + String.join(", ", missing) + ". For example: draft a hard limit rule for Boiler 1 temperature at 100 CELSIUS.", activation);
+        return new Plan(Kind.DRAFT, List.of(), null, activation, new DraftRequest(q, new HardLimitSpec(deviceName, capability, value, unit), activation));
     }
 }

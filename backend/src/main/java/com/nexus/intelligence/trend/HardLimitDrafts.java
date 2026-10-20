@@ -68,6 +68,17 @@ public class HardLimitDrafts {
         return drafts.proposeTemplate(new DraftService.TemplateCandidate("hard-limit", name, 1, r.cooldownSeconds() == null ? 60 : r.cooldownSeconds(), conditions, actions, Set.of(r.deviceId()), requestKey, rationale));
     }
 
+    /** An alert-only hard-limit draft built from a capability key (no cutoff command): the key must name a known capability type. */
+    public DraftOutcome proposeAlertLimit(UUID deviceId, String capabilityKey, double limit, String unit) {
+        CapabilityType type;
+        try {
+            type = CapabilityType.valueOf(capabilityKey == null ? "" : capabilityKey.toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new IllegalArgumentException("the capability " + capabilityKey + " is not a known capability type");
+        }
+        return propose(new Request(deviceId, capabilityKey, type, limit, unit, HardLimit.Comparison.GREATER_OR_EQUAL, null, null, null, 60));
+    }
+
     static List<String> problems(Request r) {
         List<String> out = new ArrayList<>();
         if (r == null) return List.of("a request is required");

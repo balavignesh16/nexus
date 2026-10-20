@@ -29,6 +29,15 @@ The answer lists `statements` (and `additional` ones), each a FACT (cites eviden
 
 Device state and connectivity, Twin reported and desired state, latest and historical telemetry, trends (the 98, 99, 100 example is described as increasing, not as dangerous), active rules and why a rule matched or did not, commands and their delivery evidence (publication, acknowledgement, timeout and verification kept apart), anomaly observations and suggestions. A follow-up such as "is it online?" uses the device the conversation established and looks the facts up again.
 
+## Drafting a rule from chat (P6.11)
+
+Ask for a draft with the words draft, suggest or propose followed by a rule or automation:
+
+* `Draft a hard limit rule for Boiler 1 temperature at 100 celsius` needs no model. It stores an alert-only draft (limit compared with greater-or-equal) through the existing draft workflow. The device, the capability, the value and the unit must all be in the question; a unit is never assumed.
+* `Draft a rule that turns the fan on when it is hot` needs a configured, consented model (see the local model guide); without one nothing is stored and the answer says why.
+
+The answer reports the STORED draft in platform-written sentences: its state (PENDING_APPROVAL or INVALID), the validation codes, the conflict analysis against active rules and exclusion groups with its findings, any warnings, and what happens next. A draft is not a rule. This assistant cannot approve, reject, activate, resume or send anything; the approval is the local command described in the operator guide and activation is a separate step through the normal lifecycle. Requests to create, make, add, approve, activate or enable are refused, and the refusal points to the draft wording.
+
 ## What it will not do
 
 * It never changes, controls, sends, approves, activates or deletes anything: those requests are refused, and a read question that also contains such a request is answered as a read with a notice. No code path in the assistant can reach a command, a rule change, an approval or a draft (an architecture test enforces the imports).

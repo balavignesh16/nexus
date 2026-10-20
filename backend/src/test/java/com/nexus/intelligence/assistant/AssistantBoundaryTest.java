@@ -69,12 +69,31 @@ class AssistantBoundaryTest {
         List<String> found = new ArrayList<>();
         for (Path p : sources) {
             String text = Files.readString(p);
-            for (String v : violations(text)) found.add(p + " imports " + v);
+            boolean drafting = p.getFileName().toString().equals("SuggestionService.java");   // the one allowed place: it only CREATES drafts (see the next test)
+            for (String v : violations(text)) {
+                if (drafting && ((v.contains("intelligence") && v.contains("draft")) || v.contains("HardLimitDrafts"))) continue;
+                found.add(p + " imports " + v);
+            }
             String code = text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//.*", "");
             if (WRITE_CALL.matcher(code).find()) found.add(p + " calls a write method");
             if (WRITE_MAPPING.matcher(code).find()) found.add(p + " maps a write route");
         }
         assertThat(found).isEmpty();
+    }
+
+    @Test
+    void p6_203_theOneFileThatTouchesTheDraftWorkflowOnlyCreatesDraftsAndCanNeitherApproveNorActivateNorSendAnything() throws IOException {
+        String text = Files.readString(DIR.resolve("SuggestionService.java"));
+        String code = text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//.*", "");
+        // the only calls into the workflow
+        assertThat(code).contains("drafts.propose(").contains("hardLimits.proposeAlertLimit(").contains("store.find(");
+        for (String forbidden : List.of(".approve(", ".reject(", ".decide(", "ai_draft_decide", "DraftApprovalCli", "RuleLifecycleService", ".transition(", ".legacySave(", ".activate(", ".supersede(", ".insert(", "CommandAcceptanceService", "JdbcTemplate"))
+            assertThat(code).as(forbidden).doesNotContain(forbidden);
+        // its imports are the draft workflow's creation side, the retrieval layer and the evidence types, nothing else of the platform
+        List<String> imports = Pattern.compile("^import\\s+(?:static\\s+)?([\\w.]+);", Pattern.MULTILINE).matcher(text).results().map(m -> m.group(1)).toList();
+        assertThat(imports).allMatch(i -> i.startsWith("java.") || i.startsWith("com.fasterxml.jackson.") || i.startsWith("org.springframework.boot.autoconfigure.condition.") || i.equals("org.springframework.stereotype.Service")
+                || i.startsWith("com.nexus.intelligence.assistant.") || i.startsWith("com.nexus.intelligence.retrieval.") || i.startsWith("com.nexus.intelligence.evidence.") || i.equals("com.nexus.intelligence.model.RefusalCode")
+                || i.equals("com.nexus.intelligence.draft.DraftOutcome") || i.equals("com.nexus.intelligence.draft.DraftService") || i.equals("com.nexus.intelligence.draft.store.DraftStore") || i.equals("com.nexus.intelligence.trend.HardLimitDrafts"), imports.toString());
     }
 
     @Test
