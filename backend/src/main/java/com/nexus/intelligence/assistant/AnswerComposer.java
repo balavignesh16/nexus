@@ -25,7 +25,14 @@ public final class AnswerComposer {
 
     public record Composed(List<Statement> statements, List<EvidenceItem> sources, int dropped) {}
 
+    /** An energy report with the wording options of the question that asked for it. */
+    public record EnergyView(com.nexus.intelligence.energy.EnergyService.Report report, boolean advice, String scopeName) {}
+
     public static Composed compose(List<EvidenceResult> results, TrendResult trend, String trendLabel) {
+        return compose(results, trend, trendLabel, List.of());
+    }
+
+    public static Composed compose(List<EvidenceResult> results, TrendResult trend, String trendLabel, List<EnergyView> energy) {
         List<Statement> out = new ArrayList<>();
         List<EvidenceItem> sources = new ArrayList<>();
         Set<String> sourceRefs = new HashSet<>();
@@ -43,6 +50,7 @@ public final class AnswerComposer {
             if (r.status() != EvidenceStatus.OBSERVED && r.status() != EvidenceStatus.DERIVED) add.notice(statusSentence(r));
             for (String limit : r.limits()) if (limitTexts.add(limit)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, limit, List.of()));
         }
+        for (EnergyView view : energy) describeEnergy(view, out, sources, sourceRefs, next, limitTexts);
         if (trend != null) {
             sources.add(EvidenceItem.present("trend:" + trendLabel, "trend direction of " + trendLabel, trend.direction().name()));
             describeTrend(trend, trendLabel, out, next, limitTexts);
@@ -263,5 +271,71 @@ public final class AnswerComposer {
         out.add(new Statement("s" + next[0]++, Kind.FACT, s.toString().strip(), List.of(ref)));
         for (String n : t.notes()) if (limitTexts.add(n)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, n, List.of()));
         for (String l : t.limits()) if (limitTexts.add(l)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, l, List.of()));
+    }
+
+    private static String number(double d) {
+        return java.math.BigDecimal.valueOf(d).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+    }
+
+    private static String percent(double share) {
+        return java.math.BigDecimal.valueOf(share * 100).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString() + "%";
+    }
+
+    private static void describeEnergy(EnergyView view, List<Statement> out, List<EvidenceItem> sources, Set<String> sourceRefs, int[] next, Set<String> limitTexts) {
+        var report = view.report();
+        String scope = view.scopeName() == null ? "the devices" : "\"" + view.scopeName() + "\"";
+        long hours = java.time.Duration.between(report.windowFrom(), report.windowTo()).toHours();
+        if (!report.deviceFound()) {
+            out.add(new Statement("s" + next[0]++, Kind.NOTICE, "No device was found for this energy question: " + clean(report.unavailableReason()), List.of()));
+            return;
+        }
+        if (!report.available()) {
+            out.add(new Statement("s" + next[0]++, Kind.NOTICE, "No power or energy readings are stored for " + scope + " in the last " + hours + " hours, so energy use cannot be reported. No figure is estimated from ratings or averages.", List.of()));
+            String need = "Reporting energy needs a power or current sensor whose readings are stored (" + clean(report.unavailableReason()) + ")";
+            if (limitTexts.add(need)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, need, List.of()));
+            return;
+        }
+        boolean simulated = false;
+        for (var row : report.devices()) {
+            var r = row.result();
+            String ref = "energy:" + row.deviceId() + "/" + r.capabilityKey();
+            String label = "\"" + row.name() + "\" (" + row.provenance() + ")";
+            simulated |= "SIMULATED".equals(row.provenance());
+            if (r.status() != com.nexus.intelligence.energy.EnergyResult.Status.OK) {
+                out.add(new Statement("s" + next[0]++, Kind.NOTICE, "No energy figure for " + label + ": " + clean(r.reason()), List.of()));
+                continue;
+            }
+            if (sourceRefs.add(ref)) sources.add(EvidenceItem.present(ref, "energy over the window (Wh)", Math.round(r.energyWh() * 100) / 100.0));
+            String how = r.kind() == com.nexus.intelligence.energy.EnergyResult.Kind.METERED_COUNTER ? "metered by the device's own energy counter" : "an ESTIMATE integrated from its power readings";
+            out.add(new Statement("s" + next[0]++, Kind.FACT, label + ": " + number(r.energyWh()) + " Wh (" + number(r.energyWh() / 1000.0) + " kWh) between " + r.firstSampleAt() + " and " + r.lastSampleAt() + ", " + how
+                    + "; average power " + (r.averagePowerW() == null ? "not available" : number(r.averagePowerW()) + " W") + (r.peakPowerW() == null ? "" : ", peak " + number(r.peakPowerW()) + " W") + "; readings cover " + percent(r.coverage()) + " of that span.", List.of(ref)));
+            for (String n : r.notes()) if (limitTexts.add(n)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, n, List.of()));
+        }
+        for (var t : report.totals()) {
+            String ref = "energy:total/" + t.provenance() + "/" + t.kind();
+            if (sourceRefs.add(ref)) sources.add(EvidenceItem.present(ref, "total energy of " + t.provenance() + " " + t.kind() + " (Wh)", Math.round(t.energyWh() * 100) / 100.0));
+            out.add(new Statement("s" + next[0]++, Kind.FACT, "Across " + t.devices() + " " + t.provenance() + " device(s), the " + (t.kind() == com.nexus.intelligence.energy.EnergyResult.Kind.METERED_COUNTER ? "metered" : "estimated")
+                    + " energy was " + number(t.energyWh()) + " Wh. Simulated, metered and estimated figures are never added together.", List.of(ref)));
+        }
+        if (report.scope() == null && report.topConsumers().size() > 1) {
+            var top = report.topConsumers().get(0);
+            if (top.shareOfGroup() != null)
+                out.add(new Statement("s" + next[0]++, Kind.FACT, "\"" + top.name() + "\" accounts for " + percent(top.shareOfGroup()) + " of the " + top.provenance() + " " + (top.result().kind() == com.nexus.intelligence.energy.EnergyResult.Kind.METERED_COUNTER ? "metered" : "estimated")
+                        + " energy in the window.", List.of("energy:" + top.deviceId() + "/" + top.result().capabilityKey())));
+        }
+        if (simulated) {
+            String s = "Figures labelled SIMULATED come from simulated devices and are not real consumption.";
+            if (limitTexts.add(s)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, s, List.of()));
+        }
+        if (report.candidatesTruncated()) out.add(new Statement("s" + next[0]++, Kind.NOTICE, String.join(" ", report.notes()), List.of()));
+        String base = "No baseline of normal usage is stored, so the platform cannot say whether this usage is high; it can only show where the energy went.";
+        if (limitTexts.add(base)) out.add(new Statement("s" + next[0]++, Kind.LIMIT, base, List.of()));
+        if (view.advice() && !report.topConsumers().isEmpty()) {
+            var top = report.topConsumers().get(0);
+            String ref = "energy:" + top.deviceId() + "/" + top.result().capabilityKey();
+            String low = top.result().coverage() < 0.8 ? " Its readings cover only " + percent(top.result().coverage()) + " of the span, so its figure may be an underestimate." : "";
+            out.add(new Statement("s" + next[0]++, Kind.FACT, "Suggestion for a person to review (advice only, nothing was changed): \"" + top.name() + "\" has the largest " + top.provenance() + " energy in the window (" + number(top.result().energyWh())
+                    + " Wh); checking whether its load is needed is the first place the stored data points to." + low + " The platform cannot tell whether the load was needed and does not estimate savings.", List.of(ref)));
+        }
     }
 }

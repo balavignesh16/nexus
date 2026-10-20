@@ -26,7 +26,11 @@ public final class DeterministicRouter {
     public enum Kind { TOOLS, WRITE, SCOPE, CLARIFY, DRAFT }
 
     /** One fixed tool call. {@code trend} is the trend analysis tool; otherwise {@code request} is one of the twelve lookups. */
-    public record Call(String label, LookupRequest request, boolean trend, Integer windowHours) {}
+    public record Call(String label, LookupRequest request, boolean trend, Integer windowHours, boolean energy, boolean advice) {
+        public Call(String label, LookupRequest request, boolean trend, Integer windowHours) {
+            this(label, request, trend, windowHours, false, false);
+        }
+    }
 
     /**
      * A request to DRAFT a rule for review (never to create, approve or activate one): either a hard-limit rule parsed from the question ({@code hardLimit}) or a free-form
@@ -59,7 +63,7 @@ public final class DeterministicRouter {
     private static final Set<String> WRITE_VERBS = Set.of("turn", "switch", "set", "send", "start", "stop", "open", "close", "approve", "reject", "activate", "deactivate", "delete", "remove", "change",
             "update", "create", "configure", "enable", "disable", "restart", "reboot", "execute", "toggle", "shut", "pause", "resume", "add", "edit", "modify", "raise", "lower", "increase",
             "decrease", "reset", "clear", "publish", "run", "launch", "unlock", "lock", "drop", "install", "write", "override", "ignore", "make", "build", "schedule", "rename", "replace", "grant",
-            "revoke", "allow", "block", "deploy", "apply", "adjust", "tune", "calibrate", "push", "force", "bypass", "mute", "silence", "assign", "register", "deregister", "unregister", "setup");
+            "revoke", "allow", "block", "deploy", "apply", "adjust", "tune", "calibrate", "push", "force", "bypass", "mute", "silence", "assign", "register", "deregister", "unregister", "setup", "reduce", "cut", "lessen", "minimise", "minimize");
     /** Words that may stand before the real verb of a request ("could you please restart ...", "I want you to turn off ..."). */
     private static final Set<String> POLITE = Set.of("please", "pls", "kindly", "hey", "hi", "ok", "okay", "now", "just", "then", "and", "you", "can", "could", "would", "will", "i", "want", "need", "like", "to",
             "we", "let", "lets", "us", "me", "also");
@@ -138,6 +142,8 @@ public final class DeterministicRouter {
         boolean anomalies = hasAny(lower, "anomal", "unusual", "odd", "strange", "abnormal", "weird", "wrong with", "flat", "spike", "outlier", "glitch", "suspicious");
         boolean recommendations = hasAny(lower, "suggest", "recommend", "advice", "advise", "what should", "what to do", "should i", "improve", "efficient", "reduce usage", "look at");
 
+        boolean energy = hasAny(lower, "energy", "electricity", "kwh", "kilowatt", "watt hour", "consumption", "consume", "consumed", "consuming", "power usage", "power use", "power draw", "how much power", "usage");
+        boolean saving = hasAny(lower, "reduce", "lower", "save", "saving", "efficien", "waste", "cut down", "optimi", "improve", "cheaper", "less");
         List<Call> calls = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         UUID fd = deviceId;
@@ -146,6 +152,11 @@ public final class DeterministicRouter {
         // the earlier capability is inherited only by a question that asks about readings; "is it online?" does not ask about temperature
         if (capability == null && pronoun && (latest || trend || history)) capability = context.capabilityKey();
         String fcap = capability;
+        // energy and usage: a device (resolved by a lookup that is not shown) or all devices
+        if (energy) {
+            LookupRequest resolve = haveDevice ? LookupRequest.of(LookupType.DEVICE_STATE).withDevice(fd).withDeviceName(fn) : null;
+            if (seen.add("energy")) calls.add(new Call("energy", resolve, false, window, true, saving));
+        }
         // rules and matches
         if (matches && (haveDevice || fr != null)) add(calls, seen, "rule matches", LookupRequest.of(LookupType.RULE_MATCHES).withRule(fr).withDevice(fd).withDeviceName(fn), false, window);
         if (rules && (!matches || hasAny(lower, "active", "which rules", "list", "all rules"))) add(calls, seen, "active rules", LookupRequest.of(LookupType.ACTIVE_RULES).withDevice(fd).withDeviceName(fn), false, null);
@@ -157,9 +168,9 @@ public final class DeterministicRouter {
         if (haveDevice) {
             if (anomalies) add(calls, seen, "anomalies", LookupRequest.of(LookupType.ANOMALIES).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
             if (recommendations && hasAny(lower, "what should", "what to do", "do about", "fix", "wrong")) add(calls, seen, "anomalies", LookupRequest.of(LookupType.ANOMALIES).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
-            if (recommendations) add(calls, seen, "recommendations", LookupRequest.of(LookupType.RECOMMENDATIONS).withDevice(fd).withDeviceName(fn), false, null);
+            if (recommendations && !energy) add(calls, seen, "recommendations", LookupRequest.of(LookupType.RECOMMENDATIONS).withDevice(fd).withDeviceName(fn), false, null);
             if (trend && fcap != null) add(calls, seen, "trend", LookupRequest.of(LookupType.TELEMETRY_HISTORY).withDevice(fd).withDeviceName(fn).withCapability(fcap), true, window);
-            else if (history && fcap != null) add(calls, seen, "telemetry history", LookupRequest.of(LookupType.TELEMETRY_HISTORY).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
+            else if (history && fcap != null && !energy) add(calls, seen, "telemetry history", LookupRequest.of(LookupType.TELEMETRY_HISTORY).withDevice(fd).withDeviceName(fn).withCapability(fcap).withLookbackHours(window), false, window);
             else if ((latest || (fcap != null && !trend && !history)) && !twin && !commands && !delivery && !verification && !anomalies && !recommendations && !rules) add(calls, seen, "latest telemetry", LookupRequest.of(LookupType.LATEST_TELEMETRY).withDevice(fd).withDeviceName(fn).withCapability(fcap), false, null);
             if (twin) add(calls, seen, "twin state", LookupRequest.of(LookupType.TWIN_STATE).withDevice(fd).withDeviceName(fn), false, null);
             if (online) add(calls, seen, "connectivity", LookupRequest.of(LookupType.CONNECTIVITY).withDevice(fd).withDeviceName(fn), false, null);

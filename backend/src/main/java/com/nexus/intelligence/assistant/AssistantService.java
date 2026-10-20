@@ -2,6 +2,7 @@ package com.nexus.intelligence.assistant;
 
 import com.nexus.intelligence.assistant.AssistantAnswer.Kind;
 import com.nexus.intelligence.assistant.AssistantAnswer.Statement;
+import com.nexus.intelligence.energy.EnergyService;
 import com.nexus.intelligence.evidence.EvidenceItem;
 import com.nexus.intelligence.model.DataBlock;
 import com.nexus.intelligence.model.ModelGateway;
@@ -57,15 +58,22 @@ public class AssistantService {
     private final Clock clock;
 
     private final SuggestionService suggestions;
+    private final EnergyService energy;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, SuggestionService suggestions, Clock clock) {
+    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, SuggestionService suggestions, EnergyService energy, Clock clock) {
         this.retrieval = retrieval;
         this.trends = trends;
         this.gateway = gateway;
         this.suggestions = suggestions;
+        this.energy = energy;
         this.clock = clock;
         this.conversations = new ConversationStore(clock);
+    }
+
+    /** Without the energy analysis: an energy question is answered with a notice. */
+    public AssistantService(EvidenceRetrievalService retrieval, TrendService trends, ModelGateway gateway, SuggestionService suggestions, Clock clock) {
+        this(retrieval, trends, gateway, suggestions, null, clock);
     }
 
     /** Without the drafting capability: a request for a draft is answered with a notice and nothing is stored. */
@@ -121,6 +129,7 @@ public class AssistantService {
         List<LookupRequest> requests = new ArrayList<>();
         List<DeterministicRouter.Call> lookupCalls = new ArrayList<>();
         for (DeterministicRouter.Call c : plan.calls()) {
+            if (c.request() == null) continue;      // a fleet-wide energy question needs no lookup
             requests.add(c.request());
             lookupCalls.add(c);
         }
@@ -138,7 +147,31 @@ public class AssistantService {
                 break;
             }
         }
-        AnswerComposer.Composed composed = AnswerComposer.compose(trendOnly(lookupCalls, results, trend), trend, trendLabel);
+        List<AnswerComposer.EnergyView> energyViews = new ArrayList<>();
+        Set<Integer> hidden = new LinkedHashSet<>();
+        for (DeterministicRouter.Call call : plan.calls()) {
+            if (!call.energy()) continue;
+            if (energy == null) {
+                notices.add("The energy analysis is not available in this configuration.");
+                continue;
+            }
+            Optional<UUID> energyDevice = Optional.empty();
+            String scopeName = null;
+            boolean resolved = true;
+            if (call.request() != null) {
+                int index = lookupCalls.indexOf(call);
+                EvidenceResult r = index >= 0 && index < results.size() ? results.get(index) : null;
+                if (r != null && r.status() == EvidenceStatus.OBSERVED && r.entity() != null && r.entity().id() != null) {
+                    energyDevice = Optional.of(UUID.fromString(r.entity().id()));
+                    scopeName = r.entity().name();
+                    hidden.add(index);
+                } else {
+                    resolved = false;      // the device could not be resolved: the lookup's own statements explain why
+                }
+            }
+            if (resolved) energyViews.add(new AnswerComposer.EnergyView(energy.analyse(energyDevice, Optional.ofNullable(call.windowHours())), call.advice(), scopeName));
+        }
+        AnswerComposer.Composed composed = AnswerComposer.compose(visibleResults(lookupCalls, results, trend, hidden), trend, trendLabel, energyViews);
         if (composed.dropped() > 0) notices.add(composed.dropped() + " statement(s) were left out because their sources could not be resolved.");
         List<Statement> statements = new ArrayList<>(composed.statements());
         if (statements.size() > MAX_STATEMENTS) {
@@ -190,17 +223,16 @@ public class AssistantService {
             }
         }
         List<String> planLabels = new ArrayList<>();
-        for (DeterministicRouter.Call c : lookupCalls) planLabels.add(c.trend() ? "TREND" : c.request().type().name());
+        for (DeterministicRouter.Call c : plan.calls()) planLabels.add(c.energy() ? "ENERGY" : c.trend() ? "TREND" : c.request().type().name());
         return finish(conversation, turn, status, "DETERMINISTIC", orderedBy, planLabels, primary, additional, sources, notices, null);
     }
 
     /** The lookup results; the trend call's history lookup stays in the list because its readings are sources of the trend statement. */
-    private static List<EvidenceResult> trendOnly(List<DeterministicRouter.Call> calls, List<EvidenceResult> results, TrendResult trend) {
-        if (trend == null) return results;
+    private static List<EvidenceResult> visibleResults(List<DeterministicRouter.Call> calls, List<EvidenceResult> results, TrendResult trend, Set<Integer> hidden) {
         List<EvidenceResult> out = new ArrayList<>();
         for (int i = 0; i < results.size(); i++) {
-            boolean isTrend = i < calls.size() && calls.get(i).trend();
-            if (!isTrend) out.add(results.get(i));
+            boolean isTrend = trend != null && i < calls.size() && calls.get(i).trend();
+            if (!isTrend && !hidden.contains(i)) out.add(results.get(i));
         }
         return out;
     }
