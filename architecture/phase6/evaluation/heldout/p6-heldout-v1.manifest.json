@@ -1,0 +1,9 @@
+{
+  "corpus": "p6-heldout-v1",
+  "file": "p6-heldout-v1.json",
+  "sha256": "42a345bcd433a5004a034c54e5a2337207eb7790248c388bef5bc91a063a8353",
+  "routingCases": 30,
+  "selectionCases": 24,
+  "frozenBeforeAnyRealModelCall": true,
+  "rule": "A change to the corpus changes the hash; the real-model evaluation refuses to run against a corpus whose hash differs from this manifest. A new corpus gets a new version, never an edit."
+}
