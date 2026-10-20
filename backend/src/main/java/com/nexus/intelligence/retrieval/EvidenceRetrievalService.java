@@ -114,6 +114,24 @@ public class EvidenceRetrievalService {
         return new QuestionEvidence(results, notices, limited);
     }
 
+    /**
+     * The distinct device names the platform knows, at most {@code limit} (and at most 500), for recognising a device named in a question. A fixed, read-only,
+     * bounded statement like the lookups; it returns names only, clipped, and nothing else about a device. An unreadable database gives an empty list.
+     */
+    public List<String> deviceNames(int limit) {
+        int bound = Math.max(1, Math.min(limit, 500));
+        try {
+            List<String>[] holder = new List[1];
+            readOnly.executeWithoutResult(status -> {
+                jdbc.queryForObject("SELECT set_config('statement_timeout', ?, true)", String.class, Integer.toString(settings.statementTimeoutMillis()));
+                holder[0] = jdbc.query("SELECT DISTINCT name FROM devices WHERE name IS NOT NULL AND length(name) >= 3 ORDER BY name LIMIT ?", (rs, n) -> clip(rs.getString(1)), bound);
+            });
+            return holder[0] == null ? List.of() : List.copyOf(holder[0]);
+        } catch (DataAccessException | IllegalStateException | org.springframework.transaction.TransactionException unreadable) {
+            return List.of();
+        }
+    }
+
     /** One lookup. Never throws for a missing entity, a limit or a read failure: those are statuses. */
     public EvidenceResult lookup(LookupRequest request) {
         Instant now = clock.instant();
