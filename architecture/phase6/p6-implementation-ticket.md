@@ -54,3 +54,17 @@ Every scenario has a layer and a pass criterion in the ledger. A slice is comple
 * Defects found while closing the work (recorded, not hidden): a shared-to-exclusive lock upgrade inside the activation guard deadlocked a concurrent-activation test (fixed by ordering the writer trigger after the guard); a check-to-commit window for the stale-analysis check (closed with the lock above); the freshness check had to be VOLATILE to read a snapshot taken after the lock; the P6.5 mutant D06 patched a function V43 re-issues (retargeted).
 * Ledger: 95 of 95 COVERED, recalculated from unique IDs. The deterministic evaluation gate is PASS. Open items remain limits, listed in p6-handoff.md.
 * Not done: no merge, push or tag; no Phase 7 work; no real model call.
+
+## Extension (approved 2026-10-20): P6.7 to P6.12
+
+One local commit per milestone on `feature/p6-intelligence`, starting from 35b345b. No full gate between milestones.
+
+| Milestone | Deliverable | Test focus |
+|---|---|---|
+| P6.7 | `com.nexus.intelligence.retrieval`: 12 typed lookups, evidence contract, limits, disabled-by-default assistant settings, architecture tests | Real persisted evidence (PostgreSQL) for lookups, missing, stale, ambiguous, skew, deletion, pagination, limits, zero writes; dependency tests |
+| P6.8 | `com.nexus.intelligence.trend`: deterministic trend and rate analysis, hard-limit draft template | Pure unit tests (98/99/100, noise, timestamps, boundaries, quantisation), one draft-validation integration test, mutation checks |
+| P6.9 | Local Ollama provider behind `ModelGateway`, consent handling, held-out evaluation | Unit and gateway tests; real-model evaluation only if a model is available |
+| P6.10 | Assistant: fixed-tool routing, citation grounding, multi-turn, offline fallback | Unit tests with a fake model; one integration test |
+| P6.11 | Chat suggestions and AI draft creation through the existing workflow | Boundary tests: no approval, no activation, no command |
+| P6.12 | Energy and usage analysis | Pure calculation tests plus one persistence test |
+| Final | Extension ledger, Phase 3 OFF/ON, mutation campaign, evaluation gates, fast gate, one full gate, forensic review | As in the owner's validation decision |
