@@ -47,8 +47,8 @@ import java.util.regex.Pattern;
  * values), is bounded in rows, lookback window, evidence size, concurrency and total time, and reports in plain words what it cannot establish.
  *
  * <p>Time authority: telemetry is stamped with the DEVICE event time, twin receipt and command history with the backend; freshness is always judged on the backend
- * clock, and a device timestamp later than the allowed skew is FUTURE_DATED, never "fresh". Free text stored by devices or callers (command messages, ACK messages) is
- * returned truncated and flagged untrusted. The service exists only when {@code nexus.assistant.enabled=true}; NEXUS has no user authentication, so enabling it
+ * clock, and a device timestamp later than the allowed skew is FUTURE_DATED, never "fresh". Free text stored by devices or callers (rule match, command and ACK messages)
+ * is never selected: no AI SQL reads message or payload text, so it cannot reach a prompt or an explanation. The service exists only when {@code nexus.assistant.enabled=true}; NEXUS has no user authentication, so enabling it
  * exposes these facts to everyone who can reach the endpoint (a local or private environment only).
  */
 @Service
@@ -458,7 +458,7 @@ public class EvidenceRetrievalService {
         int hours = lookback(r, notices);
         int limit = rows(r);
         Instant from = now.minus(Duration.ofHours(hours));
-        List<Map<String, Object>> rows = new ArrayList<>(jdbc.query("SELECT match_id, rule_id, rule_version_id, rule_revision, matched_at, trigger_type, message FROM rule_matches"
+        List<Map<String, Object>> rows = new ArrayList<>(jdbc.query("SELECT match_id, rule_id, rule_version_id, rule_revision, matched_at, trigger_type FROM rule_matches"
                         + " WHERE matched_at >= ? AND (?::uuid IS NULL OR rule_id = ?::uuid) AND (?::uuid IS NULL OR match_id IN (SELECT match_id FROM action_history WHERE device_id = ?::uuid))"
                         + " ORDER BY matched_at DESC, match_id DESC LIMIT ?", (rs, n) -> {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -468,7 +468,6 @@ public class EvidenceRetrievalService {
             m.put("ruleRevision", rs.getObject("rule_revision"));
             m.put("matchedAt", String.valueOf(instant(rs, "matched_at")));
             m.put("triggerType", rs.getString("trigger_type"));
-            m.put("message", untrusted(rs.getString("message")));
             return m;
         }, Timestamp.from(from), r.ruleId(), r.ruleId(), device, device, limit + 1));
         boolean more = rows.size() > limit;
@@ -514,7 +513,7 @@ public class EvidenceRetrievalService {
         int hours = lookback(r, notices);
         int limit = rows(r);
         Instant from = now.minus(Duration.ofHours(hours));
-        List<Map<String, Object>> rows = new ArrayList<>(jdbc.query("SELECT a.request_id, a.device_id, a.action_type, a.status, a.parameters::text AS parameters, a.timestamp, a.message, o.state AS outbox_state, o.attempt_count"
+        List<Map<String, Object>> rows = new ArrayList<>(jdbc.query("SELECT a.request_id, a.device_id, a.action_type, a.status, a.parameters::text AS parameters, a.timestamp, o.state AS outbox_state, o.attempt_count"
                         + " FROM action_history a LEFT JOIN command_outbox o ON o.command_id = a.request_id"
                         + " WHERE a.action_type = 'SEND_COMMAND' AND (?::uuid IS NULL OR a.request_id = ?::uuid) AND (?::uuid IS NULL OR a.device_id = ?::uuid) AND (?::uuid IS NOT NULL OR a.timestamp >= ?)"
                         + " ORDER BY a.timestamp DESC, a.request_id DESC LIMIT ?", (rs, n) -> {
@@ -526,7 +525,6 @@ public class EvidenceRetrievalService {
             m.put("command", commandSummary(rs.getString("parameters")));
             m.put("outboxState", rs.getString("outbox_state"));
             m.put("attempts", rs.getObject("attempt_count"));
-            m.put("message", untrusted(rs.getString("message")));
             return m;
         }, r.commandId(), r.commandId(), device, device, r.commandId(), Timestamp.from(from), limit + 1));
         boolean more = rows.size() > limit;
@@ -552,7 +550,7 @@ public class EvidenceRetrievalService {
         Entity entity = new Entity("command", id, null);
         Map<String, Object> action = new LinkedHashMap<>();
         boolean[] found = new boolean[1];
-        jdbc.query("SELECT status, action_type, timestamp, published_at, ack_status, ack_received_at, ack_backend_received_at, ack_device_timestamp, ack_deadline_at, ack_message FROM action_history WHERE request_id = ?", rs -> {
+        jdbc.query("SELECT status, action_type, timestamp, published_at, ack_status, ack_received_at, ack_backend_received_at, ack_device_timestamp, ack_deadline_at FROM action_history WHERE request_id = ?", rs -> {
             found[0] = true;
             action.put("status", rs.getString("status"));
             action.put("acceptedAt", String.valueOf(instant(rs, "timestamp")));
@@ -562,7 +560,6 @@ public class EvidenceRetrievalService {
             action.put("ackBackendReceivedAt", instant(rs, "ack_backend_received_at") == null ? null : instant(rs, "ack_backend_received_at").toString());
             action.put("ackDeviceTimestamp", instant(rs, "ack_device_timestamp") == null ? null : instant(rs, "ack_device_timestamp").toString());
             action.put("ackDeadlineAt", instant(rs, "ack_deadline_at") == null ? null : instant(rs, "ack_deadline_at").toString());
-            action.put("ackMessage", untrusted(rs.getString("ack_message")));
         }, r.commandId());
         Map<String, Object> outbox = new LinkedHashMap<>();
         jdbc.query("SELECT state, attempt_count, max_attempts, first_publish_confirmed_at, terminal_at, terminal_reason, last_error_code, expires_at FROM command_outbox WHERE command_id = ?", rs -> {
@@ -617,7 +614,6 @@ public class EvidenceRetrievalService {
         Map<String, Object> ack = section("ACK", "ackStatus", action.get("ackStatus"), "ackReceivedAt", action.get("ackReceivedAt"));
         ack.put("ackBackendReceivedAt", action.get("ackBackendReceivedAt"));
         ack.put("ackDeviceTimestamp", action.get("ackDeviceTimestamp"));
-        ack.put("ackMessage", action.get("ackMessage"));
         rows.add(ack);
         evidence.add(EvidenceItem.presentOrAbsent("command:" + id + "/ack/status", "acknowledgement status", action.get("ackStatus")));
         Map<String, Object> timeout = section("TIMEOUT", "ackDeadlineAt", action.get("ackDeadlineAt"), "timedOut", String.valueOf(facts.stream().anyMatch(f -> "ACK_TIMED_OUT".equals(f.get("factType")))));
@@ -866,14 +862,6 @@ public class EvidenceRetrievalService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             return null;
         }
-    }
-
-    private Map<String, Object> untrusted(String text) {
-        if (text == null) return null;
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("text", clip(text));
-        m.put("untrustedText", true);
-        return m;
     }
 
     private String clip(String text) {

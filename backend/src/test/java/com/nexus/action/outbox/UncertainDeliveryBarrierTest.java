@@ -207,10 +207,28 @@ class UncertainDeliveryBarrierTest {
                     kit.ops.complete(kit.ops.claim(a, "w", LEASE).orElseThrow(), AttemptResult.UNCERTAIN, "PUBLISH_TIMEOUT");
                 }
                 case "late" -> {
-                    a = kit.enqueue(device, Instant.now().minusSeconds(13));      // its 15 s window ends in about 2 s
-                    Claimed claimed = kit.ops.claim(a, "w", LEASE).orElseThrow();
-                    Thread.sleep(3200);
-                    kit.ops.complete(claimed, AttemptResult.CONFIRMED, null);     // confirmed, but recorded after the window
+                    // Claim with a normal delivery window on the authority used by the SQL, not a 1-2 s
+                    // remainder derived from the JVM clock. Do not alter the immutable deadline after insertion.
+                    Instant databaseNow = kit.jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class).toInstant();
+                    a = kit.enqueue(device, databaseNow.minusSeconds(1));
+                    // This branch isolates delivery expiry from lease loss (covered separately below).
+                    Duration lateLease = CommandDeliveryLimits.MAX_DELIVERY_WINDOW.plus(LEASE);
+                    var claim = kit.ops.claim(a, "w", lateLease);
+                    assertTrue(claim.isPresent(), () -> "late claim rejected: " + claimPredicates(a));
+                    Claimed claimed = claim.orElseThrow();
+                    await(() -> kit.jdbc.queryForObject("SELECT clock_timestamp() > expires_at + INTERVAL '10 milliseconds'"
+                                    + " FROM command_outbox WHERE command_id = ?", Boolean.class, claimed.commandId()),
+                            "the persisted delivery deadline on the database clock", 20);
+                    assertTrue(kit.jdbc.queryForObject("SELECT clock_timestamp() < lease_expires_at"
+                                    + " FROM command_outbox WHERE command_id = ?", Boolean.class, claimed.commandId()),
+                            "late confirmation is tested with a live lease, independently of lease loss");
+                    var resolution = kit.ops.complete(claimed, AttemptResult.CONFIRMED, null);
+                    assertTrue(resolution.uncertain());
+                    assertEquals("PUBLISH_COMPLETED_AFTER_EXPIRY", resolution.errorCode());
+                    assertEquals(List.of("ATTEMPT_STARTED", "ATTEMPT_UNCERTAIN", "DEAD_LETTERED"), kit.facts(a));
+                    assertEquals("FAILURE", kit.actionStatus(a));
+                    assertEquals(OutboxDeliveryOperations.Disposition.FENCED,
+                            kit.ops.complete(claimed, AttemptResult.CONFIRMED, null).disposition(), "late completion is applied once");
                 }
                 default -> {
                     a = kit.enqueueDue(device, 0);
@@ -222,7 +240,42 @@ class UncertainDeliveryBarrierTest {
             assertEquals("UNCERTAIN_EXPIRED", kit.terminalReason(a), path);
             UUID b = kit.enqueueDue(device, 5);
             assertFalse(kit.ops.candidates(10).contains(b), "a command after an uncertain " + path + " is held");
+            assertTrue(kit.ops.claim(b, "next", LEASE).isEmpty(), "the claim also enforces the hold after " + path);
+            assertEquals(0, kit.attempts(b), "no attempt starts for the held successor after " + path);
         }
+    }
+
+    @Test
+    void aNarrowJvmTimeFixtureCanExpireBeforeClaimWhileEveryOtherEligibilityPredicatePasses() {
+        Instant databaseNow = kit.jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class).toInstant();
+        // Controlled reproduction of the old fixture with a JVM three seconds behind PostgreSQL.
+        // The old 13 s backdate plus whole-second expiry truncation puts the row outside its 15 s window.
+        Instant simulatedJvmNow = databaseNow.minusSeconds(3);
+        UUID command = kit.enqueue(kit.device(), simulatedJvmNow.minusSeconds(13));
+        Map<String, Object> predicates = claimPredicates(command);
+        System.out.println("expired narrow-fixture reproduction: " + predicates);
+        assertEquals("QUEUED", predicates.get("state"));
+        for (String predicate : List.of("due", "unacknowledged", "no_older_unresolved", "no_uncertain_hold"))
+            assertEquals(true, predicates.get(predicate), predicate + ": " + predicates);
+        assertEquals(false, predicates.get("unexpired"), "only expiry rejects this fixture: " + predicates);
+        assertTrue(kit.ops.claim(command, "w", LEASE).isEmpty(), "an already expired command must not be claimed");
+        assertEquals(0, kit.attempts(command));
+        assertTrue(kit.facts(command).isEmpty(), "rejection records no attempt or publication");
+        assertEquals(1, kit.ops.expireDue(10).size());
+        assertEquals("EXPIRED", kit.terminalReason(command), "never attempted is not an uncertain publication");
+    }
+
+    private Map<String, Object> claimPredicates(UUID command) {
+        return kit.jdbc.queryForMap("SELECT o.state, o.created_at, o.next_attempt_at, o.expires_at,"
+                + " now() AS transaction_now, clock_timestamp() AS wall_now,"
+                + " o.next_attempt_at <= now() AS due, now() < o.expires_at AS unexpired,"
+                + " NOT EXISTS (SELECT 1 FROM action_history a WHERE a.request_id = o.command_id AND a.ack_status IS NOT NULL) AS unacknowledged,"
+                + " NOT EXISTS (SELECT 1 FROM command_outbox x WHERE x.device_id = o.device_id AND x.command_id <> o.command_id"
+                + " AND (x.state IN ('IN_FLIGHT', 'RETRY_WAIT') OR (x.state = 'QUEUED' AND x.created_at < o.created_at))) AS no_older_unresolved,"
+                + " NOT EXISTS (SELECT 1 FROM command_outbox u WHERE u.device_id = o.device_id AND u.state = 'DEAD_LETTER'"
+                + " AND u.terminal_reason = 'UNCERTAIN_EXPIRED' AND now() < LEAST(to_timestamp(u.payload_epoch_seconds)"
+                + " + INTERVAL '40 seconds', u.created_at + INTERVAL '60 seconds')) AS no_uncertain_hold"
+                + " FROM command_outbox o WHERE o.command_id = ?", command);
     }
 
     // ------------------------------------------------------------------------------------- reporting and expiry

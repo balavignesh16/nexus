@@ -49,8 +49,24 @@ def execute(name: str, command: list[str], cwd: Path, timeout: int, verbose: boo
         print(f"\n--- {name} ---\n{str(output)[-4000:]}")
     return Check(name, status, stamp, int((time.monotonic() - started) * 1000), reason, str(output)[-2000:])
 
+EVALUATION_RESULTS = rt.ROOT / "backend" / "target" / "p6-eval" / "results"
+
+
+def clear_evaluation_results(directory: Path = EVALUATION_RESULTS) -> int:
+    """Removes the evaluation result files left by an earlier run (a mutation campaign writes them too), so the Phase 6 gate can only read results written by this
+    invocation. Returns how many files were removed."""
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for path in directory.glob("*.json"):
+        path.unlink()
+        removed += 1
+    return removed
+
+
 def backend_batches_check(mvnw: str, verbose: bool) -> Check:
     started, stamp = time.monotonic(), rt.utc_now()
+    clear_evaluation_results()
     try:
         result = backend_batches.run(mvnw, BACKEND_FULL_TIMEOUT_SECONDS, verbose, log_dir=rt.VALIDATION_DIR)
     except Exception as error:                                   # inventory or orchestration fault: a failed check, never a silent pass

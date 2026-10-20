@@ -56,3 +56,13 @@ Heavy-tailed noise: outlier false-positive rate 0.96, spike 0.26; a weak 5-sigma
 * Conflict analysis is exact only for rules and groups the database can see at check time; writers that bypass database triggers (a superuser, TRUNCATE) are outside the lock. See `forensic-review-p66.md` row 4 for the residual list.
 * No real model was evaluated; no ML model exists; anomaly detection is statistics on synthetic evaluation data.
 * Not built: a free-form question box, energy and usage analysis, trend detector. A proposed P6.7 to P6.12 extension (assistant with read-only lookups, trend detector, real-model connection, usage analysis) was discussed but is NOT approved and is not part of Phase 6 as authorised.
+
+## Extension P6.7 to P6.12 - state at the validation hold (NOT certified)
+
+* Commits on `feature/p6-intelligence`: P6.12 is `1c3b1b7`; the extension ledger has 57 of 59 rows COVERED, P6-241 and P6-242 PLANNED.
+* Evidence so far: fast gate PASS (9 checks); Phase 3 OFF 776 of 776 and ON 776 of 776; deterministic evaluation gate PASS standalone; mutation sets refreshed
+  (P6.4 26 killed with N01/N03 obsolete, P6.5 40, P6.6 31, P6.7 14, P6.8 15, P6.9 17, P6.10 13, P6.11 9, P6.12 10, none surviving).
+* Full gate: NOT passed. Attempt 1 (496 s) failed in backend batch 1 of 13 on a documented timing-sensitive test and then the evaluation check read stale result files;
+  attempt 2 was stopped by the host for low memory. The stale-results defect is corrected in `validate_nexus.py` (results are cleared before the backend batches).
+* To finish: with the machine quiet and memory sustained, run one supervised `MQTT_PORT=1 python validate_nexus.py --full --verbose`, record counts and duration,
+  update P6-241/P6-242 and `forensic-review-p612.md`, commit.

@@ -179,6 +179,29 @@ class BaselineComparison(unittest.TestCase):
             self.assertFalse((tmp / "b.json").exists())
 
 
+class FreshResults(unittest.TestCase):
+    def test_the_full_gate_clears_results_left_by_an_earlier_run_and_nothing_else(self):
+        sys.path.insert(0, str(ROOT))
+        import validate_nexus as validate
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "results"
+            directory.mkdir()
+            (directory / "drafts.json").write_text("{}", encoding="utf-8")
+            (directory / "lifecycle.json").write_text("{}", encoding="utf-8")
+            (directory / "keep.txt").write_text("x", encoding="utf-8")
+            self.assertEqual(2, validate.clear_evaluation_results(directory))
+            self.assertEqual(["keep.txt"], sorted(p.name for p in directory.iterdir()))
+            self.assertEqual(0, validate.clear_evaluation_results(Path(tmp) / "missing"))
+
+    def test_the_backend_check_clears_before_it_runs_and_the_gate_does_not_pass_on_missing_results(self):
+        source = (ROOT / "validate_nexus.py").read_text(encoding="utf-8")
+        body = source[source.index("def backend_batches_check"):source.index("def skipped")]
+        self.assertLess(body.index("clear_evaluation_results()"), body.index("backend_batches.run("))
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = gate.evaluate(gate.load_results(Path(tmp)), None, [])
+            self.assertEqual("INCOMPLETE", verdict["overall"])
+
+
 class CorpusIntegrity(unittest.TestCase):
     def test_the_committed_corpus_matches_its_manifest(self):
         self.assertEqual([], gate.corpus_problems(gate.CORPUS))
