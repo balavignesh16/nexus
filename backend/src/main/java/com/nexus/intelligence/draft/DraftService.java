@@ -8,6 +8,7 @@ import com.nexus.intelligence.model.ModelGateway;
 import com.nexus.intelligence.model.ModelOutcome;
 import com.nexus.intelligence.model.ModelPurpose;
 import com.nexus.intelligence.model.ModelRequest;
+import com.nexus.intelligence.model.ProviderIdentity;
 import com.nexus.intelligence.model.StructuredOutput;
 import com.nexus.rule.application.RuleCapabilityValidator;
 import com.nexus.rule.domain.Rule;
@@ -104,9 +105,26 @@ public class DraftService {
             cited.add(id);
         }
 
+        return storeCandidate(goal, candidate, cited, completed.identity(), "AI_DRAFT", PROMPT_TEMPLATE);
+    }
+
+    /**
+     * A template-built proposal (no model): the same policy, validator, conflict analysis and storage as a model proposal, stored as a draft that only a local
+     * approver can turn into an inactive rule version. The provenance is the model-free identity and the origin says it is a template.
+     */
+    public record TemplateCandidate(String templateKey, String name, int priority, int cooldownSeconds, List<RuleCondition> conditions, List<RuleAction> actions, Set<UUID> devices, String requestKey,
+                                    String rationale) {}
+
+    public DraftOutcome proposeTemplate(TemplateCandidate t) {
+        if (t == null || t.devices() == null || t.devices().isEmpty()) return new DraftOutcome.Refused(DraftRefusal.MISSING_EVIDENCE, null);
+        Candidate candidate = new Candidate(t.name(), t.priority(), t.cooldownSeconds(), t.conditions(), t.actions(), List.of(), t.rationale());
+        return storeCandidate(t.requestKey(), candidate, new LinkedHashSet<>(t.devices()), ProviderIdentity.NONE, "TEMPLATE_DRAFT", "template/" + t.templateKey());
+    }
+
+    private DraftOutcome storeCandidate(String requestKey, Candidate candidate, Set<UUID> cited, ProviderIdentity identity, String origin, String promptTemplate) {
         UUID draftId = UUID.randomUUID(), ruleId = UUID.randomUUID();
         Rule rule = new Rule(ruleId, candidate.name(), false, candidate.priority(), candidate.conditions(), candidate.actions(),
-                Map.of("origin", "AI_DRAFT", "draftId", draftId.toString()), candidate.cooldown(), null, null);
+                Map.of("origin", origin, "draftId", draftId.toString()), candidate.cooldown(), null, null);
 
         List<Map<String, Object>> policy = DraftPolicy.check(rule, cited);
         List<Map<String, Object>> diagnostics;
@@ -134,7 +152,7 @@ public class DraftService {
         validation.put("conflictAnalysis", conflictAnalysis);
         validation.put("validatedAt", clock.instant().toString());
         validation.put("validator", "RuleCapabilityValidator+DraftPolicy");
-        validation.put("promptTemplate", PROMPT_TEMPLATE);
+        validation.put("promptTemplate", promptTemplate);
         // The rationale is model prose shown to the approver. If it asserts actuation, receipt, approval, a fault or a cause it is not stored at all.
         String rationale = candidate.rationale();
         if (rationale != null && com.nexus.rule.ai.UnsupportedAssertionGuard.violation(rationale) != null) {
@@ -143,7 +161,7 @@ public class DraftService {
         }
         String definition = write(rule);
         List<String> refs = new ArrayList<>(cited.stream().map(id -> "device:" + id).toList());
-        String hash = store.insert(draftId, valid, definition, completed.identity(), sha256(goal), rationale, refs, write(validation));
+        String hash = store.insert(draftId, valid, definition, identity, sha256(requestKey), rationale, refs, write(validation));
         if (valid) store.supersede(draftId);
         return new DraftOutcome.Created(draftId, valid ? "PENDING_APPROVAL" : "INVALID", valid, hash, all, warnings);
     }
