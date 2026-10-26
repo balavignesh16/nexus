@@ -119,6 +119,8 @@ public class TelemetryService {
                 .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Device", request.deviceId().toString()));
 
         if (onboarding == null ? device.getStatus() != DeviceStatus.ACTIVE : !onboarding.admitsTelemetry(device)) {
+            if (onboarding != null && device.getStatus() == DeviceStatus.REGISTERED)
+                throw new OnboardingTelemetryRejectedException("Onboarding has not admitted telemetry; no state was changed");
             throw new IllegalStateException("Cannot ingest telemetry for inactive device");
         }
 

@@ -36,6 +36,8 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
   const hasLedWrite = capabilities.some(
     (c) => c.capabilityType === CapabilityType.LED && c.direction === 'WRITE'
   );
+  const hasUsbServoWrite = capabilities.some(c => c.capabilityType === CapabilityType.SERVO &&
+    c.direction === 'WRITE' && c.metadata?.usbBoard === 'ESP3');
 
   const [state, setState] = useState<DispatchState>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -67,11 +69,11 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
     }
   });
 
-  if (!hasLedWrite) {
+  if (!hasLedWrite && !hasUsbServoWrite) {
     return null;
   }
 
-  const sendCommand = async (value: boolean) => {
+  const sendCommand = async (value: boolean | number, capability: CapabilityType = CapabilityType.LED) => {
     setState('sending');
     setMessage(null);
     pendingCommandIdRef.current = null;
@@ -81,7 +83,7 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
     }
     try {
       const result = await deviceApi.sendDeviceCommand(deviceId, {
-        capability: CapabilityType.LED,
+        capability,
         command: 'SET_STATE',
         value,
       });
@@ -134,7 +136,7 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
 
   return (
     <div className="flex flex-col gap-2" data-testid="device-command-controls">
-      <div className="flex items-center gap-2">
+      {hasLedWrite && <div className="flex items-center gap-2">
         <Button
           type="button"
           variant="secondary"
@@ -153,7 +155,13 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
         >
           Turn LED OFF
         </Button>
-      </div>
+      </div>}
+      {hasUsbServoWrite && <div className="flex flex-wrap gap-2" aria-label="USB door requested position">
+        {([['OPEN', 120], ['CLOSE', 60], ['CENTER', 90]] as const).map(([label, angle]) => <Button
+          key={label} type="button" variant="outline" size="sm" disabled={state === 'sending'}
+          onClick={() => sendCommand(angle, CapabilityType.SERVO)}>Door {label} ({angle}°)</Button>)}
+        <p className="w-full text-xs text-foundation-muted-fg">Requested servo position only. Physical movement is unverified; unloaded bench use.</p>
+      </div>}
       {message && (
         <span
           data-testid="device-command-result"

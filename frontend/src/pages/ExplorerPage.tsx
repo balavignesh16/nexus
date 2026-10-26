@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Boxes } from 'lucide-react';
 import { ExplorerTree } from '../components/explorer/ExplorerTree';
 import { SiteWorkspace } from '../components/explorer/SiteWorkspace';
@@ -47,6 +48,7 @@ export default function ExplorerPage() {
               <Boxes size={16} />
             </div>
             <h2 className="font-semibold text-sm text-foundation-fg">Infrastructure</h2>
+            <Link className="text-xs underline ml-auto" to="/infrastructure">Manage / Add</Link>
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden">

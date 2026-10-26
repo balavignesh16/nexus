@@ -90,11 +90,12 @@ export default function DeviceOnboardingPage() {
           <Button disabled={!templateId || members.length === 0} onClick={() => setStep(1)}>Next</Button>
         </div>}
         {step === 1 && <div className="space-y-3">
-          <label className="block text-xs">Site <Select value={siteId} onChange={e => { setSiteId(e.target.value); setBuildingId(''); setSpaceId(''); setBuildings([]); setSpaces([]); }}>
+          <p className="text-sm">Assign this device to a space in your chosen building. Need a location? <Link className="underline" to="/infrastructure" target="_blank" rel="noreferrer">Create site, building or room</Link>, then refresh this page before starting provisioning.</p>
+          <label className="block text-xs">Site <Select aria-label="Site" value={siteId} onChange={e => { setSiteId(e.target.value); setBuildingId(''); setSpaceId(''); setBuildings([]); setSpaces([]); }}>
             <option value="">Select site</option>{sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
-          <label className="block text-xs">Building <Select value={buildingId} onChange={e => { setBuildingId(e.target.value); setSpaceId(''); setSpaces([]); }}>
+          <label className="block text-xs">Building <Select aria-label="Building" value={buildingId} onChange={e => { setBuildingId(e.target.value); setSpaceId(''); setSpaces([]); }}>
             <option value="">Select building</option>{buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</Select></label>
-          <label className="block text-xs">Space <Select value={spaceId} onChange={e => setSpaceId(e.target.value)}>
+          <label className="block text-xs">Space <Select aria-label="Space" value={spaceId} onChange={e => setSpaceId(e.target.value)}>
             <option value="">Select space</option>{spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
           <label className="block text-xs">Name <Input value={name} onChange={e => setName(e.target.value)} /></label>
           <label className="block text-xs">Serial number <Input value={serialNumber} onChange={e => setSerialNumber(e.target.value)} /></label>
@@ -143,7 +144,7 @@ export default function DeviceOnboardingPage() {
         </div>}
         {step === 3 && <div className="space-y-3 text-sm">
           <p>Template: {selectedTemplate?.displayName}</p><p>Device: {name} · {serialNumber} · {mode}</p>
-          <p>Space: {spaces.find(s => s.id === spaceId)?.name}</p>
+          <p>Site: {sites.find(s => s.id === siteId)?.name} · Building: {buildings.find(b => b.id === buildingId)?.name} · Space: {spaces.find(s => s.id === spaceId)?.name}</p>
           <pre className="rounded-lg border border-foundation-border p-3 overflow-auto text-xs">{JSON.stringify(overrides, null, 2)}</pre>
           <p className="text-xs text-foundation-muted-fg">The backend validates and commits the Device, bindings, session, and contract version together. Status and telemetry progress comes from the server.</p>
           <div className="flex gap-2"><Button variant="outline" onClick={() => setStep(2)}>Back</Button>

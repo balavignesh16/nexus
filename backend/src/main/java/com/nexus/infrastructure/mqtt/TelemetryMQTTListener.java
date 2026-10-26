@@ -40,6 +40,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class TelemetryMQTTListener implements MqttCallbackExtended {
+    private final java.util.concurrent.ThreadPoolExecutor subscriptions = new java.util.concurrent.ThreadPoolExecutor(
+            0,1,10,java.util.concurrent.TimeUnit.SECONDS,new java.util.concurrent.ArrayBlockingQueue<>(1),task->{
+                Thread thread=new Thread(task,"nexus-mqtt-subscriptions");thread.setDaemon(true);return thread;
+            });
+    volatile java.util.concurrent.Future<?> subscriptionTask=java.util.concurrent.CompletableFuture.completedFuture(null);
+    @jakarta.annotation.PreDestroy
+    public void closeSubscriptions() { subscriptions.shutdownNow(); }
 
     private static final Logger log = LoggerFactory.getLogger(TelemetryMQTTListener.class);
 
@@ -185,7 +192,9 @@ public class TelemetryMQTTListener implements MqttCallbackExtended {
     @Override
     public void connectComplete(boolean reconnect, String serverURI) {
         log.info("MQTT Connection complete (reconnect: {}). Subscribing...", reconnect);
-        subscribe();
+        // Never block Paho's callback thread on synchronous SUBSCRIBE while queued incoming data waits on it.
+        try { subscriptionTask=subscriptions.submit(this::subscribe); }
+        catch(java.util.concurrent.RejectedExecutionException busy) { log.warn("MQTT subscription refresh already pending or shutting down"); }
         reconnectController.onConnectComplete();
     }
 

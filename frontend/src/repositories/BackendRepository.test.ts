@@ -124,6 +124,18 @@ describe('BackendTelemetryRepository - parses the real backend response shape', 
 
     expect(history).toEqual([]);
   });
+
+  it('preserves typed false, zero and strings rather than displaying the legacy null value', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ok:true,json:async()=>({records:[
+      {sensorType:'CUSTOM',capabilityKey:'led_state',value:null,typedValue:false},
+      {sensorType:'CUSTOM',capabilityKey:'angle',value:null,typedValue:0},
+      {sensorType:'CUSTOM',capabilityKey:'mode',value:null,typedValue:'AUTO'},
+    ]})});
+    const repo=new BackendTelemetryRepository();
+    expect((await repo.getTelemetryHistory('d1')).map(row=>row.payload)).toEqual([{led_state:false},{angle:0},{mode:'AUTO'}]);
+    expect(await repo.getTelemetry('d1','led_state')).toEqual([]);
+    expect((await repo.getTelemetry('d1','angle'))[0].value).toBe(0);
+  });
 });
 
 /**

@@ -70,6 +70,9 @@ import java.util.UUID;
  */
 @Component
 public class CommandExecutor implements ActionExecutor {
+    private UsbRealCommandPolicy usbRealPolicy = new UsbRealCommandPolicy("", "");
+    @Autowired(required = false)
+    void setUsbRealCommandPolicy(UsbRealCommandPolicy policy) { this.usbRealPolicy = policy; }
 
     public record PreparedCommand(UUID deviceId, UUID bindingId, String legacyCapabilityType,
             UUID capabilityDefinitionId, String capabilityKey, CapabilityValueType valueType,
@@ -200,7 +203,9 @@ public class CommandExecutor implements ActionExecutor {
         Device device = deviceOpt.get();
 
         if (device.getMode() == DeviceMode.REAL) {
-            throw new CommandRejectedException("Command dispatch to REAL devices is not yet enabled");
+            usbRealPolicy.requireAllowed(deviceId, parameters);
+            if (device.getStatus() != com.nexus.device.domain.DeviceStatus.ACTIVE)
+                throw new CommandRejectedException("USB REAL device must be ACTIVE before bench commands");
         }
 
         String capability = asString(parameters.get("capability"));

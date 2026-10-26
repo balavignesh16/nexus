@@ -14,6 +14,7 @@ import ReactFlow, {
   useReactFlow,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import './RuleStudio.css';
 import { v4 as uuidv4 } from 'uuid';
 
 import { TriggerNode } from './nodes/TriggerNode';
@@ -21,7 +22,7 @@ import { ConditionNode } from './nodes/ConditionNode';
 import { ActionNode } from './nodes/ActionNode';
 import { RuleInspector } from './RuleInspector';
 import { RulePalette } from './RulePalette';
-import { Save, Play, AlertTriangle, CheckCircle, Undo2, Redo2, Maximize, Network, Loader2 } from 'lucide-react';
+import { Save, Play, AlertTriangle, CheckCircle, Maximize, Network, Loader2, Workflow, Plus } from 'lucide-react';
 import { validateGraph, compileGraphToRule, ruleToGraph } from '../../utils/workflowCompiler';
 import { getLayoutedElements } from '../../utils/layoutEngine';
 import { RuleSimulator } from './RuleSimulator';
@@ -132,6 +133,13 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
     setSelectedNode(node);
   };
 
+  const addBlock = (type: string) => {
+    if (!['trigger','condition','action'].includes(type)) return;
+    const node: Node = {id:uuidv4(),type,position:{x:60+nodes.length*240,y:120},data:{label:type==='trigger'?'On event':type==='condition'?'Check a condition':'Perform an action'}};
+    setNodes(current=>current.concat(node));setSelectedNode(node);setValidationErrors([]);setSaveSuccess(null);
+    setTimeout(()=>fitView({duration:300,padding:.25}),60);
+  };
+
   const onPaneClick = () => {
     setSelectedNode(null);
   };
@@ -196,12 +204,12 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
   }, [isSimulatorOpen, nodes, edges, persisted]);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
+    <div className="rule-studio flex-1 flex flex-col h-full min-h-0 overflow-hidden relative">
       
       {/* Toolbar */}
-      <div className="h-14 border-b border-border bg-card shrink-0 flex items-center justify-between px-6">
+      <div className="studio-toolbar min-h-20 border-b border-border bg-card shrink-0 flex flex-wrap gap-3 items-center justify-between px-5 py-3">
         <div className="flex items-center gap-4">
-          <h1 className="font-semibold text-foreground text-lg">Visual Rules Studio</h1>
+          <div><h1 className="font-semibold text-foreground text-lg flex items-center gap-2"><Workflow size={19} className="text-primary"/>Visual Rule Builder</h1><p className="text-xs text-muted-foreground mt-1">Event → Conditions → Actions</p></div>
           <div className="px-2 py-0.5 rounded text-xs font-mono bg-muted/50 border border-border text-muted-foreground">
             {persisted ? (persisted.lifecycle ?? (persisted.enabled ? 'ACTIVE' : 'SAVED')) : 'UNSAVED'}
           </div>
@@ -221,17 +229,10 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
         <div className="flex items-center gap-2">
           {/* Editor Controls */}
           <div className="flex items-center gap-1 border-r border-border pr-2 mr-1">
-            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50" disabled>
-              <Undo2 size={16} />
-            </button>
-            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50" disabled>
-              <Redo2 size={16} />
-            </button>
-            <div className="w-px h-4 bg-border mx-1" />
-            <button onClick={onLayout} title="Auto Layout" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+            <button onClick={onLayout} title="Auto Layout" aria-label="Arrange blocks" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
               <Network size={16} />
             </button>
-            <button onClick={onCenter} title="Center Graph" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+            <button onClick={onCenter} title="Center Graph" aria-label="Fit canvas" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
               <Maximize size={16} />
             </button>
           </div>
@@ -262,10 +263,10 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
       </div>
 
       {/* Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        <RulePalette />
+      <div className="studio-workspace flex-1 flex">
+        <RulePalette onAdd={addBlock}/>
         
-        <div className="flex-1 flex flex-col h-full relative">
+        <div className="studio-canvas flex-1 flex flex-col h-full min-h-0 relative">
           <div className="flex-1 relative" ref={reactFlowWrapper}>
             <ReactFlow
               nodes={nodes}
@@ -282,10 +283,11 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
               fitView
               className="bg-background"
             >
-              <Background color="#333" gap={16} />
+              <Background color="#d1cadf" gap={22} size={1}/>
               <Controls className="bg-card border-border fill-foreground" />
               <MiniMap 
                 className="bg-card border-border" 
+                maskColor="rgba(241,239,248,0.65)"
                 nodeColor={(n) => {
                   if (n.type === 'trigger') return '#3b82f6';
                   if (n.type === 'condition') return '#f97316';
@@ -294,6 +296,15 @@ export function RuleCanvas({ initialRule, onSaved }: RuleCanvasProps) {
                 }} 
               />
             </ReactFlow>
+            {nodes.length===0 && <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-5">
+              <div className="max-w-sm text-center rounded-3xl bg-card border border-border p-7 shadow-sm pointer-events-auto">
+                <div className="mx-auto mb-4 h-12 w-12 rounded-2xl bg-muted flex items-center justify-center text-primary"><Workflow size={23}/></div>
+                <h2 className="font-semibold text-lg text-foreground">Build your first rule</h2>
+                <p className="text-sm text-muted-foreground leading-relaxed mt-2 mb-5">Start with an event, add conditions, then choose an action. Select any block to edit its properties.</p>
+                <button type="button" onClick={()=>addBlock('trigger')} className="inline-flex items-center gap-2 bg-primary text-primary-foreground rounded-xl px-4 py-2.5 text-sm font-medium"><Plus size={16}/>Add event trigger</button>
+                <p className="text-xs text-muted-foreground mt-4">Nothing runs until saved and separately activated.</p>
+              </div>
+            </div>}
             
             {/* Validation Errors Overlay */}
             {validationErrors.length > 0 && (

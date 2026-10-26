@@ -62,6 +62,36 @@ import static org.mockito.Mockito.*;
  * genuinely exercised, not assumed.
  */
 class TelemetryMQTTListenerTest {
+    private void connectAndAwait(boolean reconnect,String uri) {
+        listener.connectComplete(reconnect,uri);
+        try { listener.subscriptionTask.get(2,TimeUnit.SECONDS); }
+        catch(Exception error) { throw new AssertionError("Subscription worker did not complete",error); }
+    }
+    @org.junit.jupiter.api.AfterEach
+    void closeSubscriptionWorker() { listener.closeSubscriptions(); }
+    @Test
+    void brokerSubscribeCannotBlockTheMqttCallbackThread() throws Exception {
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        doAnswer(call->{entered.countDown();assertTrue(release.await(2,TimeUnit.SECONDS));return null;})
+                .when(mqttClient).subscribe(TELEMETRY_TOPIC,1);
+        try {
+            listener.connectComplete(true,"tcp://localhost:1883");
+            assertTrue(entered.await(1,TimeUnit.SECONDS));
+            assertFalse(listener.subscriptionTask.isDone());
+            verify(reconnectController).onConnectComplete();
+        } finally {release.countDown();}
+        listener.subscriptionTask.get(2,TimeUnit.SECONDS);
+        verify(mqttClient).subscribe(COMMAND_ACK_TOPIC,1);
+    }
+    @Test
+    void notAdmittedOnboardingTelemetryIsDroppedInsteadOfBlockingStatusAndOtherDevices() throws Exception {
+        UUID id=UUID.randomUUID();
+        doThrow(new com.nexus.device.onboarding.OnboardingTelemetryRejectedException("not admitted"))
+                .when(telemetryService).processTelemetry(any(TelemetryRequest.class),eq(TelemetrySource.MQTT));
+        listener.messageArrived("nexus/devices/"+id+"/telemetry",messageFor(validPayload(id)));
+        verify(mqttClient).messageArrivedComplete(42,1);
+        verify(mqttClient,never()).disconnect();
+    }
 
     private static final String TELEMETRY_TOPIC = "nexus/devices/+/telemetry";
     private static final String DEVICE_STATUS_TOPIC = "nexus/devices/+/status";
@@ -375,7 +405,7 @@ class TelemetryMQTTListenerTest {
 
     @Test
     void connectComplete_subscribesWithQos1_soReconnectsResubscribeCorrectly() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(TELEMETRY_TOPIC, 1);
     }
@@ -463,7 +493,7 @@ class TelemetryMQTTListenerTest {
         // status subscribe call, which succeeds by default here.
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(TELEMETRY_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }
@@ -472,21 +502,21 @@ class TelemetryMQTTListenerTest {
     void subscribeException_onDeviceStatusTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(DEVICE_STATUS_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }
 
     @Test
     void connectComplete_alsoSubscribesToDeviceStatusTopic() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(DEVICE_STATUS_TOPIC, 1);
     }
 
     @Test
     void successfulSubscribe_doesNotIncrementSubscribeFailureCounter() {
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(0.0, counterValue("mqtt.subscribe.failures"));
     }
@@ -498,7 +528,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, messageFor(validPayload(deviceId)));
         listener.connectionLost(new RuntimeException("dropped"));
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
         listener.messageArrived(topic, messageFor(validPayload(deviceId)));
 
         assertEquals(2.0, counterValue("mqtt.messages.received"),
@@ -655,7 +685,7 @@ class TelemetryMQTTListenerTest {
 
     @Test
     void connectComplete_alsoSubscribesToCommandAckTopic() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(COMMAND_ACK_TOPIC, 1);
     }
@@ -664,7 +694,7 @@ class TelemetryMQTTListenerTest {
     void subscribeException_onCommandAckTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(COMMAND_ACK_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }

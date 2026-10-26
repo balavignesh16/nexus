@@ -42,6 +42,22 @@ import static org.mockito.Mockito.*;
  * and device connectivity all pass, in that order.
  */
 class CommandExecutorTest {
+    @Test
+    void explicitUsbRealOptInStillRequiresWriteCapabilityAndConnectivity() throws Exception {
+        givenDeviceExistsAuthorizedAndOnline();
+        when(simulatedDevice.getMode()).thenReturn(DeviceMode.REAL);
+        when(simulatedDevice.getStatus()).thenReturn(com.nexus.device.domain.DeviceStatus.ACTIVE);
+        executor.setUsbRealCommandPolicy(new UsbRealCommandPolicy(deviceId.toString(),""));
+        assertEquals(ExecutionStatus.SUCCESS,executor.execute(ledOnRequest,new ActionContext(null,null)).status());
+        clearInvocations(mqttClient);
+        when(deviceCapabilityRepository.findByDeviceIdAndCapabilityTypeAndDirection(deviceId,CapabilityType.LED,CapabilityDirection.WRITE)).thenReturn(Optional.empty());
+        assertEquals(ExecutionStatus.FAILURE,executor.execute(ledOnRequest,new ActionContext(null,null)).status());
+        verify(mqttClient,never()).publish(anyString(),any(MqttMessage.class));
+        givenDeviceExistsAuthorizedAndOnline();
+        when(deviceConnectivityRegistry.get(deviceId)).thenReturn(Optional.empty());
+        assertEquals(ExecutionStatus.FAILURE,executor.execute(ledOnRequest,new ActionContext(null,null)).status());
+        verify(mqttClient,never()).publish(anyString(),any(MqttMessage.class));
+    }
 
     private DeviceRepository deviceRepository;
     private DeviceCapabilityRepository deviceCapabilityRepository;

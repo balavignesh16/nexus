@@ -28,6 +28,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * unreachable server leaves the deterministic path in charge. No real model is involved.
  */
 class OllamaModelProviderTest {
+    @Test
+    void statusOnlyProbesMetadataCachesItAndNeverCallsChat() {
+        server.createContext("/api/ps", exchange -> respond(exchange, 200, "{\"models\":[]}"));
+        GuardSettings settings = GuardSettings.defaults();
+        try (AiCallGuard guard = new AiCallGuard(settings, Clock.systemUTC())) {
+            ModelGateway gateway = new ModelGateway(provider(), guard, settings, true);
+            var controller = new com.nexus.intelligence.api.ModelStatusController(gateway, true, url(), "llama3.2:3b");
+            var status = controller.status();
+            assertThat(status.mode()).isEqualTo("OLLAMA_LOCAL");
+            assertThat(status.ollama().inspection().reachable()).isTrue();
+            assertThat(status.ollama().inspection().installed()).isTrue();
+            assertThat(status.ollama().loaded()).isFalse();
+            assertThat(controller.status().ollama()).isSameAs(status.ollama());
+            assertThat(chatCalls.get()).isZero();
+            assertThat(status.gateway().providerAttempts()).isZero();
+            var offline = new com.nexus.intelligence.api.ModelStatusController(
+                    new ModelGateway(new NoOpModelProvider(), guard, settings, false), false, "invalid-unused-url", "none").status();
+            assertThat(offline.mode()).isEqualTo("DETERMINISTIC_ONLY");
+            assertThat(offline.ollama()).isNull();
+        }
+    }
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private HttpServer server;

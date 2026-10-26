@@ -84,6 +84,16 @@ function renderWithRealtime(ui: React.ReactElement) {
 }
 
 describe('DeviceCommandControls - truthful command dispatch UI', () => {
+  it('uses the existing command API for the explicitly provisioned USB servo profile', async () => {
+    vi.mocked(deviceApi.sendDeviceCommand).mockResolvedValue({executionId:'exec',requestId:'req',matchId:null,
+      actionType:'SEND_COMMAND',parameters:{},status:'SUCCESS',timestamp:new Date().toISOString(),message:'published'});
+    renderWithRealtime(<DeviceCommandControls deviceId="dev-1" capabilities={[
+      capability({capabilityType:'SERVO',metadata:{usbBoard:'ESP3'}})]} />);
+    fireEvent.click(screen.getByRole('button',{name:'Door OPEN (120°)'}));
+    await waitFor(()=>expect(deviceApi.sendDeviceCommand).toHaveBeenCalledWith('dev-1',{
+      capability:'SERVO',command:'SET_STATE',value:120}));
+    expect(screen.getByText(/Physical movement is unverified/)).toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

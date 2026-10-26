@@ -369,7 +369,7 @@ describe('RulesPage - real rules, real matches, no fabrication', () => {
     const refetch = vi.fn();
     mockUsePolling.mockImplementation((key: any) => (Array.isArray(key) && key[0] === 'rule-matches' ? emptyMatchesPolling : { data: [rule()], isLoading: false, refetch }));
     renderPage();
-    fireEvent.click(screen.getByRole('button', { name: /Visual Studio/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Visual Rule Builder/ }));
     expect(screen.getByTestId('studio')).toHaveTextContent('studio:new');
     fireEvent.click(screen.getByText('fake-saved'));
     expect(refetch).toHaveBeenCalledTimes(1);

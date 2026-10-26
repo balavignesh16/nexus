@@ -17,6 +17,19 @@ public final class ModelGateway {
     private final GuardSettings settings;
     private final boolean sendDeviceEvidence;
     private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+    private final AtomicLong providerAttempts = new AtomicLong();
+    private final AtomicLong providerResponses = new AtomicLong();
+    private volatile LastOutcome lastOutcome;
+
+    public record LastOutcome(String outcome, java.time.Instant finishedAt, long durationMillis) {}
+    public record RuntimeStatus(ProviderIdentity identity, boolean configured, boolean evidenceConsent,
+                                long providerAttempts, long providerResponses, LastOutcome lastOutcome) {}
+
+    /** Operational metadata only. Schema acceptance does not imply downstream evidence validation. */
+    public RuntimeStatus runtimeStatus() {
+        return new RuntimeStatus(provider.identity(), provider.available(), sendDeviceEvidence,
+                providerAttempts.get(), providerResponses.get(), lastOutcome);
+    }
 
     public ModelGateway(ModelProvider provider, AiCallGuard guard, GuardSettings settings, boolean sendDeviceEvidence) {
         this(provider, guard, new PromptAssembler(settings.maxContextChars()), settings, sendDeviceEvidence);
@@ -31,6 +44,14 @@ public final class ModelGateway {
     }
 
     public ModelOutcome ask(ModelRequest request) {
+        long started = System.nanoTime();
+        ModelOutcome outcome = askBounded(request);
+        lastOutcome = new LastOutcome(outcome instanceof ModelOutcome.Refused refused ? refused.code().name() : "SCHEMA_ACCEPTED",
+                java.time.Instant.now(), (System.nanoTime() - started) / 1_000_000);
+        return outcome;
+    }
+
+    private ModelOutcome askBounded(ModelRequest request) {
         ProviderIdentity identity = provider.identity();
         if (!provider.available()) return refuse(RefusalCode.DISABLED, null, identity);
         if (request.carriesDeviceEvidence() && !sendDeviceEvidence) return refuse(RefusalCode.NO_CONSENT, null, identity);
@@ -40,7 +61,12 @@ public final class ModelGateway {
         } catch (PromptAssembler.TooLarge e) {
             return refuse(RefusalCode.CONTEXT_TOO_LARGE, null, identity);
         }
-        AiCallGuard.Result result = guard.call(() -> provider.complete(prompt, settings.maxOutputChars()));
+        AiCallGuard.Result result = guard.call(() -> {
+            providerAttempts.incrementAndGet();
+            String response = provider.complete(prompt, settings.maxOutputChars());
+            providerResponses.incrementAndGet();
+            return response;
+        });
         if (result.refusal() != null) return refuse(result.refusal(), null, identity);
         if (result.text() != null && result.text().length() > settings.maxOutputChars()) return refuse(RefusalCode.OUTPUT_TOO_LARGE, StructuredOutput.Code.TOO_LARGE, identity);
         try {

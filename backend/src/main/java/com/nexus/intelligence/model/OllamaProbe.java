@@ -28,6 +28,18 @@ public final class OllamaProbe {
 
     private OllamaProbe() {}
 
+    /** Null means not observable, not unloaded. This endpoint never initiates inference. */
+    public static Boolean loaded(String baseUrl, String model, Duration timeout) {
+        URI base = OllamaModelProvider.loopbackOnly(baseUrl);
+        try {
+            HttpClient client = HttpClient.newBuilder().connectTimeout(timeout).followRedirects(HttpClient.Redirect.NEVER).build();
+            for (JsonNode entry : get(client, base.resolve("/api/ps"), timeout).path("models")) {
+                if (model.equals(entry.path("name").asText()) || model.equals(entry.path("model").asText())) return true;
+            }
+            return false;
+        } catch (Exception unavailable) { return null; }
+    }
+
     public static Inspection inspect(String baseUrl, String model, Duration timeout) {
         URI base = OllamaModelProvider.loopbackOnly(baseUrl);
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build();

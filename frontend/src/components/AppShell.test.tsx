@@ -45,8 +45,9 @@ describe('AppShell - navigation, connection state, real overlays', () => {
     });
   });
 
-  it('renders all ten existing navigation destinations with unchanged routes', () => {
+  it('keeps the current destinations accessible in labelled navigation groups', () => {
     renderShell();
+    for(const label of ['Intelligence','Decide & Act','Framework'])fireEvent.click(screen.getByRole('button',{name:label}));
 
     const expected: [string, string][] = [
       ['Overview', '/'],
@@ -56,7 +57,16 @@ describe('AppShell - navigation, connection state, real overlays', () => {
       ['Events', '/events'],
       ['Pipeline', '/pipeline'],
       ['Analytics', '/analytics'],
-      ['AI Intelligence', '/ai'],
+      ['AI Insights', '/intelligence'],
+      ['Three ESP Simulation', '/simulation'],
+      ['Manage Infrastructure', '/infrastructure'],
+      ['Device Onboarding', '/framework/onboarding'],
+      ['Device Templates', '/framework/templates'],
+      ['Capability Definitions', '/framework/capabilities'],
+      ['Generic Rules', '/framework/rules'],
+      ['AI Rule Drafts', '/ai/drafts'],
+      ['Trends', '/trends'],
+      ['Energy Intelligence', '/energy'],
       ['Rules', '/rules'],
       ['Actions', '/actions'],
       ['Settings', '/settings'],
@@ -124,6 +134,32 @@ describe('AppShell - navigation, connection state, real overlays', () => {
     renderShell();
 
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
+  });
+
+  it('collapses explicitly instead of expanding on hover, and restores a selected group', () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button',{name:'Collapse navigation'}));
+    expect(screen.queryByRole('link',{name:'Infrastructure'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Intelligence'}));
+    expect(screen.getByRole('link',{name:'AI Insights'})).toHaveAttribute('href','/intelligence');
+    expect(screen.getByRole('button',{name:'Collapse navigation'})).toBeInTheDocument();
+  });
+
+  it('shows labelled real service states on demand rather than anonymous dots', () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button',{name:'Connection details'}));
+    expect(screen.getByText('MQTT')).toBeInTheDocument();
+    expect(screen.getByText('Database')).toBeInTheDocument();
+    expect(screen.getByText('Realtime')).toBeInTheDocument();
+    expect(screen.getByText('4/4')).toBeInTheDocument();
+  });
+
+  it('opens mobile navigation and closes on Escape', () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button',{name:'Open navigation'}));
+    expect(screen.getByRole('dialog',{name:'Application navigation'})).toBeInTheDocument();
+    fireEvent.keyDown(document,{key:'Escape'});
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('the content slot is not display:flex, so a narrower page cannot leave dark bg-canvas exposed as a right-side gap (regression)', () => {

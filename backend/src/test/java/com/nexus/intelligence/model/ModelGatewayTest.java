@@ -17,6 +17,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** P6-004..P6-016 (model boundary): structured output, prompt assembly, bounds, consent and provider failure, on a fake provider and a fake clock. */
 class ModelGatewayTest {
+    @Test
+    void runtimeMetadataCountsActualProviderEntryAndResponsesNotMerelyQuestions() {
+        ModelGateway disabled = gateway(provider(false, p -> "{}"), settings(1, 2000, 0, 5), true);
+        disabled.ask(request());
+        assertThat(disabled.runtimeStatus().providerAttempts()).isZero();
+        assertThat(disabled.runtimeStatus().lastOutcome().outcome()).isEqualTo("DISABLED");
+        guard.close();
+        ModelGateway invalid = gateway(provider(true, p -> "not JSON"), settings(1, 2000, 0, 5), true);
+        invalid.ask(request());
+        assertThat(invalid.runtimeStatus().providerAttempts()).isEqualTo(1);
+        assertThat(invalid.runtimeStatus().providerResponses()).isEqualTo(1);
+        assertThat(invalid.runtimeStatus().lastOutcome().outcome()).isEqualTo("OUTPUT_INVALID");
+        guard.close();
+        ModelGateway valid = gateway(provider(true, p -> "{\"summary\":\"safe\"}"), settings(1, 2000, 0, 5), true);
+        valid.ask(request());
+        assertThat(valid.runtimeStatus().lastOutcome().outcome()).isEqualTo("SCHEMA_ACCEPTED");
+        assertThat(valid.runtimeStatus().lastOutcome().durationMillis()).isGreaterThanOrEqualTo(0);
+    }
     private static final StructuredOutput.Schema SCHEMA = StructuredOutput.Schema.of(
             Map.of("summary", StructuredOutput.FieldType.STRING, "refs", StructuredOutput.FieldType.STRING_LIST), Set.of("summary"));
 

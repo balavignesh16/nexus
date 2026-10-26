@@ -77,6 +77,44 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
     expect(screen.getAllByText('—').length).toBe(4);
   });
 
+  it('discovers canonical demo sensor keys rather than filtering only uppercase legacy metrics', () => {
+    mockPolling({data:[device({name:'DEMO-ESP2 Safety Room',mode:'SIMULATED'})],isLoading:false},
+      {data:[{...reading(731,1000,'demo_gas_adc'),unit:'ADC_COUNTS'}],isLoading:false});
+    render(<TelemetryPage/>);
+    expect(screen.getByLabelText('Telemetry metric')).toHaveValue('demo_gas_adc');
+    expect(screen.getAllByText('731.0').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Simulated').length).toBeGreaterThan(0);
+    expect(screen.getByText('Gas Adc Trend (ADC_COUNTS)')).toBeInTheDocument();
+    const call=mockUsePolling.mock.calls.find(c=>c[0][0]==='telemetry-page');
+    expect(call?.[2].refetchInterval).toBe(5000);
+  });
+
+  it('keeps Boolean false and text states in the table without fabricated numeric statistics', () => {
+    mockPolling({data:[device()],isLoading:false},{data:[
+      {id:'a',timestamp:1000,payload:{demo_led_state:false}},
+      {id:'b',timestamp:2000,payload:{demo_alarm:'NORMAL'}},
+    ],isLoading:false});
+    render(<TelemetryPage/>);
+    expect(screen.getByText('false')).toBeInTheDocument();
+    expect(screen.getByText('State/text telemetry — see readings below.')).toBeInTheDocument();
+    expect(screen.queryByText('0.0')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Telemetry metric'),{target:{value:'demo_alarm'}});
+    expect(screen.getByText('NORMAL')).toBeInTheDocument();
+  });
+
+  it('keeps zero numeric but does not mix incompatible units or coerce null into zero', () => {
+    mockPolling({data:[device()],isLoading:false},{data:[
+      {...reading(100,1000,'temperature'),unit:'FAHRENHEIT'},
+      {...reading(0,2000,'temperature'),unit:'CELSIUS'},
+      {id:'missing',timestamp:3000,payload:{temperature:null},unit:'CELSIUS'},
+    ],isLoading:false});
+    render(<TelemetryPage/>);
+    expect(screen.getAllByText('0.0').length).toBe(4);
+    expect(screen.getByText('1 of 1 fetched point(s)')).toBeInTheDocument();
+    expect(screen.queryByText('100.0')).not.toBeInTheDocument();
+    expect(screen.getByText('null')).toBeInTheDocument();
+  });
+
   it('shows a loading state before devices arrive', () => {
     mockPolling(
       { data: [], isLoading: true },
@@ -87,7 +125,7 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
     expect(container.querySelector('[class*="animate"]')).toBeTruthy();
   });
 
-  it('requests telemetry for the selected device via the exact unchanged query key/contract', () => {
+  it('requests one typed device-history snapshot isolated from scalar websocket cache writes', () => {
     mockPolling(
       { data: [device({ id: 'dev-1' }), device({ id: 'dev-2', name: 'Motion Sensor 1' })], isLoading: false },
       { data: [], isLoading: false }
@@ -96,7 +134,7 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
     render(<TelemetryPage />);
 
     const telemetryCall = mockUsePolling.mock.calls.find((c) => c[0][0] === 'telemetry-page');
-    expect(telemetryCall![0]).toEqual(['telemetry-page', 'dev-1', 'TEMPERATURE']);
+    expect(telemetryCall![0]).toEqual(['telemetry-page', 'dev-1', 'all', 'typed-history']);
   });
 
   it('switching the metric selector changes the filtered chart data', () => {
@@ -182,8 +220,8 @@ describe('TelemetryPage - real telemetry, no fabricated chart data', () => {
 
     expect(mockDownloadCsv).toHaveBeenCalledWith(
       expect.stringContaining('telemetry-dev-1-TEMPERATURE-'),
-      ['timestamp', 'sensorType', 'value'],
-      [[new Date(1000).toISOString(), 'TEMPERATURE', '20']]
+      ['timestamp', 'sensorType', 'value', 'unit'],
+      [[new Date(1000).toISOString(), 'TEMPERATURE', '20', '']]
     );
   });
 
