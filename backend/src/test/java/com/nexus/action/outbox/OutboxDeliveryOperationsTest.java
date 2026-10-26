@@ -209,7 +209,10 @@ class OutboxDeliveryOperationsTest {
     void aPublishThatCompletesAfterTheWindowIsLateAndUncertainNeverANormalPublish() throws Exception {
         UUID device = kit.device();
         // payload time 13 s ago: the 15 s window ends about 2 s from now
-        UUID command = kit.enqueue(device, Instant.now().minusSeconds(13));
+        // The window is judged on the DATABASE clock, so the 13 s are measured on it too: the JVM clock and the container's clock can differ by seconds
+        // on a loaded or recently resumed machine, which made this two-second margin flaky (seen once in the P4-FINAL batched gate).
+        Instant databaseNow = kit.jdbc.queryForObject("SELECT clock_timestamp()", java.sql.Timestamp.class).toInstant();
+        UUID command = kit.enqueue(device, databaseNow.minusSeconds(13));
         Claimed claimed = claim(command);
         Thread.sleep(3200);
         Resolution r = kit.ops.complete(claimed, AttemptResult.CONFIRMED, null);

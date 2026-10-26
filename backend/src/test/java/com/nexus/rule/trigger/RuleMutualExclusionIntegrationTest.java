@@ -67,7 +67,7 @@ class RuleMutualExclusionIntegrationTest extends TypedTriggerSupport {
         assertTrue(candidate(a).get("evidence").toString().contains(group.groupId().toString()), "the persisted evidence names the group");
         assertTrue(candidate(a).get("evidence").toString().contains("\"rank\": 2"));
         assertEquals(1, count("SELECT count(*) FROM rule_matches WHERE rule_id=?", a), "the excluded rule's match is still attributed history");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void anEqualBestRankFailsClosedAndWithoutAGroupBothActAsBefore() {

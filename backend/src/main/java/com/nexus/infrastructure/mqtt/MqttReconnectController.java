@@ -2,7 +2,6 @@ package com.nexus.infrastructure.mqtt;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -94,8 +93,11 @@ public class MqttReconnectController {
                 MqttReconnectController::secondsSinceLastSuccess);
     }
 
-    @PostConstruct
+    private boolean initialized;
+    @org.springframework.context.event.EventListener(org.springframework.context.event.ContextRefreshedEvent.class)
     synchronized void init() {
+        if(initialized) return;
+        initialized=true;
         if (mqttClient.isConnected()) {
             state = State.CONNECTED;
             lastSuccessfulConnect = Instant.now();

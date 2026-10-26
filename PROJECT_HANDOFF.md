@@ -1,5 +1,16 @@
 # NEXUS: current project handoff
 
+## Current handoff — 2026-10-26
+
+Canonical folder: `D:\nexus`; branch: `main`. All phase branches through Phase 6 and the latest pending
+UI/model/demo/USB changes have been brought together. Read `README.md` for actual startup commands and
+`architecture/consolidation-20261026.md` for the inventory and validation record.
+Earlier handoff claims about the next Phase 3 slice or uncommitted work describe old checkpoints only.
+Use acceptance ledgers for exact completion: Phase 6 extension certification P6-241/P6-242 is still PLANNED.
+Real USB devices and simulated devices remain separate; the physical output issue is not certified resolved.
+
+## Historical handoff (preserved)
+
 Checkpoint: 2026-10-14 (Slices 2-5 implemented locally and uncommitted on top of the 2026-10-13 foundation). This is the small current-state entry point for any agent.
 Read `NEXT_TASK.md` next; detailed contracts are referenced, not duplicated here.
 

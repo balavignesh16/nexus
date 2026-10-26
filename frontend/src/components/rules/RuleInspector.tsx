@@ -1,5 +1,5 @@
 import type { Node } from 'reactflow';
-import { Settings, Info, AlertCircle, FileJson, BookOpen, AlertTriangle } from 'lucide-react';
+import { Settings, AlertCircle, FileJson, BookOpen, AlertTriangle } from 'lucide-react';
 import { ACTION_TYPES } from '../../utils/workflowCompiler';
 
 interface RuleInspectorProps {
@@ -14,9 +14,11 @@ const ACTIONS: string[] = [...ACTION_TYPES];
 export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps) {
   if (!selectedNode) {
     return (
-      <div className="w-80 bg-card border-l border-border h-full shrink-0 flex flex-col items-center justify-center p-6 text-center text-muted-foreground">
-        <Info size={32} className="mb-4 opacity-20" />
-        <p className="text-sm">Select a node on the canvas to configure its properties.</p>
+      <div className="studio-inspector bg-card border-l border-border h-full shrink-0 flex flex-col items-center justify-center p-6 text-center text-muted-foreground">
+        <div className="rounded-2xl bg-muted p-4 mb-4"><Settings size={24}/></div>
+        <h2 className="text-foreground font-semibold mb-2">Block properties</h2>
+        <p className="text-sm leading-relaxed">Select a block to configure its event, condition or action.</p>
+        <p className="text-xs leading-relaxed mt-5">Connect blocks using their side handles. Validate before saving; activation remains a separate step.</p>
       </div>
     );
   }
@@ -28,7 +30,7 @@ export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps
   };
 
   return (
-    <div className="w-80 bg-card border-l border-border h-full shrink-0 flex flex-col">
+    <div className="studio-inspector bg-card border-l border-border h-full min-h-0 shrink-0 flex flex-col">
       <div className="p-4 border-b border-border flex items-center gap-2">
         <Settings size={16} className="text-muted-foreground" />
         <h2 className="font-semibold text-foreground">Node Properties</h2>
@@ -168,7 +170,7 @@ export function RuleInspector({ selectedNode, onUpdateNode }: RuleInspectorProps
             <BookOpen size={12} /> Documentation
           </h3>
           <div className="text-xs text-muted-foreground">
-            <p className="mb-2">Visit the <a href="#" className="text-blue-500 hover:underline">Nexus Docs</a> for advanced configuration guides for this node type.</p>
+            <p className="mb-2">Conditions use AND semantics. Saving and dry-running do not activate a rule. Drawing a branch does not make it executable.</p>
           </div>
         </div>
       </div>

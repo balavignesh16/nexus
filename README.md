@@ -1,100 +1,98 @@
-# NEXUS — The Physical Intelligence Framework
+# NEXUS — Physical Intelligence Framework
 
-## Reproducible development baseline
+**Canonical checkout: `D:\nexus`, branch `main`.** Phase 4.5/4.6, Phase 5, Phase 6 and the latest
+operator-interface, Ollama, three-ESP demo and USB work are integrated here. Older worktrees are recovery
+copies, not dependencies. Read [the consolidation record](architecture/consolidation-20261026.md).
 
-Supported environment: Java 21 LTS (newer JDKs best-effort), Node.js 22+,
-Python 3.11+, Docker with modern Compose, TimescaleDB 2.16.1/PostgreSQL 16,
-and Mosquitto 2.x. Ports: backend 8080, frontend 5173, MQTT 1883, PostgreSQL
-5432. Copy .env.example to .env for overrides; never commit real keys.
+## Included features
 
-    python start_nexus.py
-    python start_nexus.py --help
-    python start_nexus.py --no-simulator
-    python start_nexus.py --duration 60 --infra-down-on-exit
-    python stop_nexus.py --list
-    python stop_nexus.py --infra
-    python validate_nexus.py --fast
-    python validate_nexus.py --full
+- Generic capability definitions/templates, onboarding and Site → Building → Space placement.
+- Separate reported/desired Twin state, history, quality and qualified convergence.
+- Versioned rules, guarded execution, arbitration, cooldown/hysteresis and backend dry-run.
+- Durable telemetry intake, command outbox, fenced dispatch, retry and uncertain-delivery holds.
+- Adapter contracts/SDKs, bounded model access and evidence-grounded assistant/analysis screens.
+- Local Ollama with explicit consent and deterministic fallback; no AI activation/approval bypass.
+- Three SIMULATED ESPs, infrastructure creation, typed telemetry and the updated navigation/rule builder.
+- Separate REAL USB identities, reconstructed firmware/bridge, preserved ESP1 button sketch and project reports.
 
-Startup rejects occupied ports unless --reuse verifies an independently running
-NEXUS service. A second live orchestrator is always rejected. Readiness is
-bounded; Vite stays on 5173. Ignored .nexus/ contains runtime ownership, logs,
-and validation reports. --clean never removes databases or Docker volumes.
+This is not a new certification. P6-241 and P6-242 remain PLANNED. A device ACK, qualified convergence and
+independently observed physical effect are distinct evidence. The physical LED/servo issue is not certified fixed.
 
-Full validation requires a stopped application environment. For collisions run
-python stop_nexus.py --infra. For readiness or migration failures inspect
-.nexus/logs and .nexus/validation/latest.txt.
+## Start
 
-Automated end-to-end evidence is an **integrated simulated
-physical-intelligence software loop**, not proof of a physical ESP32 loop.
+Prerequisites: Java 21 LTS, Node.js 22+, Python 3.11+, Docker Desktop/Compose.
+Ports: PostgreSQL5432, MQTT1883, backend8080, frontend5173, demo8766; optional Ollama11434.
 
-### Capability-definition foundation
+```powershell
+cd D:\nexus
+.\start.bat
+```
 
-The backend exposes additive capability metadata through GET/POST
-/api/v1/capability-definitions and GET/PUT
-/api/v1/capability-definitions/{id}. Definitions use stable lower-snake-case
-string keys and typed constraints. Active telemetry, Twin, Rule, command,
-frontend, and simulator paths still use CapabilityType compatibility; arbitrary
-new definitions do not yet flow end-to-end. Device templates and runtime
-cutover remain later work.
+For the interactive ESP demonstration, use a second terminal:
 
-A framework for transforming physical-world telemetry into contextual intelligence.
+```powershell
+cd D:\nexus
+.\start_demo.bat
+# On a fresh database only, explicitly provision before first use:
+# .\start_demo.bat --provision
+```
 
-## Core Vision
-NEXUS transforms physical-world telemetry into intelligence through a fundamental processing loop:
-**SENSE → CONNECT → UNDERSTAND → DECIDE → ACT → LEARN**
+The migrated ignored configuration preserves existing device UUIDs. Do not launch duplicate app/bridge processes.
+Stop the demo/bridge with Ctrl+C, then use `python stop_nexus.py` in this folder to stop the app.
+Do not delete PostgreSQL/MQTT data or SQLite delivery journals to force recovery.
 
-## Simulation-First Principle
-NEXUS is designed simulation-first. The backend does not differentiate between a simulated device and physical hardware. Both communicate over the exact same MQTT contract, ensuring the software architecture is robust before physical devices are integrated.
+### Optional Ollama
 
-## High-Level Architecture & Tech Stack
-- **Backend:** Modular Monolith using Java 21 & Spring Boot 3
-- **Frontend:** Single Page Application using React 19, TypeScript, Vite & React Query
-- **Messaging:** Eclipse Mosquitto (MQTT) & Spring STOMP WebSockets
-- **Database:** PostgreSQL / TimescaleDB (JPA-backed persistence for telemetry, events, actions, pipeline traces, and digital twin state)
-- **Simulator:** Python-based virtual device engine & Frontend Scenario Engine
+Start your installed Ollama server separately; no model is downloaded automatically:
 
-## Repository Structure
-This is a monorepo containing the following components:
-- `backend/` — The Java/Spring Boot core platform.
-- `frontend/` — The React/TypeScript/Vite Operations Center UI.
-- `simulator/` — The Python virtual device and telemetry generation engine.
-- `infrastructure/` — Docker Compose, Mosquitto, and PostgreSQL configuration.
-- `architecture/` — ADRs, Component Diagrams, and RC1 Validation reports.
+```powershell
+.\start.bat --ollama --model llama3.2:3b --allow-local-evidence
+```
 
-## Development Status
-**Current Phase: F0 — Platform Stabilization & Baseline Freeze**
+Default startup is deterministic-only. Free sufficient memory before inference; the supervised inference smoke
+retains its4GiB free-memory gate. The assistant explains stored platform evidence, not general chatbot answers.
 
-The framework currently features a fully functional decoupled Realtime Platform (F7) and Pipeline Observability module (F7.5). The backend implements the complete loop from Telemetry to Events to Rules to Actions. 
+### Optional physical USB bench
 
-### Current Data Flow
-`Device ➔ MQTT ➔ Telemetry ➔ Twin ➔ Event ➔ Rule ➔ Action ➔ Pipeline ➔ Realtime STOMP ➔ Frontend React Query ➔ UI`
+Read [USB instructions](usb-integration/README.md), close Arduino Serial Monitor/Plotter, and use the bench
+launcher INSTEAD of start.bat when deliberately enabling the exact REAL-device allowlists:
 
-### Hybrid Operating Modes
-The NEXUS frontend supports multiple execution environments. The shipped default is **live-backend, not demo** (`DEMO_MODE` defaults to `false`, overridable via the `VITE_DEMO_MODE` build env var):
-- **Backend Mode (default):** Connects to the real Spring Boot backend; the realtime WebSocket connects live rather than parking in a demo state, so React Query polling and live push both reflect real data.
-- **Demo Mode:** Operates entirely offline using a frontend `ScenarioEngine` and `DemoRepository` mock data. Still available by setting `VITE_DEMO_MODE=true`, but is opt-in rather than the default.
-- **Hybrid Mode:** The global `DataSourceResolver` still falls back to `DemoRepository` fixtures per-call when a live backend request fails or returns an empty result (e.g. a freshly-restarted backend with no rules registered yet will show a sample rule rather than an empty list) — this fallback is independent of the `DEMO_MODE`/`VITE_DEMO_MODE` setting above and has not been removed.
-- **Realtime Mode:** Uses WebSockets to push live data directly into the React Query cache via `RealtimeRepositorySync`.
+```powershell
+.\usb-integration\start_app.ps1
+# In a second terminal:
+python usb-integration/bridge.py --config usb-integration/config.local.json
+```
 
-## Current Limitations & Known Issues (Pre-F8)
-NEXUS is currently in a pre-production baseline state and has several critical limitations:
-1. **Rule State Is Still Volatile:** Telemetry, Events, Action History, Pipeline Traces, and Digital Twin state are now persisted to PostgreSQL/TimescaleDB via JPA (verified against a real TimescaleDB instance, including restart/hydration). Rules and rule-match history, however, remain in an in-memory `RuleRegistry`/`BoundedRuleMatchStore` and are still lost on backend restart.
-2. **No Security:** The platform lacks authentication (AuthN), authorization (AuthZ), JWT, and Spring Security. The MQTT broker runs with `allow_anonymous true`.
-3. **Hardware Integration:** Real ESP32/C++ edge gateways do not exist yet.
-4. **Digital Twin Limitations:** Digital Twins currently only support "Current State" reporting. Desired state reconciliation is not yet implemented.
-5. **No AI:** Decisions are made by the deterministic rule engine described above; no AI/ML model, inference, or anomaly-detection code exists in the codebase yet, despite the project's long-term framing.
-6. **Action Execution Is Stubbed:** The Action Execution Framework correctly dispatches matched rules and persists a real history of each attempt, but the registered executors (alert, command, webhook) are stub implementations that log and record a result rather than calling a real external system or physical actuator.
+For a lightweight simulation demo leave the USB bridge stopped. It never needs to be running to show the
+SIMULATED ESPs. GPIO/software state and ACKs are not independent physical measurements.
 
-## Local Development
-Prerequisites: Docker and Docker Compose.
+## Open
 
-1. **Configuration:** Copy `.env.example` to `.env` in the root directory.
-2. **Start Infrastructure:** `docker compose -f infrastructure/docker-compose.yml --env-file .env up -d`
-3. **Start Backend:** `cd backend && mvnw spring-boot:run`
-4. **Start Frontend:** `cd frontend && npm run dev`
-5. **Run Simulator:** `cd simulator && python -m nexus_simulator`
+| Screen | URL |
+|---|---|
+| Home | http://localhost:5173 |
+| Three ESP demo | http://localhost:5173/simulation |
+| Telemetry | http://localhost:5173/telemetry |
+| Infrastructure creation | http://localhost:5173/infrastructure |
+| Device onboarding | http://localhost:5173/framework/onboarding |
+| Assistant/model status | http://localhost:5173/assistant |
+| Rules/visual builder | http://localhost:5173/rules |
+| Actions/delivery history | http://localhost:5173/actions |
 
-*Alternatively, run `start.bat` on Windows to launch all services.*
+The ESP demo is behavioural software simulation, not circuit simulation or calibrated gas evidence.
+MQTT backlog can delay stored telemetry; inspect timestamps, not just Live badges.
 
-> **Security Warning:** The Mosquitto MQTT broker is strictly configured for trusted local development. Do not expose this service to the internet without configuring TLS and password authentication.
+## Layout and validation
+
+`backend/`, `frontend/`, `simulator/`: platform, UI and original simulator.
+`demo-simulation/`, `usb-integration/`: interactive model, firmware and serial bridge.
+`sdk/`, `contracts/`, `infrastructure/`: SDKs, wire schemas and local services.
+`architecture/`: contracts, acceptance ledgers and dated evidence.
+`ARDUINO_TEST/` and root PDFs/DOCX files: preserved project/review materials.
+Ignored `.nexus/`: runtime ownership, private configs, delivery journal, logs and recovery evidence.
+
+Run focused tests first. `python validate_nexus.py --full` is an expensive separately controlled certification
+gate, not implied by a passing build or this consolidation. Never rewrite existing migration checksums or reset
+the development database to make startup pass. Existing evaluation/anomaly-quality failures remain documented.
+
+**Local/private use only:** no general user authentication; do not expose anonymous MQTT or the app publicly.

@@ -14,17 +14,24 @@ import { EmptyState } from '../components/foundation/EmptyState';
 import { ErrorState } from '../components/foundation/ErrorState';
 import { LoadingBlock } from '../components/foundation/LoadingState';
 import { DataSourceBadge } from '../components/ui/DataSourceBadge';
+import { CommandLifecyclePanel } from '../components/actions/CommandLifecyclePanel';
+import { DeadLettersCard } from '../components/actions/DeadLettersCard';
+import { deliveryLabel, formatInstant } from '../utils/commandLifecycle';
+import { normalizeAction } from '../utils/normalizeAction';
 
 // ACCEPTED_FOR_DISPATCH is durable intent; MQTT delivery is not yet known.
 const STATUS_FILTERS = ['ALL', 'ACCEPTED_FOR_DISPATCH', 'SUCCESS', 'FAILURE', 'IGNORED', 'UNSUPPORTED'];
 
 export default function ActionsPage() {
   const { actions } = useRepositories();
-  const { data: globalActions = [], isLoading, error } = usePolling(
+  const { data: loadedActions = [], isLoading, error } = usePolling(
     ['global-actions-history'],
     () => actions.getActions(undefined, 100),
     { interval: 3000 }
   );
+  // History rows and live (realtime) rows have different shapes; one boundary makes them one shape (P4-102, decision D5).
+  const globalActions = useMemo(() => (loadedActions as unknown[]).map(normalizeAction), [loadedActions]);
+  const [openLifecycle, setOpenLifecycle] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
@@ -42,14 +49,21 @@ export default function ActionsPage() {
 
   // Real ExecutionStatus values from the backend - the comparison always
   // uses the real 'FAILURE' spelling; only the displayed label is humanized.
-  const getActionStatus = (status: string, actionType?: string) => {
+  const getActionStatus = (status: string | undefined, actionType?: string, deliveryState?: string, deliveryReason?: string) => {
     switch (status) {
-      case 'ACCEPTED_FOR_DISPATCH': return { label: 'Delivery unknown', icon: Clock, color: 'var(--warning)' };
+      case 'ACCEPTED_FOR_DISPATCH': {
+        // With the outbox the delivery state says exactly where the command is; without a delivery record it is genuinely unknown.
+        const delivery = deliveryLabel(deliveryState, deliveryReason);
+        return { label: delivery ? delivery.label : 'Delivery unknown', icon: Clock, color: 'var(--warning)' };
+      }
       case 'SUCCESS': return { label: actionType === 'SEND_COMMAND' ? 'Published to MQTT' : 'SUCCESS', icon: CheckCircle2, color: 'var(--success)' };
-      case 'FAILURE': return { label: 'Failed', icon: XCircle, color: 'var(--danger)' };
+      case 'FAILURE': {
+        const delivery = deliveryState === 'DEAD_LETTER' ? deliveryLabel(deliveryState, deliveryReason) : null;
+        return { label: delivery ? delivery.label : 'Failed', icon: XCircle, color: delivery?.tone === 'warning' ? 'var(--warning)' : 'var(--danger)' };
+      }
       case 'UNSUPPORTED': return { label: 'Unsupported', icon: XCircle, color: 'var(--warning)' };
       case 'IGNORED': return { label: 'Ignored', icon: RotateCw, color: 'var(--foundation-muted-fg)' };
-      default: return { label: status || 'Unknown', icon: RotateCw, color: 'var(--foundation-muted-fg)' };
+      default: return { label: status ? 'Status not recognised' : 'Status not available', icon: RotateCw, color: 'var(--foundation-muted-fg)' };
     }
   };
 
@@ -139,7 +153,7 @@ export default function ActionsPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 {filteredActions.map((action: any, i: number) => {
-                  const status = getActionStatus(action.status,action.actionType);
+                  const status = getActionStatus(action.status, action.actionType, action.deliveryState, action.deliveryReason);
                   const targetDevice = action.deviceId || action.parameters?.deviceId || 'System';
                   return (
                     <GlassPanel
@@ -157,12 +171,12 @@ export default function ActionsPage() {
                           'Request ID': action.requestId || 'N/A',
                           'Rule Match ID': action.matchId || 'N/A',
                           'Target Device': targetDevice,
-                          'Execution Time': new Date(action.timestamp).toLocaleString(),
+                          'Execution Time': formatInstant(action.timestamp),
                           'Status': status.label,
                           'Message': action.message || 'N/A',
                         },
                         history: [
-                          { time: new Date(action.timestamp).toLocaleString(), action: status.label, details: action.message || 'No message returned by the executor.' },
+                          { time: formatInstant(action.timestamp), action: status.label, details: action.message || 'No message returned by the executor.' },
                         ],
                         rawJson: action,
                         correlationId: undefined,
@@ -179,7 +193,7 @@ export default function ActionsPage() {
                           <div className="flex items-center justify-between gap-3 flex-wrap">
                             <span className="text-sm font-semibold text-foundation-fg">{action.actionType}</span>
                             <span className="text-xs font-mono text-foundation-tertiary-fg shrink-0">
-                              {new Date(action.timestamp).toLocaleString()}
+                              {formatInstant(action.timestamp)}
                             </span>
                           </div>
                           <div className="text-xs text-foundation-muted-fg mt-0.5 font-mono truncate" title={targetDevice}>
@@ -189,7 +203,7 @@ export default function ActionsPage() {
                           {action.actionType === 'SEND_COMMAND' && <p className="text-xs text-foundation-muted-fg mt-1">
                             Command: {action.commandStatus ?? (action.status === 'SUCCESS' ? 'PUBLISHED' : action.status)}
                             {' · '}Execution: {action.executionStatus ?? action.status}
-                            {action.ackDeadlineAt ? ` · ACK deadline ${new Date(action.ackDeadlineAt).toLocaleString()}` : ''}
+                            {action.ackDeadlineAt ? ` · ACK deadline ${formatInstant(action.ackDeadlineAt)}` : ''}
                             {action.ackBackendReceivedAt && action.ackDeadlineAt && new Date(action.ackBackendReceivedAt) > new Date(action.ackDeadlineAt) ? ' · Late ACK' : ''}
                           </p>}
 
@@ -202,7 +216,7 @@ export default function ActionsPage() {
                             </span>
 
                             {/* Acknowledgement - only SEND_COMMAND rows ever carry ack data */}
-                            {action.actionType === 'SEND_COMMAND' && (
+                            {action.actionType === 'SEND_COMMAND' && action.requestId && (
                               <span className="flex items-center gap-1.5 text-[10px]">
                                 <span className="text-foundation-muted-fg">Device ack:</span>
                                 <span
@@ -212,6 +226,18 @@ export default function ActionsPage() {
                                   {ackLabel(action.ackStatus).label}
                                 </span>
                               </span>
+                            )}
+
+                            {/* Read-only lifecycle detail: queued, published, acknowledged and verified as separate facts */}
+                            {action.actionType === 'SEND_COMMAND' && action.requestId && (
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium underline"
+                                aria-expanded={openLifecycle === action.requestId}
+                                onClick={(e) => { e.stopPropagation(); setOpenLifecycle(openLifecycle === action.requestId ? null : (action.requestId as string)); }}
+                              >
+                                {openLifecycle === action.requestId ? 'Hide lifecycle' : 'Lifecycle'}
+                              </button>
                             )}
 
                             {/* Real Rule Match investigation link - only when matchId genuinely exists */}
@@ -226,6 +252,7 @@ export default function ActionsPage() {
                               </Link>
                             )}
                           </div>
+                          {action.requestId && openLifecycle === action.requestId && <CommandLifecyclePanel commandId={action.requestId} />}
                         </div>
                       </div>
                     </GlassPanel>
@@ -240,6 +267,7 @@ export default function ActionsPage() {
             <Card level="glass" padding="lg" icon={<RotateCw size={16} />} title="Retry Queue">
               <EmptyState icon={<CheckCircle2 size={24} />} title="No retry view yet." description="With the command outbox enabled, the backend retries commands proven not to have been sent (bounded, then dead-lettered). This page does not list retries yet." />
             </Card>
+            <DeadLettersCard />
             <Card level="glass" padding="lg" icon={<Clock size={16} />} title="Scheduled">
               <EmptyState icon={<Clock size={24} />} title="Not yet implemented." description="Action scheduling is not currently part of NEXUS." />
             </Card>

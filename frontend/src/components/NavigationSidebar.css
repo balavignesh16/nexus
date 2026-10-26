@@ -1,0 +1,40 @@
+.nexus-sidebar { width:244px; flex-shrink:0; min-height:0; display:flex; color:var(--foundation-fg); z-index:10; transition:width .18s ease; }
+.nexus-sidebar.is-compact { width:72px; }
+.nexus-sidebar-panel { display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
+.nexus-nav-heading { min-height:72px; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:16px; border-bottom:1px solid var(--foundation-border); }
+.nexus-nav-heading strong { display:block; font-size:15px; font-weight:650; margin-top:3px; }
+.nexus-nav-eyebrow { display:block; font-size:9px; letter-spacing:.12em; color:var(--foundation-muted-fg); }
+.nexus-nav-collapse,.nexus-nav-mobile-close { display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0; border:1px solid var(--foundation-border); border-radius:9px; color:var(--foundation-muted-fg); cursor:pointer; }
+.nexus-nav-mobile-close { display:none; }
+.nexus-nav-scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:12px 10px; scrollbar-width:thin; scrollbar-color:transparent transparent; }
+.nexus-nav-scroll:hover,.nexus-nav-scroll:focus-within { scrollbar-color:#d3cce5 transparent; }
+.nexus-nav-group { margin-bottom:6px; }
+.nexus-nav-group-toggle { display:flex; align-items:center; gap:9px; width:100%; min-height:36px; padding:8px 10px; border-radius:10px; font-size:11px; font-weight:650; color:var(--foundation-muted-fg); text-align:left; cursor:pointer; }
+.nexus-nav-group-toggle.has-active-route { color:var(--accent); }
+.nexus-nav-chevron { margin-left:auto; flex-shrink:0; transition:transform .15s; }
+.nexus-nav-group-toggle .nexus-nav-chevron.is-open { transform:rotate(180deg); }
+.nexus-nav-links { display:flex; flex-direction:column; gap:3px; margin:3px 0 10px; }
+.nexus-nav-link { position:relative; display:flex; align-items:center; gap:10px; min-height:36px; padding:8px 11px; border-radius:11px; color:var(--foundation-muted-fg); text-decoration:none; font-size:12px; font-weight:500; line-height:1.3; }
+.nexus-nav-link svg { flex-shrink:0; }
+.nexus-nav-link:hover,.nexus-nav-group-toggle:hover,.nexus-nav-health:hover { background:#f3f0fa; color:var(--foundation-fg); }
+.nexus-nav-link[aria-current="page"] { background:#eeebf8; color:#6855a5; font-weight:650; box-shadow:inset 0 0 0 1px #e3dcf5; }
+.nexus-nav-active-dot { width:5px; height:5px; margin-left:auto; border-radius:50%; background:var(--accent); flex-shrink:0; }
+.nexus-nav-footer { padding:10px; border-top:1px solid var(--foundation-border); flex-shrink:0; }
+.nexus-nav-health { width:100%; display:flex; align-items:center; gap:10px; min-height:36px; padding:8px 11px; color:var(--foundation-muted-fg); font-size:11px; text-align:left; border-radius:10px; cursor:pointer; }
+.nexus-nav-count { margin-left:5px; font-variant-numeric:tabular-nums; font-size:10px; }
+.nexus-nav-services { padding:5px 12px; font-size:10px; color:var(--foundation-muted-fg); }
+.nexus-nav-services>div { display:flex; justify-content:space-between; gap:12px; padding:4px 0; }
+.nexus-sidebar button:focus-visible,.nexus-sidebar a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.nexus-sidebar.is-compact .nexus-nav-label,.nexus-sidebar.is-compact .nexus-nav-chevron { display:none; }
+.nexus-sidebar.is-compact .nexus-nav-heading { padding:16px 10px; justify-content:center; }
+.nexus-sidebar.is-compact .nexus-nav-group-toggle,.nexus-sidebar.is-compact .nexus-nav-link,.nexus-sidebar.is-compact .nexus-nav-health { justify-content:center; }
+.nexus-nav-backdrop { display:none; }
+@media(max-width:767px) {
+ .nexus-sidebar,.nexus-sidebar.is-compact { display:none; }
+ .nexus-sidebar.is-mobile-open { display:flex; position:fixed; z-index:50; top:12px; bottom:12px; left:12px; width:min(290px,calc(100vw - 36px)); }
+ .nexus-sidebar.is-mobile-open .nexus-nav-label { display:block; }
+ .nexus-sidebar.is-mobile-open .nexus-nav-collapse { display:none; }
+ .nexus-nav-mobile-close { display:flex; }
+ .nexus-nav-backdrop { display:block; position:fixed; inset:0; background:#28213b55; backdrop-filter:blur(3px); z-index:40; }
+}
+@media(prefers-reduced-motion:reduce) { .nexus-sidebar,.nexus-nav-chevron { transition:none; } }

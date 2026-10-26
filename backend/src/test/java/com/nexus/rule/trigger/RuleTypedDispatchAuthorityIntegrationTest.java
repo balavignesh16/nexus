@@ -25,12 +25,13 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         UUID rule = typedRule(device, "typed command", 1, TELEMETRY, List.of(temperatureAbove("10")), List.of(ledCommand(device, true)));
         ingest(device, 25, now.minusSeconds(5));
         assertEquals(1, commands(device));
+        awaitDelivery();                  // with the outbox ON the dispatcher publishes after the acceptance
         var history = sql.queryForMap("SELECT status,match_id,ack_status FROM action_history WHERE device_id=?", device);
         assertEquals("SUCCESS", history.get("status"), "published to the real broker");
         assertNull(history.get("ack_status"), "publication is not an ACK");
         assertEquals(1, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", device));
         assertEquals(1, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p USING(plan_id) WHERE c.rule_id=? AND c.disposition='SELECTED' AND c.request_id=(SELECT request_id FROM action_history WHERE device_id=?)", rule, device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void pausingBetweenPlanPersistenceAndDispatchDeniesNewAcceptance() {
@@ -47,7 +48,7 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         assertEquals(0, commands(device), "a captured plan cannot authorize a paused rule");
         assertEquals(0, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", device));
         assertEquals(0, count("SELECT count(*) FROM current_twin_verification_state WHERE device_id=?", device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void conflictingRulesFromOneFactAreArbitratedByPriority() {
@@ -61,7 +62,7 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         assertEquals("SUPPRESSED_PRIORITY", suppressed.get("disposition"));
         assertNotNull(suppressed.get("winner_candidate_id"));
         assertEquals(1, matches(loser), "a suppressed candidate keeps its attributed match");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void equalPriorityConflictDispatchesNothingAndRecordsConflictEvidence() {
@@ -71,7 +72,7 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         ingest(device, 25, now.minusSeconds(5));
         assertEquals(0, commands(device));
         assertEquals(2, count("SELECT count(*) FROM rule_action_candidates c JOIN rule_action_plans p USING(plan_id) JOIN rule_trigger_facts f ON f.fact_id=p.fact_id WHERE f.device_id=? AND c.disposition='SUPPRESSED_CONFLICT'", device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void identicalCommandsFromTwoRulesCoalesceIntoOnePublication() {
@@ -88,7 +89,7 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         assertEquals(sql.queryForObject("SELECT candidate_id FROM rule_action_candidates WHERE rule_id=?", UUID.class, first),
             sql.queryForObject("SELECT winner_candidate_id FROM rule_action_candidates WHERE rule_id=?", UUID.class, second));
         assertEquals(1, count("SELECT count(*) FROM rule_matches WHERE rule_id=?", second), "the contributor keeps its own attributed match");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void archivedOrReplacedVersionCannotDispatchFromAnOldPlan() {
@@ -103,6 +104,6 @@ class RuleTypedDispatchAuthorityIntegrationTest extends TypedTriggerSupport {
         }).when(planStore).persist(any(), any());
         try { ingest(device, 25, now.minusSeconds(5)); } finally { reset(planStore); }
         assertEquals(0, commands(device), "the replaced version's captured plan no longer owns execution");
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 }

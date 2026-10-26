@@ -24,6 +24,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TelemetryServiceTest {
+    @Test
+    void registeredButNotAdmittedIsPermanentRejectionWithNoWritesAndDatabaseFailuresStayTransient() {
+        UUID id=UUID.randomUUID();
+        Device device=new Device(id,mock(Space.class),"USB",DeviceType.CUSTOM,"Espressif","ESP32","test","test",com.nexus.device.domain.DeviceMode.REAL);
+        var onboarding=mock(com.nexus.device.onboarding.OnboardingLifecycleService.class);
+        when(deviceRepository.findById(id)).thenReturn(Optional.of(device));
+        var service=new TelemetryService(telemetryRepository,deviceRepository,digitalTwinService,
+                mock(RealtimePublisher.class),mock(PipelineService.class),null,null,onboarding,null);
+        var request=new TelemetryRequest(id,Instant.now(),"TEMPERATURE_SENSOR",22.5,"CELSIUS");
+        when(onboarding.admitsTelemetry(device)).thenReturn(false);
+        assertThrows(com.nexus.device.onboarding.OnboardingTelemetryRejectedException.class,()->service.processTelemetry(request));
+        verifyNoInteractions(telemetryRepository,digitalTwinService);
+        assertEquals(DeviceStatus.REGISTERED,device.getStatus());
+        when(onboarding.admitsTelemetry(device)).thenThrow(new IllegalStateException("database failure"));
+        assertThrows(IllegalStateException.class,()->service.processTelemetry(request));
+        verifyNoInteractions(telemetryRepository,digitalTwinService);
+    }
 
     private TelemetryRepository telemetryRepository;
     private DeviceRepository deviceRepository;

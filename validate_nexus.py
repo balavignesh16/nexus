@@ -10,6 +10,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import nexus_runtime as rt
+import backend_batches
 
 @dataclass
 class Check:
@@ -20,7 +21,10 @@ class Check:
     reason: str
     outputSummary: str = ""
 
-BACKEND_FULL_TIMEOUT_SECONDS = 1800
+# Owner-approved on 2026-10-18 (Phase 5 certification): 1,800 s -> 2,400 s for the complete backend check only. Measured with Phase 5 (243 classes, 1,896 tests,
+# 11 sequential batches): 1,618 s and 1,922 s on the same machine in two runs, against 1,541 s for Phase 4 (219 classes, 1,746 tests); the 1,922 s run exhausted the
+# former budget with every test passing. Nothing else changed: the batches, the per-batch process timeout, the report checks and the failure behaviour are as before.
+BACKEND_FULL_TIMEOUT_SECONDS = 2400
 
 
 def cli() -> argparse.ArgumentParser:
@@ -45,6 +49,34 @@ def execute(name: str, command: list[str], cwd: Path, timeout: int, verbose: boo
         print(f"\n--- {name} ---\n{str(output)[-4000:]}")
     return Check(name, status, stamp, int((time.monotonic() - started) * 1000), reason, str(output)[-2000:])
 
+EVALUATION_RESULTS = rt.ROOT / "backend" / "target" / "p6-eval" / "results"
+
+
+def clear_evaluation_results(directory: Path = EVALUATION_RESULTS) -> int:
+    """Removes the evaluation result files left by an earlier run (a mutation campaign writes them too), so the Phase 6 gate can only read results written by this
+    invocation. Returns how many files were removed."""
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for path in directory.glob("*.json"):
+        path.unlink()
+        removed += 1
+    return removed
+
+
+def backend_batches_check(mvnw: str, verbose: bool) -> Check:
+    started, stamp = time.monotonic(), rt.utc_now()
+    clear_evaluation_results()
+    try:
+        result = backend_batches.run(mvnw, BACKEND_FULL_TIMEOUT_SECONDS, verbose, log_dir=rt.VALIDATION_DIR)
+    except Exception as error:                                   # inventory or orchestration fault: a failed check, never a silent pass
+        return Check("complete backend and integration suite", "FAIL", stamp, int((time.monotonic() - started) * 1000), f"batch orchestration error: {error}")
+    status = "PASS" if result.ok else "FAIL"
+    if verbose or not result.ok:
+        print("\n--- complete backend and integration suite ---\n" + result.summary)
+    return Check("complete backend and integration suite", status, stamp, int((time.monotonic() - started) * 1000), result.summary, result.summary)
+
+
 def skipped(name: str, reason: str) -> Check:
     return Check(name, "SKIP", rt.utc_now(), 0, reason)
 
@@ -65,14 +97,24 @@ def main() -> int:
     checks: list[Check] = []
     py = sys.executable
     checks.append(execute("repository tooling tests", [py, "-m", "unittest", "discover", "-s", "tests", "-v"], rt.ROOT, 180, a.verbose))
+    # P5.1: the standalone wire-contract validator (schemas, fixtures, drift detector, CLI, parity registry). Standard library plus jsonschema only;
+    # no Spring, PostgreSQL, Mosquitto or network. The backend differential test (WireContractParityTest) runs inside the backend batches.
+    checks.append(execute("wire contract validator and device SDK tests (nexus_contract, nexus_device_sdk)", [py, "-m", "unittest", "discover", "-s", "sdk/python/tests", "-t", "sdk/python"], rt.ROOT, 300, a.verbose))
     checks.append(execute("Python tooling syntax", [py, "-m", "py_compile", "start_nexus.py", "stop_nexus.py",
-                                                   "stop_script.py", "validate_nexus.py", "nexus_runtime.py"], rt.ROOT, 60, a.verbose))
+                                                   "stop_script.py", "validate_nexus.py", "nexus_runtime.py", "phase4_enablement_check.py", "backend_batches.py",
+                                                   "tests/p6_eval_gate.py", "tests/p6_eval_manifest.py"], rt.ROOT, 60, a.verbose))
     mvnw = str(rt.ROOT / "backend" / ("mvnw.cmd" if os.name == "nt" else "mvnw"))
     if a.full:
         # Wall-clock budget of the complete backend suite only (real PostgreSQL and Mosquitto containers, 190+ test classes). The suite measured
         # 1,068 s at P4.3 and 1,175 s at P4.4 on the 16 GB development machine, so the former 1,200 s left a 25 s margin and made the gate flaky for reasons
-        # unrelated to correctness; 1,800 s leaves a margin of about 50%. No check, assertion, skip or exit-code handling was changed, and no other budget.
-        checks.append(execute("complete backend and integration suite", [mvnw, "test"], rt.ROOT / "backend", BACKEND_FULL_TIMEOUT_SECONDS, a.verbose))
+        # unrelated to correctness; 1,800 s left a margin of about 50% (raised to 2,400 s for Phase 5, see BACKEND_FULL_TIMEOUT_SECONDS). No check, assertion, skip or exit-code handling was changed, and no other budget.
+        # P4-FINAL: the same set of test classes, run as deterministic sequential bounded batches (backend_batches.py) because one Maven process holding every
+        # container and Spring context exhausted the machine's memory. The budget covers all batches; completeness is proven from the reports.
+        checks.append(backend_batches_check(mvnw, a.verbose))
+        # Phase 6 (ledger P6-086, P6-089): the deterministic evaluation suites run inside the batches above and write their result files; the gate then
+        # RECOMPUTES every verdict from those files (it does not trust them), requires every required suite, checks the corpus against its manifest and compares
+        # the deterministic measures with the committed baseline. Only PASS exits 0; the optional real-model suite is NOT_EVALUATED and is disclosed, not hidden.
+        checks.append(execute("phase 6 deterministic evaluation gate (PASS required)", [py, "tests/p6_eval_gate.py"], rt.ROOT, 120, a.verbose))
     else:
         checks.append(execute("backend compile", [mvnw, "-q", "-DskipTests", "test"], rt.ROOT / "backend", 300, a.verbose))
     npm = "npm.cmd" if os.name == "nt" else "npm"
@@ -86,6 +128,15 @@ def main() -> int:
         checks.append(skipped("simulator unit tests", f"environment not installed at {simpy}"))
     checks.append(execute("git whitespace check", ["git", "diff", "--check"], rt.ROOT, 60, a.verbose))
     if a.full:
+        # Phase 5 (ledger P5-126): the adapter conformance kit at unit level with the extensibility proof (git diff of the Twin, Rule and Phase 4 reliability
+        # packages against the Phase 4 baseline), and the live conformance run of the three adapters against disposable PostgreSQL and Mosquitto with a mixed
+        # fleet. The same classes also run inside the complete backend suite; these named checks make the Phase 5 evidence visible on its own line.
+        checks.append(execute("phase 5 adapter conformance kit and extensibility proof (unit level)",
+                              [mvnw, "-q", "-Dtest=ConformanceKitTest,AdapterConformanceTest,AdapterExtensibilityTest,SharedCasesOracleTest", "test"],
+                              rt.ROOT / "backend", 600, a.verbose))
+        checks.append(execute("phase 5 adapter smoke (MQTT, HTTP and simulator conformance, mixed fleet, on PostgreSQL and Mosquitto)",
+                              [mvnw, "-q", "-Dtest=AdapterConformanceIntegrationTest", "test"],
+                              rt.ROOT / "backend", 600, a.verbose))
         checks.append(execute("deterministic physical-intelligence loop smoke",
                               [mvnw, "-q", "-Dtest=PhysicalIntelligenceLoopSmokeTest", "test"],
                               rt.ROOT / "backend", 600, a.verbose))
@@ -96,6 +147,18 @@ def main() -> int:
                               rt.ROOT / "backend", 600, a.verbose))
         checks.append(execute("isolated database restart/persistence smoke",
                               [mvnw, "-q", "-Dtest=InMemoryDigitalTwinRegistryTest,RuleRegistryPersistenceIntegrationTest", "test"],
+                              rt.ROOT / "backend", 600, a.verbose))
+        # Phase 4 (P4-FINAL, ledger P4-116): real backend processes are started against disposable PostgreSQL and Mosquitto, stopped without any
+        # graceful shutdown at chosen points, and replaced; the assertions are made on durable rows and on what the broker itself received. The
+        # tagged tests are excluded from the ordinary suite above (pom: surefire.excludedGroups) and run here explicitly. The smoke is three
+        # scenarios (kill after acceptance and a standby takes over; kill after publish and recovery stays uncertain without a duplicate; an ACK
+        # timeout that passed during downtime is persisted after the restart); the complete campaign is `-Dsurefire.groups=crash`.
+        checks.append(execute("phase 4 crash-recovery smoke (real processes killed and restarted)",
+                              [mvnw, "-q", "-Dsurefire.groups=crash-smoke", "-Dsurefire.excludedGroups=", "-Dtest=CommandCrashRecoveryTest", "test"],
+                              rt.ROOT / "backend", 1200, a.verbose))
+        # The enablement and rollback checklist (contract R22) as a script, run against a freshly migrated disposable database.
+        checks.append(execute("phase 4 enablement procedure check (script against a migrated database)",
+                              [mvnw, "-q", "-Dsurefire.groups=crash", "-Dsurefire.excludedGroups=", "-Dtest=CommandEnablementProcedureTest", "test"],
                               rt.ROOT / "backend", 600, a.verbose))
     report = {
         "schemaVersion": 1, "mode": "full" if a.full else "fast",

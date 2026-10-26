@@ -1,4 +1,14 @@
-# NEXUS next task: review, then close the remaining Phase 3 obligations
+# NEXUS next task — consolidated checkout
+
+## Current next-task pointer — 2026-10-26
+
+Use the consolidated `D:\nexus` / `main` checkout. Read `README.md` and
+`architecture/consolidation-20261026.md`; do not restart Phase 3 based on the historical brief below.
+Next separately authorized priorities are the MQTT intake backlog/latency diagnosis, final Phase 6 extension
+certification (P6-241/P6-242), and independently observed physical bench verification. A consolidation commit
+does not close these requirements, authorize a full gate, or start Phase 7.
+
+## Historical next-task brief (preserved)
 
 Status (2026-10-14): Slices 2-5 are implemented, validated locally and **uncommitted**. The previous Slice 2 planning brief below is historical. Nothing is staged, committed, tagged or pushed.
 

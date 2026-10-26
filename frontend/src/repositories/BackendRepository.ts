@@ -13,6 +13,7 @@ export class BackendDeviceRepository implements IDeviceRepository {
     
     return {
       id: data.id,
+      mode: data.mode,
       name: data.name,
       status: data.status,
       deviceType: data.deviceType || 'Generic',
@@ -42,6 +43,7 @@ export class BackendDeviceRepository implements IDeviceRepository {
     const items = data.content || data || [];
     return items.map((d: any) => ({
       id: d.id,
+      mode: d.mode,
       name: d.name,
       status: d.status,
       deviceType: d.deviceType || 'Generic',
@@ -73,10 +75,11 @@ export class BackendTelemetryRepository implements ITelemetryRepository {
     // undefined). See getTelemetryHistory() below for the same fix.
     const records = data.records || data.content || [];
     return records
-      .filter((item: any) => item.sensorType === metric)
+      .filter((item: any) => (item.capabilityKey ?? item.sensorType) === metric &&
+        typeof (Object.hasOwn(item, 'typedValue') ? item.typedValue : item.value) === 'number')
       .map((item: any) => ({
         timestamp: new Date(item.timestamp).getTime(),
-        value: Number(item.value)
+        value: Object.hasOwn(item, 'typedValue') ? item.typedValue : item.value
       }));
   }
 
@@ -97,7 +100,7 @@ export class BackendTelemetryRepository implements ITelemetryRepository {
       id: item.id,
       deviceId: item.deviceId,
       timestamp: item.timestamp,
-      payload: { [item.sensorType]: item.value },
+      payload: { [item.capabilityKey ?? item.sensorType]: Object.hasOwn(item, 'typedValue') ? item.typedValue : item.value },
       unit: item.unit,
     }));
   }

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeManager, TOPICS } from './RealtimeManager';
+import { actionFromRealtime } from '../utils/normalizeAction';
 import type { TelemetryPayload, TwinUpdatedPayload, DomainEventPayload, ActionExecutedPayload, PipelineTracePayload, RuleMatchedPayload } from './RealtimeEvents';
 import { normalizeRealtimePipelineTrace } from './normalizePipelineTrace';
 import type { PipelineTracePayload as CanonicalPipelineTracePayload } from '../repositories/types';
@@ -93,15 +94,8 @@ export function RealtimeRepositorySync() {
       const payload = msg.payload;
       if (!payload) return;
       
-      const newAction = {
-        id: payload.executionId,
-        type: payload.status === 'FAILURE' ? 'ACTION_FAILED' : 'ACTION_COMPLETED',
-        actionType: payload.actionType,
-        deviceId: msg.deviceId,
-        timestamp: payload.executedAt,
-        message: payload.message,
-        correlationId: msg.correlationId
-      };
+      // One normalization boundary (P4-102): the live row carries the same fields, and the same ISO timestamp, as a history row.
+      const newAction = actionFromRealtime(payload as unknown as Record<string, unknown>, msg.deviceId, msg.correlationId);
 
       // Update global actions query
       queryClient.setQueryData<any[]>(['global-actions-history'], (old = []) => {
@@ -112,6 +106,9 @@ export function RealtimeRepositorySync() {
       queryClient.setQueryData<any[]>(['actions', 20], (old = []) => {
         return [newAction, ...old].slice(0, 20);
       });
+
+      // The live row is partial (no request id, acknowledgement or delivery state): refetch so the full history row replaces it.
+      queryClient.invalidateQueries({ queryKey: ['global-actions-history'] });
     });
 
     // 5b. Sync Rule Matches -> Annotate matching rule in every cached

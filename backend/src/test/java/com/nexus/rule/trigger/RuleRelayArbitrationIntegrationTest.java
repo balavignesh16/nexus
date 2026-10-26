@@ -85,7 +85,7 @@ class RuleRelayArbitrationIntegrationTest extends TypedTriggerSupport {
         assertEquals(candidate(two).get("request_id"), d2.get("command_id"), "channel 2's desired state is owned by rule 2's request");
         assertEquals("ACCEPTED", candidate(one).get("outcome"));
         assertEquals("ACCEPTED", candidate(two).get("outcome"));
-        verify(executor, times(2)).publishPrepared(any(), any());
+        verifyPublications(2);
     }
 
     @Test void aConflictOnOneChannelNeverTouchesTheOtherChannel() {

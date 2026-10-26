@@ -113,6 +113,17 @@ describe('RuleCanvas persists through the real backend and claims success only f
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('adds a starting trigger locally without saving or activating a rule', async () => {
+    mount(null);
+    expect(screen.getByText('Build your first rule')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Add event trigger'}));
+    expect(screen.queryByText('Build your first rule')).not.toBeInTheDocument();
+    expect(screen.getByText('On event')).toBeInTheDocument();
+    expect(createRule).not.toHaveBeenCalled();
+    expect(updateRule).not.toHaveBeenCalled();
+    expect(dryRun).not.toHaveBeenCalled();
+  });
+
   it('hands the simulator the unsaved graph as an inline definition, or tells the user to fix the graph', async () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: /simulate/i }));

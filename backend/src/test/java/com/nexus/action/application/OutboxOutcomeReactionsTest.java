@@ -76,9 +76,7 @@ class OutboxOutcomeReactionsTest {
         reactions.deadLettered(deadLetter(OutboxTerminalReason.UNCERTAIN_EXPIRED, true));
         verify(verification, never()).commandFailed(any(), any(), any());
         verify(ruleFacts, never()).publicationFailed(any(), any(), any(), any());
-        ArgumentCaptor<com.nexus.pipeline.domain.PipelineTrace> trace = ArgumentCaptor.forClass(com.nexus.pipeline.domain.PipelineTrace.class);
-        verify(pipeline).recordTrace(trace.capture());
-        assertEquals("UNCERTAIN", trace.getValue().getStatus(), "the uncertainty stays visible in the pipeline trace");
+        verify(pipeline, never()).recordTrace(any());   // the projector owns the durable outcome trace (P4-095)
         verify(realtime).publishActionExecuted(any(), eq("corr"));
     }
 

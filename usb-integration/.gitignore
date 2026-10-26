@@ -1,0 +1,6 @@
+.venv/
+.pio/
+__pycache__/
+config.local.json
+diagnostics/
+*.exe

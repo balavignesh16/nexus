@@ -15,6 +15,9 @@ import TelemetryPage from './pages/TelemetryPage';
 import PipelinePage from './pages/PipelinePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AiInsightsPage from './pages/AiInsightsPage';
+import Phase6Page from './pages/Phase6Page';
+import SimulationPage from './pages/SimulationPage';
+import InfrastructureManagePage from './pages/InfrastructureManagePage';
 import SettingsPage from './pages/SettingsPage';
 import CapabilityDefinitionsPage from './pages/framework/CapabilityDefinitionsPage';
 import DeviceTemplatesPage from './pages/framework/DeviceTemplatesPage';
@@ -38,12 +41,19 @@ function App() {
             <Route path="/events" element={<AppShell><EventsPage /></AppShell>} />
             <Route path="/rules" element={<AppShell><RulesPage /></AppShell>} />
             <Route path="/explorer" element={<AppShell><ExplorerPage /></AppShell>} />
+            <Route path="/simulation" element={<AppShell><SimulationPage /></AppShell>} />
+            <Route path="/infrastructure" element={<AppShell><InfrastructureManagePage /></AppShell>} />
             <Route path="/design" element={<AppShell><DesignSystemPage /></AppShell>} />
             <Route path="/twins" element={<AppShell><TwinsPage /></AppShell>} />
             <Route path="/telemetry" element={<AppShell><TelemetryPage /></AppShell>} />
             <Route path="/pipeline" element={<AppShell><PipelinePage /></AppShell>} />
             <Route path="/analytics" element={<AppShell><AnalyticsPage /></AppShell>} />
             <Route path="/ai" element={<AppShell><AiInsightsPage /></AppShell>} />
+            <Route path="/assistant" element={<AppShell><Phase6Page key="assistant" screen="assistant" /></AppShell>} />
+            <Route path="/intelligence" element={<AppShell><Phase6Page key="insights" screen="insights" /></AppShell>} />
+            <Route path="/trends" element={<AppShell><Phase6Page key="trends" screen="trends" /></AppShell>} />
+            <Route path="/ai/drafts" element={<AppShell><Phase6Page key="drafts" screen="drafts" /></AppShell>} />
+            <Route path="/energy" element={<AppShell><Phase6Page key="energy" screen="energy" /></AppShell>} />
             <Route path="/actions" element={<AppShell><ActionsPage /></AppShell>} />
             <Route path="/settings" element={<AppShell><SettingsPage /></AppShell>} />
             <Route path="/system" element={<AppShell><SystemPage /></AppShell>} />

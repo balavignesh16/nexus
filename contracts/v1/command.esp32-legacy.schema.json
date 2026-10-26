@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.invalid/contracts/v1/command.esp32-legacy.schema.json",
+  "title": "ESP32 legacy command profile (what firmware/src/main.cpp accepts)",
+  "description": "Profile layer 2. Mirrors the firmware parser: commandId a string, capability and command strings, value a JSON boolean, timestamp an integer that fits a C long (32 bits on the ESP32). The closed allowlist (capability LED, command SET_STATE) is the profile's UNSUPPORTED rule in nexus_contract.rules and the freshness rule is absolute and 30 seconds (layer 4). A SERVO or RELAY command is valid under the generic contract and invalid under this profile.",
+  "type": "object",
+  "required": ["commandId", "capability", "command", "value", "timestamp"],
+  "properties": {
+    "commandId": { "type": "string" },
+    "capability": { "type": "string" },
+    "command": { "type": "string" },
+    "value": { "type": "boolean" },
+    "timestamp": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 }
+  },
+  "x-nexus-rules": [
+    "unsupported: capability must equal LED and command must equal SET_STATE, otherwise the firmware answers REJECTED/UNSUPPORTED",
+    "stale: abs(now - timestamp) > 30 seconds is REJECTED/STALE"
+  ]
+}

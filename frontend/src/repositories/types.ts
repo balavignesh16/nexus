@@ -32,6 +32,7 @@ export interface Metric {
 
 export interface DeviceState {
   id: string;
+  mode?: 'SIMULATED' | 'REAL';
   name: string;
   status: DeviceStatus;
   deviceType: string;

@@ -56,12 +56,9 @@ public class MQTTConfiguration {
         long timeToWaitMs = (options.getConnectionTimeout() * 1000L) + TIME_TO_WAIT_GRACE_MS;
         mqttClient.setTimeToWait(timeToWaitMs);
 
-        try {
-            mqttClient.connect(options);
-            log.info("Connected successfully to MQTT broker.");
-        } catch (MqttException e) {
-            log.warn("Failed to connect to MQTT broker at startup. The reconnect controller will retry.", e);
-        }
+        // The reconnect controller connects after ContextRefreshedEvent, once the intake callback exists.
+        // A persistent session may deliver QoS1 immediately on CONNECT; manual ACKs must have an owner first.
+        log.info("MQTT client prepared; connection deferred until intake callbacks are installed.");
 
         return mqttClient;
     }

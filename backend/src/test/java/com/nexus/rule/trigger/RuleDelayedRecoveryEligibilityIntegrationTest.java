@@ -58,7 +58,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertEquals(1, matchesOf(fact));
         assertEquals(1, plansOf(fact));
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
         assertEquals(deviceTime, sql.queryForObject("SELECT occurred_at FROM rule_trigger_facts WHERE fact_id=?", java.sql.Timestamp.class, fact).toInstant(), "the occurrence time is never rewritten by recovery");
         assertEquals(0, recovery.recover(10));
         assertEquals(1, commands(device));
@@ -77,7 +77,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertEquals(1, matches(rule));
         assertEquals(1, commands(device));
         clearInvocations(alerts);
-        clearInvocations(executor);
+        resetPublicationSpiesKeepingStubs();
 
         now = now.plusSeconds(10);
         assertEquals(1, recovery.recover(10), "an expired fact is a completed disposition, not a failure");
@@ -89,7 +89,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertEquals(0, plansOf(oldFact));
         assertEquals(1, matches(rule), "only the new fact produced a match");
         assertEquals(1, commands(device), "no second command");
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
         assertEquals(0, recovery.recover(10), "EXPIRED is terminal");
         assertEquals("EXPIRED", status(oldFact));
     }
@@ -106,7 +106,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertEquals("ROUTED", status(fact));
         assertEquals(0, matches(rule), "the P2.3 freshness gate refuses to act on a stale reading");
         assertEquals(0, commands(device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void pauseAndResumeBetweenTheFactAndItsRecoveryNeverLetTheNewEpochActOnTheOldFact() {
@@ -124,7 +124,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertTrue(note(fact).contains("RECOVERY_RULES_NOT_ADMITTED") && note(fact).contains(rule.toString()), note(fact));
         assertEquals(0, matches(rule));
         assertEquals(0, commands(device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void aVersionActivatedAfterTheFactCannotActOnItWhileFutureFactsStillWork() {
@@ -141,7 +141,7 @@ class RuleDelayedRecoveryEligibilityIntegrationTest extends TypedTriggerSupport 
         assertEquals(1, recovery.recover(10));
         assertEquals(0, matches(rule), "the replacement version did not exist when the fact was recorded");
         verify(alerts, never()).execute(any(), any());
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
         assertTrue(note(oldFact).contains("RECOVERY_RULES_NOT_ADMITTED"), note(oldFact));
         ingest(device, 26, now);                                      // the replacement works normally on a fact recorded after it was activated
         assertEquals(1, matches(rule));

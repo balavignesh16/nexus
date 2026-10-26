@@ -1,0 +1,43 @@
+{
+  "corpusHash": "ba9bfa5e128501c4060314418d8d9fb89b9515dbf3626392643c6715f563991b",
+  "files": {
+    "anomaly.json": {
+      "cases": 23,
+      "provenance": "Specification of seeded synthetic series families (generator version 1 in the Java harness). The series are generated, not stored; the specification, seeds, amplitudes and truth labels are fixed here BEFORE results were viewed.",
+      "sha256": "bf57dd349f082e1d75e1c3bb9fe28e76d9a1a99359d0c732f07653ab801fd760"
+    },
+    "drafts.json": {
+      "cases": 64,
+      "provenance": "Hand-written for Phase 6.5: scripted provider replies for the draft path, including replies from an adversary that obeys injected instructions.",
+      "sha256": "28ed5a8db33c7f706331905aaa26a0a42713979d0b72d6b8a07ba150eee496d3"
+    },
+    "injection.json": {
+      "cases": 44,
+      "provenance": "Hand-written for Phase 6.5: attacker-controlled text in each class of the approved injection list, placed into every free-text vector by the suites.",
+      "sha256": "114489935857c853eb89a54f6246a23b733d2b9038a20286833d39bf4b8fc48a"
+    },
+    "lifecycle.json": {
+      "cases": 24,
+      "provenance": "Hand-written for Phase 6.5: command lifecycle views (queued, published, uncertain, expired, acknowledged, acknowledged without verification, contradictory, missing) with required and forbidden statements.",
+      "sha256": "a0ffc4a9efad7960183fe2f465649ae4f4e17923018e6adbaeaeb7d1288c707e"
+    },
+    "narrator.json": {
+      "cases": 67,
+      "provenance": "Hand-written for Phase 6.5 from the fabrication classes in the approved contract (faults, reasons for silence, actuation, calibration, rule outcomes, approval, receipt, verification, causes) plus structural attacks and near-miss alterations; expected results are deterministic.",
+      "sha256": "01b13689bbd431ee745b2baef962265b4c5b717dfcc8f3a029aac4395a0054d2"
+    },
+    "nonmatch.json": {
+      "cases": 12,
+      "provenance": "Hand-written for Phase 6.5: rule non-match scenarios with the reason each must name and the statements each must not make.",
+      "sha256": "76a13c4a1239b5e62862b13fb0f66635128d2a6e7f3828118104008cabfb43ef"
+    },
+    "prose.json": {
+      "cases": 66,
+      "provenance": "Hand-written for Phase 6.5: wordings in the four safety-critical assertion classes, obfuscated variants, benign factual claims and meaning-equivalent paraphrase probes.",
+      "sha256": "449254fd4630ce5ed9d85819371b5cda298140dbee81c20913e6238c90309fef"
+    }
+  },
+  "generatorVersion": "1",
+  "totalCases": 300,
+  "version": "p6-eval-corpus-v1"
+}

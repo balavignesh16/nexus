@@ -69,7 +69,7 @@ public class OutboxOutcomeReactions implements OutboxOutcomeListener {
 
     @Override
     public void published(Resolution r) {
-        broadcastAndTrace(r, "SUCCESS");
+        broadcast(r);
     }
 
     @Override
@@ -87,7 +87,7 @@ public class OutboxOutcomeReactions implements OutboxOutcomeListener {
     public void deadLettered(Resolution r) {
         if (r.uncertain() || r.ackRecorded()) {
             // uncertainty (or an acknowledged command) is never reported as a definite publication failure
-            broadcastAndTrace(r, r.uncertain() ? "UNCERTAIN" : "FAILURE");
+            broadcast(r);
             return;
         }
         String reason = "MQTT_PUBLICATION_FAILED";
@@ -108,7 +108,7 @@ public class OutboxOutcomeReactions implements OutboxOutcomeListener {
                 log.error("Twin verification could not be told that command {} failed", r.commandId(), failure);
             }
         }
-        broadcastAndTrace(r, "FAILURE");
+        broadcast(r);
     }
 
     /**
@@ -137,17 +137,16 @@ public class OutboxOutcomeReactions implements OutboxOutcomeListener {
         }
     }
 
-    private void broadcastAndTrace(Resolution r, String traceStatus) {
+    /**
+     * The realtime ActionExecuted message. The pipeline trace of the outcome is NOT written here any more: the durable, idempotent and
+     * crash-recoverable trace of every lifecycle fact is projected from the state history by {@code CommandTraceProjector} (contract
+     * R37, P4-095), so an outcome whose process died right after commit still has its trace.
+     */
+    private void broadcast(Resolution r) {
         Optional<ActionHistoryRecord> record = actions.findById(r.commandId());
         if (record.isEmpty()) return;
         ActionExecutionResult result = record.get().toResult();
         String correlation = r.correlationId() != null ? r.correlationId() : r.commandId().toString();
-        try {
-            pipeline.recordTrace(PipelineTrace.of(correlation, r.deviceId() == null ? null : r.deviceId().toString(), PipelineStage.ACTION,
-                    r.at().toEpochMilli(), traceStatus, "DELIVERY_" + result.status().name(), null));
-        } catch (RuntimeException e) {
-            log.warn("Pipeline trace for the delivery outcome of command {} could not be recorded", r.commandId(), e);
-        }
         realtime.publishActionExecuted(result, correlation);
     }
 }

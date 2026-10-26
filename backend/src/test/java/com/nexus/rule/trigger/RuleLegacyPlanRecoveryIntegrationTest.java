@@ -66,7 +66,7 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, commands(device), "exactly one command was accepted");
         assertEquals(1, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", device));
         assertEquals(1, count("SELECT count(*) FROM twin_state_transitions WHERE device_id=? AND transition_type='DESIRED_STATE_CHANGED'", device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
         assertEquals("RECOVERED", row(event).get("status"));
         assertEquals("PLAN_CREATED", row(event).get("reason"));
         assertEquals(1, count("SELECT count(*) FROM rule_matches WHERE rule_id=?", rule), "no second match");
@@ -76,7 +76,7 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
 
         assertEquals(0, recovery.recover(10), "RECOVERED is terminal");
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void aTransientFailureDuringRecoveryIsRecordedBackedOffAndRetriedWithinABoundedBudget() {
@@ -141,13 +141,13 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
                 default -> { lifecycle.transition(rule, "pause", null); lifecycle.transition(rule, "resume", null); }
             }
             now = now.plusSeconds(40);
-            clearInvocations(executor);
+            resetPublicationSpiesKeepingStubs();
             assertEquals(0, recovery.recover(10), change);
             assertEquals("EXPIRED", row(event).get("status"), change);
             assertEquals("OWNERSHIP_CHANGED", row(event).get("reason"), change);
             assertEquals(0, plans(event), change + ": no plan, no candidates");
             assertEquals(0, commands(device), change);
-            verify(executor, never()).publishPrepared(any(), any());
+            verifyNoPublication();
             reset(planStore);
             sql.update("UPDATE rules SET lifecycle='PAUSED', enabled=false WHERE rule_id=?", rule);
         }
@@ -215,7 +215,7 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, commands(device), "redelivery never accepts a second command");
         now = now.plusSeconds(40);
         assertEquals(0, recovery.recover(10), "nothing is left for the scanner");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void twoConcurrentRecoveryWorkersProduceOnePlanAndOneCommand() throws Exception {
@@ -236,7 +236,7 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, created);
         assertEquals(1, plans(event));
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
         assertEquals("RECOVERED", row(event).get("status"));
     }
 
@@ -254,7 +254,7 @@ class RuleLegacyPlanRecoveryIntegrationTest extends TypedTriggerSupport {
         assertEquals(0, count("SELECT count(*) FROM rule_legacy_plan_recovery WHERE event_id=? AND status NOT IN ('HISTORICAL','RECOVERED')", event));
         assertEquals(1, plans(event), "no second plan");
         assertEquals(0, commands(device), "an approved plan is a decision: it is never turned into a command by recovery");
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void historicalMatchesFromBeforeRecoveryExistedAreNeverReplayed() {

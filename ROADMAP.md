@@ -1,5 +1,13 @@
 # NEXUS Physical Intelligence Framework Roadmap
 
+## Current consolidation checkpoint — 2026-10-26
+
+All phase branches through Phase 6 and the latest UI/Ollama/demo/USB work are consolidated in `D:\nexus`
+on `main`. See `architecture/consolidation-20261026.md` and the phase acceptance ledgers for actual evidence.
+The earlier broad progress table/checkpoints below are historical and are NOT a claim that later source is absent.
+This operation does not mark untested work complete: Phase 6 extension rows P6-241/P6-242 remain PLANNED,
+and physical LED/servo operation is not established by software acknowledgements. No Phase 7 work was started.
+
 This document is the shared implementation roadmap for evolving NEXUS from a
 three-ESP demonstration into a reusable physical-intelligence framework. Update
 the status checkboxes and decision log as work progresses.

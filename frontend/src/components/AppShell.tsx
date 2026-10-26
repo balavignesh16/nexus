@@ -1,6 +1,7 @@
-import { type ReactNode, useState } from 'react';
-import { Link, useLocation, Outlet } from 'react-router-dom';
-import { Search, Server, Zap, Settings, LayoutDashboard, Box, Signal, FileJson, TrendingUp, Cpu, Bell, Workflow, Boxes } from 'lucide-react';
+import { type ReactNode, useCallback, useState } from 'react';
+import { Link, Outlet } from 'react-router-dom';
+import { Search, Server, Zap, Settings, LayoutDashboard, Box, Signal, FileJson, TrendingUp, Cpu, Bell, Workflow, Boxes, Menu } from 'lucide-react';
+import { NavigationSidebar } from './NavigationSidebar';
 import { DemoScenarioSelector } from './ui/DemoScenarioSelector';
 import { useConnectionStatus } from '../services/ConnectionManager';
 import { CommandPalette } from './ui/CommandPalette';
@@ -14,25 +15,30 @@ interface AppShellProps {
 
 // Grouped by the platform's actual data-flow layers (Physical -> Observation
 // -> Understanding -> Decision), not a flat alphabetical menu - the sidebar
-// itself should communicate what NEXUS is. Unchanged from the pre-redesign
-// shell: same four groups, same ten destinations, same routes.
+// itself should communicate what NEXUS is. Phase 6 adds assistant and analysis
+// destinations while preserving the earlier observation and rule workflows.
 const NAV_GROUPS = [
   {
-    label: 'Observe',
+    label: 'Workspace',
     items: [
       { label: 'Overview', icon: LayoutDashboard, path: '/' },
       { label: 'Infrastructure', icon: Server, path: '/explorer' },
+      { label: 'Manage Infrastructure', icon: Boxes, path: '/infrastructure' },
+      { label: 'Three ESP Simulation', icon: Cpu, path: '/simulation' },
       { label: 'Digital Twin', icon: Box, path: '/twins' },
       { label: 'Telemetry', icon: Signal, path: '/telemetry' },
     ],
   },
   {
-    label: 'Understand',
+    label: 'Intelligence',
     items: [
       { label: 'Events', icon: Zap, path: '/events' },
       { label: 'Pipeline', icon: Workflow, path: '/pipeline' },
       { label: 'Analytics', icon: TrendingUp, path: '/analytics' },
-      { label: 'AI Intelligence', icon: Cpu, path: '/ai' },
+      { label: 'NEXUS Assistant', icon: Cpu, path: '/assistant' },
+      { label: 'AI Insights', icon: Cpu, path: '/intelligence' },
+      { label: 'Trends', icon: TrendingUp, path: '/trends' },
+      { label: 'Energy Intelligence', icon: Zap, path: '/energy' },
     ],
   },
   {
@@ -40,6 +46,7 @@ const NAV_GROUPS = [
     items: [
       { label: 'Rules', icon: FileJson, path: '/rules' },
       { label: 'Actions', icon: Zap, path: '/actions' },
+      { label: 'AI Rule Drafts', icon: FileJson, path: '/ai/drafts' },
     ],
   },
   {
@@ -67,15 +74,11 @@ const CONNECTION_TONE: Record<string, string> = {
 };
 
 export function AppShell({ children }: AppShellProps = {}) {
-  const location = useLocation();
   const connection = useConnectionStatus();
   const [cmdOpen, setCmdOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-
-  const getIsActive = (path: string) => {
-    if (path === '/') return location.pathname === '/';
-    return location.pathname.startsWith(path);
-  };
+  const [mobileOpen,setMobileOpen]=useState(false);
+  const closeMobileNav=useCallback(()=>setMobileOpen(false),[]);
 
   const connectionColor = CONNECTION_TONE[connection.realtimeStatus] ?? 'var(--danger)';
 
@@ -94,6 +97,7 @@ export function AppShell({ children }: AppShellProps = {}) {
         >
           {/* Left: Wordmark */}
           <div className="flex items-center gap-2.5 shrink-0 pl-2">
+            <button type="button" aria-label="Open navigation" aria-expanded={mobileOpen} className="md:hidden text-foundation-muted-fg p-1" onClick={()=>setMobileOpen(true)}><Menu size={20}/></button>
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center"
               style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}
@@ -122,6 +126,7 @@ export function AppShell({ children }: AppShellProps = {}) {
 
           {/* Right: real connection state + real overlays */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <Link to="/assistant" className="text-xs font-semibold text-[var(--accent)] px-3 py-2 rounded-full border border-foundation-border">NEXUS Assistant</Link>
             <DemoScenarioSelector />
 
             <div
@@ -146,82 +151,7 @@ export function AppShell({ children }: AppShellProps = {}) {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden px-4 sm:px-6 pb-4 sm:pb-6 gap-4 sm:gap-6">
-        {/* Sidebar Nav - refined glass rail, hover-expand preserved from the
-            prior shell (same interaction, new visual language). */}
-        <aside className="hidden md:flex w-[72px] hover:w-[224px] flex-col shrink-0 transition-all duration-300 z-10 group/sidebar">
-          <GlassPanel level="elevated" radius="panel-lg" className="flex-1 flex flex-col overflow-hidden">
-            <nav className="flex-1 flex flex-col gap-4 p-3 overflow-hidden">
-              {NAV_GROUPS.map((group) => (
-                <div key={group.label} className="flex flex-col gap-1">
-                  <span className="px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-foundation-tertiary-fg opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200 h-3">
-                    {group.label}
-                  </span>
-                  {group.items.map((item) => {
-                    const active = getIsActive(item.path);
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        aria-current={active ? 'page' : undefined}
-                        className="flex items-center gap-4 rounded-[var(--radius-pill)] p-3 transition-colors text-sm"
-                        style={active
-                          ? { backgroundColor: 'var(--accent)', color: 'var(--accent-foreground)' }
-                          : undefined}
-                      >
-                        <div className="shrink-0">
-                          <item.icon size={19} className={active ? '' : 'text-foundation-muted-fg'} />
-                        </div>
-                        <span
-                          className={`opacity-0 w-0 group-hover/sidebar:w-auto group-hover/sidebar:opacity-100 transition-all whitespace-nowrap overflow-hidden duration-200 font-medium ${active ? '' : 'text-foundation-fg/90'}`}
-                        >
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              ))}
-            </nav>
-
-            {/* Bottom Status Modules - same real ConnectionManager data as before */}
-            <div className="shrink-0 flex flex-col border-t border-foundation-border">
-              <div className="px-3 py-4 flex flex-col gap-3 text-xs overflow-hidden">
-                {[
-                  { label: 'Realtime', status: connection.realtimeStatus },
-                  { label: 'Backend', status: connection.backend },
-                  { label: 'MQTT Broker', status: connection.mqtt },
-                  { label: 'Database', status: connection.database },
-                ].map((service, i) => {
-                  const isOnline = service.status === 'Online' || service.status === 'connected' || service.status === 'demo';
-                  return (
-                    <div key={i} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-foundation-muted-fg shrink-0">
-                        <div
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: isOnline ? 'var(--success)' : 'var(--danger)' }}
-                        />
-                        <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap overflow-hidden w-0 group-hover/sidebar:w-auto duration-200">
-                          {service.label}
-                        </span>
-                      </div>
-                      <span
-                        className="font-medium text-[11px] opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap"
-                        style={{ color: isOnline ? 'var(--success)' : 'var(--danger)' }}
-                      >
-                        {service.status}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="px-5 py-3 border-t border-foundation-border text-[11px] text-foundation-tertiary-fg flex items-center justify-between opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap">
-                <span>v1.0.0</span>
-                <span>Build 250803.1</span>
-              </div>
-            </div>
-          </GlassPanel>
-        </aside>
+        <NavigationSidebar groups={NAV_GROUPS} connection={connection} mobileOpen={mobileOpen} onMobileClose={closeMobileNav}/>
 
         {/* PANE 2/3: DYNAMIC MAIN CONTENT
             Deliberately kept on the legacy dark bg-canvas: pages not yet

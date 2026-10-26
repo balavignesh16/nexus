@@ -75,6 +75,16 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         assertFalse(connectivity.applyObservedStatus(device, DeviceConnectivityStatus.ONLINE));
     }
 
+    /** A broker that cannot take the command: the executor fails directly (outbox OFF); the dispatcher's attempts are proven not sent (outbox ON). */
+    private void failPublication(ActionExecutionRequest request) {
+        if (!outboxMode()) {
+            doAnswer(inv -> new ActionExecutionResult(request.requestId(), request, ExecutionStatus.FAILURE, Instant.now(), "broker unavailable"))
+                .when(executor).publishPrepared(any(), any());
+        } else {
+            doReturn(com.nexus.action.outbox.BrokerCommandPublisher.Attempt.notSent("BROKER_UNAVAILABLE")).when(brokerPublisher).publish(any(), any(), any());
+        }
+    }
+
     @Test void publicationFailureFiresOnlyAfterDurableAcceptance() {
         UUID device = device();
         UUID rule = subscribed(device, TriggerType.COMMAND_PUBLICATION_FAILED, Map.of());
@@ -86,11 +96,12 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         assertEquals(0, matches(rule));
 
         var request = manualCommand(device);
-        doAnswer(inv -> new ActionExecutionResult(request.requestId(), request, ExecutionStatus.FAILURE, Instant.now(), "broker unavailable"))
-            .when(executor).publishPrepared(any(), any());
+        failPublication(request);
         try {
             assertTrue(dispatch.dispatch(request, new ActionContext(null, null), "corr").accepted());
-        } finally { reset(executor); }
+            awaitDelivery();          // with the outbox ON the failure is the dead letter after the bounded retries
+        } finally { resetPublicationSpies(); reset(brokerPublisher); }
+        if (outboxMode()) awaitCondition("the publication-failed fact and its rule match after the dead letter", () -> facts("COMMAND_PUBLICATION_FAILED", device) == 1 && matches(rule) == 1);
         assertEquals(1, facts("COMMAND_PUBLICATION_FAILED", device));
         assertEquals(1, count("SELECT count(*) FROM rule_trigger_facts WHERE trigger_type='COMMAND_PUBLICATION_FAILED' AND source_key=?", request.requestId().toString()));
         assertEquals(1, matches(rule));
@@ -124,6 +135,7 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         UUID rule = subscribed(device, TriggerType.COMMAND_ACK_TIMED_OUT, Map.of());
         var request = manualCommand(device);
         assertTrue(dispatch.dispatch(request, new ActionContext(null, null), "corr").accepted());
+        awaitDelivery();              // the ACK deadline exists once the command is published
         Instant deadline = sql.queryForObject("SELECT ack_deadline_at FROM action_history WHERE request_id=?", java.sql.Timestamp.class, request.requestId()).toInstant();
         assertNotNull(deadline);
 
@@ -136,7 +148,7 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         assertEquals(0, timeouts.scan(100), "observed once");
         assertEquals(1, facts("COMMAND_ACK_TIMED_OUT", device));
         assertEquals(1, matches(rule));
-        verify(executor, times(1)).publishPrepared(any(), any());   // no resend of the command
+        verifyPublications(1);   // no resend of the command
     }
 
     @Test void anAcknowledgedCommandNeverTimesOut() {
@@ -167,12 +179,12 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         UUID device = device();
         UUID rule = subscribed(device, TriggerType.COMMAND_PUBLICATION_FAILED, Map.of());
         var request = manualCommand(device);
-        doAnswer(inv -> new ActionExecutionResult(request.requestId(), request, ExecutionStatus.FAILURE, Instant.now(), "broker unavailable"))
-            .when(executor).publishPrepared(any(), any());
+        failPublication(request);
         doThrow(new IllegalStateException("injected fact outage")).when(sourceFacts).publicationFailed(any(), any(), any(), any());
         try {
             assertTrue(dispatch.dispatch(request, new ActionContext(null, null), "corr").accepted());
-        } finally { reset(executor); reset(sourceFacts); }
+            awaitDelivery();
+        } finally { resetPublicationSpies(); reset(brokerPublisher); reset(sourceFacts); }
         assertEquals("FAILURE", sql.queryForObject("SELECT status FROM action_history WHERE request_id=?", String.class, request.requestId()),
             "the command's publication failure is recorded regardless of Rule storage");
         assertEquals(0, facts("COMMAND_PUBLICATION_FAILED", device));
@@ -184,6 +196,7 @@ class RuleTypedCommandAndConnectivityTriggersIntegrationTest extends TypedTrigge
         UUID rule = subscribed(device, TriggerType.COMMAND_ACK_TIMED_OUT, Map.of());
         var request = manualCommand(device);
         assertTrue(dispatch.dispatch(request, new ActionContext(null, null), "corr").accepted());
+        awaitDelivery();              // the ACK deadline exists once the command is published
         Instant deadline = sql.queryForObject("SELECT ack_deadline_at FROM action_history WHERE request_id=?", java.sql.Timestamp.class, request.requestId()).toInstant();
         now = deadline.plusSeconds(1);
         assertEquals(1, timeouts.scan(100));

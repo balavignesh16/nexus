@@ -143,6 +143,25 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(com.nexus.action.outbox.CommandQueueFullException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleCommandQueueFull(com.nexus.action.outbox.CommandQueueFullException ex) {
+        // P4.6 (R18): a typed, retryable refusal. Nothing was written for the refused command; the client may try again shortly.
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("status", HttpStatus.TOO_MANY_REQUESTS.value());
+        body.put("error", HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase());
+        body.put("code", ex.code());
+        body.put("scope", ex.scope().name());
+        body.put("message", ex.getMessage());
+        body.put("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "1").body(body);
+    }
+
+    @ExceptionHandler(com.nexus.telemetry.application.TelemetryMessageConflictException.class)
+    public ResponseEntity<ErrorResponse> handleTelemetryMessageConflict(com.nexus.telemetry.application.TelemetryMessageConflictException ex) {
+        return new ResponseEntity<>(new ErrorResponse(HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(), ex.getMessage(), Instant.now()), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
         ErrorResponse error = new ErrorResponse(

@@ -32,4 +32,4 @@ class SimulatorConfig:
 
     # Phase 12: per-device MQTT client identity suffix and command staleness.
     instance_id: Optional[str] = field(default_factory=_default_instance_id)
-    command_stale_window_seconds: float = 300.0
+    command_stale_window_seconds: float = 30.0   # P5.5 (D4): the firmware's 30-second absolute rule; a larger value is explicit and logged

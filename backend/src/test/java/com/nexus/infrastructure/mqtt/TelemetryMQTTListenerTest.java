@@ -6,6 +6,7 @@ import com.nexus.device.command.DeviceCommandAckMessageHandler;
 import com.nexus.device.connectivity.DeviceStatusMessageHandler;
 import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.application.TelemetryService;
+import com.nexus.telemetry.application.TelemetrySource;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
@@ -61,6 +62,36 @@ import static org.mockito.Mockito.*;
  * genuinely exercised, not assumed.
  */
 class TelemetryMQTTListenerTest {
+    private void connectAndAwait(boolean reconnect,String uri) {
+        listener.connectComplete(reconnect,uri);
+        try { listener.subscriptionTask.get(2,TimeUnit.SECONDS); }
+        catch(Exception error) { throw new AssertionError("Subscription worker did not complete",error); }
+    }
+    @org.junit.jupiter.api.AfterEach
+    void closeSubscriptionWorker() { listener.closeSubscriptions(); }
+    @Test
+    void brokerSubscribeCannotBlockTheMqttCallbackThread() throws Exception {
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        doAnswer(call->{entered.countDown();assertTrue(release.await(2,TimeUnit.SECONDS));return null;})
+                .when(mqttClient).subscribe(TELEMETRY_TOPIC,1);
+        try {
+            listener.connectComplete(true,"tcp://localhost:1883");
+            assertTrue(entered.await(1,TimeUnit.SECONDS));
+            assertFalse(listener.subscriptionTask.isDone());
+            verify(reconnectController).onConnectComplete();
+        } finally {release.countDown();}
+        listener.subscriptionTask.get(2,TimeUnit.SECONDS);
+        verify(mqttClient).subscribe(COMMAND_ACK_TOPIC,1);
+    }
+    @Test
+    void notAdmittedOnboardingTelemetryIsDroppedInsteadOfBlockingStatusAndOtherDevices() throws Exception {
+        UUID id=UUID.randomUUID();
+        doThrow(new com.nexus.device.onboarding.OnboardingTelemetryRejectedException("not admitted"))
+                .when(telemetryService).processTelemetry(any(TelemetryRequest.class),eq(TelemetrySource.MQTT));
+        listener.messageArrived("nexus/devices/"+id+"/telemetry",messageFor(validPayload(id)));
+        verify(mqttClient).messageArrivedComplete(42,1);
+        verify(mqttClient,never()).disconnect();
+    }
 
     private static final String TELEMETRY_TOPIC = "nexus/devices/+/telemetry";
     private static final String DEVICE_STATUS_TOPIC = "nexus/devices/+/status";
@@ -113,7 +144,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, message);
 
-        verify(telemetryService, times(1)).processTelemetry(any(TelemetryRequest.class));
+        verify(telemetryService, times(1)).processTelemetry(any(TelemetryRequest.class), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -127,7 +158,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         InOrder inOrder = inOrder(telemetryService, mqttClient);
-        inOrder.verify(telemetryService).processTelemetry(any(TelemetryRequest.class));
+        inOrder.verify(telemetryService).processTelemetry(any(TelemetryRequest.class), eq(TelemetrySource.MQTT));
         inOrder.verify(mqttClient).messageArrivedComplete(anyInt(), anyInt());
     }
 
@@ -140,7 +171,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         ArgumentCaptor<TelemetryRequest> captor = ArgumentCaptor.forClass(TelemetryRequest.class);
-        verify(telemetryService).processTelemetry(captor.capture());
+        verify(telemetryService).processTelemetry(captor.capture(), eq(TelemetrySource.MQTT));
         TelemetryRequest request = captor.getValue();
         assertEquals(deviceId, request.deviceId());
         assertEquals(Instant.parse("2026-01-01T00:00:00Z"), request.timestamp());
@@ -156,7 +187,7 @@ class TelemetryMQTTListenerTest {
         UUID deviceId = UUID.randomUUID();
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         MqttMessage message = messageFor(validPayload(deviceId));
-        when(telemetryService.processTelemetry(any())).thenThrow(new RuntimeException("simulated DB failure"));
+        when(telemetryService.processTelemetry(any(), eq(TelemetrySource.MQTT))).thenThrow(new RuntimeException("simulated DB failure"));
 
         assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
 
@@ -173,7 +204,7 @@ class TelemetryMQTTListenerTest {
         String topic = "nexus/devices/" + deviceId + "/telemetry";
         MqttMessage message = messageFor(validPayload(deviceId));
         RuntimeException cause = new RuntimeException("device repository unavailable");
-        when(telemetryService.processTelemetry(any())).thenThrow(cause);
+        when(telemetryService.processTelemetry(any(), eq(TelemetrySource.MQTT))).thenThrow(cause);
 
         RuntimeException thrown = assertThrows(RuntimeException.class, () -> listener.messageArrived(topic, message));
         assertEquals(cause, thrown.getCause(), "original failure must be preserved as the cause");
@@ -190,7 +221,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, message);
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -218,7 +249,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived("short/topic", message);
 
-        verify(telemetryService, times(1)).processTelemetry(any());
+        verify(telemetryService, times(1)).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(anyInt(), anyInt());
     }
 
@@ -243,7 +274,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, messageFor(json)));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -271,7 +302,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -286,7 +317,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -308,7 +339,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -329,7 +360,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -348,7 +379,7 @@ class TelemetryMQTTListenerTest {
 
         assertDoesNotThrow(() -> listener.messageArrived(topic, message));
 
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(mqttClient, times(1)).messageArrivedComplete(message.getId(), message.getQos());
     }
 
@@ -374,7 +405,7 @@ class TelemetryMQTTListenerTest {
 
     @Test
     void connectComplete_subscribesWithQos1_soReconnectsResubscribeCorrectly() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(TELEMETRY_TOPIC, 1);
     }
@@ -452,7 +483,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, messageFor("{not valid json at all"));
 
         assertEquals(1.0, counterValue("mqtt.messages.received"));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -462,7 +493,7 @@ class TelemetryMQTTListenerTest {
         // status subscribe call, which succeeds by default here.
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(TELEMETRY_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }
@@ -471,21 +502,21 @@ class TelemetryMQTTListenerTest {
     void subscribeException_onDeviceStatusTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(DEVICE_STATUS_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }
 
     @Test
     void connectComplete_alsoSubscribesToDeviceStatusTopic() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(DEVICE_STATUS_TOPIC, 1);
     }
 
     @Test
     void successfulSubscribe_doesNotIncrementSubscribeFailureCounter() {
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(0.0, counterValue("mqtt.subscribe.failures"));
     }
@@ -497,7 +528,7 @@ class TelemetryMQTTListenerTest {
 
         listener.messageArrived(topic, messageFor(validPayload(deviceId)));
         listener.connectionLost(new RuntimeException("dropped"));
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
         listener.messageArrived(topic, messageFor(validPayload(deviceId)));
 
         assertEquals(2.0, counterValue("mqtt.messages.received"),
@@ -551,7 +582,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         verify(deviceStatusMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
     }
 
     @Test
@@ -614,7 +645,7 @@ class TelemetryMQTTListenerTest {
         listener.messageArrived(topic, message);
 
         verify(deviceCommandAckMessageHandler, times(1)).handle(eq(topic), any(byte[].class));
-        verify(telemetryService, never()).processTelemetry(any());
+        verify(telemetryService, never()).processTelemetry(any(), eq(TelemetrySource.MQTT));
         verify(deviceStatusMessageHandler, never()).handle(anyString(), any(byte[].class));
     }
 
@@ -654,7 +685,7 @@ class TelemetryMQTTListenerTest {
 
     @Test
     void connectComplete_alsoSubscribesToCommandAckTopic() throws Exception {
-        listener.connectComplete(true, "tcp://localhost:1883");
+        connectAndAwait(true, "tcp://localhost:1883");
 
         verify(mqttClient).subscribe(COMMAND_ACK_TOPIC, 1);
     }
@@ -663,7 +694,7 @@ class TelemetryMQTTListenerTest {
     void subscribeException_onCommandAckTopicOnly_alsoIncrementsSubscribeFailureCounter() throws Exception {
         doThrow(new RuntimeException("broker refused SUBSCRIBE")).when(mqttClient).subscribe(eq(COMMAND_ACK_TOPIC), anyInt());
 
-        listener.connectComplete(false, "tcp://localhost:1883");
+        connectAndAwait(false, "tcp://localhost:1883");
 
         assertEquals(1.0, counterValue("mqtt.subscribe.failures"));
     }

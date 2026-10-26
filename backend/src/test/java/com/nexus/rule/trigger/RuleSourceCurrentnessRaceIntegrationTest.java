@@ -116,7 +116,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, acceptedFor(f2), "the newer observation acted on its own");
         assertEquals(1, commands(device), "the old fact added no second command");
         assertEquals(1, desiredChanges(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void theSameOrderingThroughInlineRoutingAlsoDecidesNothingForTheOldFact() {
@@ -135,7 +135,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, commands(device));
         assertEquals(1, acceptedFor(f2));
         assertEquals("ROUTED", status(f2));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     // ------------------------------------------------------------------ 2. superseded between the plan and the acceptance
@@ -156,7 +156,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, acceptedFor(f2));
         assertEquals(1, commands(device), "exactly one accepted command: the newer observation's");
         assertEquals(1, desiredChanges(device), "no desired-state mutation from the superseded fact");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void theAcceptanceTimeRecheckAlsoGuardsTheRecoveryEntryPoint() {
@@ -176,7 +176,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, matchesOf(f1));
         assertEquals(0, acceptedFor(f1));
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void anAcceptanceThatLinearizedBeforeTheNewerObservationKeepsItsHistory() {
@@ -197,8 +197,18 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertNotNull(historyBefore.get(), "the first acceptance had linearized before the newer observation committed");
         assertEquals(1, acceptedFor(f1), "the earlier acceptance is history and is not rewritten");
         var after = sql.queryForMap("SELECT request_id,status,\"timestamp\",message FROM action_history WHERE request_id=?", historyBefore.get().get("request_id"));
-        assertEquals(historyBefore.get().get("status"), after.get("status"));
-        assertEquals(historyBefore.get().get("timestamp"), after.get("timestamp"));
+        if (!outboxMode()) {
+            assertEquals(historyBefore.get().get("status"), after.get("status"));
+            assertEquals(historyBefore.get().get("timestamp"), after.get("timestamp"));
+        } else {
+            // With the outbox ON the first acceptance is ACCEPTED_FOR_DISPATCH when the newer observation arrives and its OWN dispatcher publishes it afterwards;
+            // what must hold is that the newer observation neither rewrote nor failed it: it is the same request, published once, by its own delivery.
+            awaitDelivery();
+            var settled = sql.queryForMap("SELECT status FROM action_history WHERE request_id=?", historyBefore.get().get("request_id"));
+            assertEquals("SUCCESS", settled.get("status"));
+            assertEquals("PUBLISHED", sql.queryForObject("SELECT state FROM command_outbox WHERE command_id=?", String.class, historyBefore.get().get("request_id")));
+            assertEquals(1, sql.queryForObject("SELECT attempt_count FROM command_outbox WHERE command_id=?", Integer.class, historyBefore.get().get("request_id")));
+        }
         assertEquals(1, acceptedFor(f2), "the newer observation then acts on its own");
         assertEquals(2, commands(device));
     }
@@ -236,7 +246,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(0, acceptedFor(f1), "but not accepted once superseded");
         assertEquals(1, acceptedFor(f2));
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void aReportedTransitionSupersededBeforeTheSnapshotDecidesNothing() {
@@ -269,7 +279,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         assertEquals(1, matchesOf(f1));
         assertEquals(1, acceptedFor(f1));
         assertEquals(1, commands(device));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     // ------------------------------------------------------------------ the lock protocol itself
@@ -322,7 +332,7 @@ class RuleSourceCurrentnessRaceIntegrationTest extends TypedTriggerSupport {
         }
         assertEquals(0, commands(p.device()));
         assertEquals(0, desiredChanges(p.device()));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void aNewerObservationWaitsForAnAcceptanceThatHoldsTheSourceRowAndTheAcceptanceStaysValid() throws Exception {

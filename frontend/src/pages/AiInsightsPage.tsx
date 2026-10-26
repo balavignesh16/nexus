@@ -11,7 +11,7 @@ import { usePolling } from '../hooks/usePolling';
 
 /**
  * NEXUS Intelligence: an evidence-grounded rule-match explanation
- * interface, not a chatbot. There is no conversational AI API in NEXUS -
+ * interface, not the Phase 6 chatbot (which lives at /assistant). Here,
  * every explanation shown here is either genuinely provider-generated
  * (generatedBy === "AI") or the backend's own deterministic, non-AI
  * fallback (generatedBy === "DETERMINISTIC_FALLBACK"). The two are never

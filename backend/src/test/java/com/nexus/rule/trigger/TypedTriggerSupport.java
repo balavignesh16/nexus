@@ -55,6 +55,80 @@ public abstract class TypedTriggerSupport {
     @org.springframework.boot.test.mock.mockito.SpyBean protected CommandExecutor executor;
     @org.springframework.boot.test.mock.mockito.SpyBean protected com.nexus.action.application.executor.CreateAlertExecutor alerts;
     @org.springframework.boot.test.mock.mockito.SpyBean protected com.nexus.rule.plan.RuleActionPlanStore planStore;
+    @Autowired protected com.nexus.action.outbox.CommandOutboxSettings outboxSettings;
+    /** The broker seam of the outbox dispatcher. With the outbox OFF it is never called (the executor publishes directly). */
+    @org.springframework.boot.test.mock.mockito.SpyBean protected com.nexus.action.outbox.BrokerCommandPublisher brokerPublisher;
+
+    // ---- Dual-mode (outbox OFF = the legacy synchronous path, outbox ON = durable acceptance, then publication by the dispatcher).
+    // The business requirement of every assertion below is unchanged: "this many publications reached the broker seam, and no direct publication
+    // happened". With the flag OFF each helper is exactly the former `verify(executor, ...).publishPrepared(...)`.
+    protected boolean outboxMode() { return outboxSettings.enabled(); }
+
+    /** Waits (bounded, polling a durable fact, never a fixed sleep) until the dispatcher has no unresolved obligation left. */
+    protected void awaitDelivery() {
+        if (!outboxMode()) return;
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        try {
+            while (sql.queryForObject("SELECT count(*) FROM command_outbox WHERE state IN ('QUEUED','IN_FLIGHT','RETRY_WAIT')", Integer.class) > 0) {
+                if (System.nanoTime() > end) org.junit.jupiter.api.Assertions.fail("the dispatcher did not resolve every queued command within 30 s");
+                Thread.sleep(25);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            org.junit.jupiter.api.Assertions.fail("interrupted while waiting for delivery");
+        }
+    }
+
+    /** Delivery of the previous test's commands is asynchronous with the outbox ON: let it finish before the spies are reset for the next test. */
+    @org.junit.jupiter.api.AfterEach void settleDeliveryAfterTheTest() { awaitDelivery(); }
+
+    /** Bounded polling (20 s) of a durable condition that another thread establishes after the call returns. Never a fixed sleep. */
+    protected void awaitCondition(String what, java.util.function.BooleanSupplier condition) {
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        try {
+            while (!condition.getAsBoolean()) {
+                if (System.nanoTime() > end) org.junit.jupiter.api.Assertions.fail("timed out waiting for " + what);
+                Thread.sleep(25);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            org.junit.jupiter.api.Assertions.fail("interrupted while waiting for " + what);
+        }
+    }
+
+    /** The legacy `clearInvocations(executor)`: forget the publications of the setup, keep any stubbing. With the outbox ON the setup's commands are delivered first. */
+    protected void resetPublicationSpiesKeepingStubs() {
+        awaitDelivery();
+        org.mockito.Mockito.clearInvocations(executor);
+        org.mockito.Mockito.clearInvocations(brokerPublisher);
+    }
+
+    /** Forget the publications of the setup (the legacy `reset(executor)`): with the outbox ON the setup's commands must first have been delivered. */
+    protected void resetPublicationSpies() {
+        awaitDelivery();
+        org.mockito.Mockito.reset(executor);
+        org.mockito.Mockito.reset(brokerPublisher);
+    }
+
+    /** Exactly {@code n} publications reached the broker (directly with the flag OFF, through the dispatcher with the flag ON), none directly in outbox mode. */
+    protected void verifyPublications(int n) {
+        if (!outboxMode()) {
+            org.mockito.Mockito.verify(executor, org.mockito.Mockito.times(n)).publishPrepared(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+            return;
+        }
+        org.mockito.Mockito.verify(executor, org.mockito.Mockito.never()).publishPrepared(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        awaitDelivery();
+        org.mockito.Mockito.verify(brokerPublisher, org.mockito.Mockito.times(n)).publish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    /** Nothing reached the broker by any path: no direct publication and, once the dispatcher is idle, none through it either. */
+    protected void verifyNoPublication() {
+        org.mockito.Mockito.verify(executor, org.mockito.Mockito.never()).publishPrepared(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        if (outboxMode()) {
+            awaitDelivery();
+            org.mockito.Mockito.verify(brokerPublisher, org.mockito.Mockito.never()).publish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        }
+    }
 
     protected volatile Instant now = Instant.now();
     @BeforeEach void freezeClock() {

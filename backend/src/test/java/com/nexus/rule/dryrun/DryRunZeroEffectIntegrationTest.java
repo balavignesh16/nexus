@@ -64,7 +64,7 @@ class DryRunZeroEffectIntegrationTest extends TypedTriggerSupport {
     }
     private void assertNoEffects(String what) {
         verifyNoInteractions(engine, realtime, persister, lifecycleSpy);
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
         verify(planStore, never()).persist(any(), any());
         verify(planStore, never()).recordOutcomes(any());
     }
@@ -145,7 +145,8 @@ class DryRunZeroEffectIntegrationTest extends TypedTriggerSupport {
         assertTrue(count("SELECT count(*) FROM rule_matches") > 0 && count("SELECT count(*) FROM rule_cooldown_state") > 0 && count("SELECT count(*) FROM rule_repeat_state") > 0
             && count("SELECT count(*) FROM rule_hysteresis_state") > 0 && count("SELECT count(*) FROM rule_action_candidates") > 0,
             "the fixture really holds production cooldown, edge, hysteresis, match and plan state to protect");
-        clearInvocations(engine, realtime, persister, lifecycleSpy, executor, planStore);
+        resetPublicationSpiesKeepingStubs();
+        clearInvocations(engine, realtime, persister, lifecycleSpy, planStore);
         var observer = subscribe();
         try {
             Thread.sleep(500);                                              // retained and in-flight messages from the fixture
@@ -163,7 +164,8 @@ class DryRunZeroEffectIntegrationTest extends TypedTriggerSupport {
 
     @Test void aFailureInTheMiddleOfEvaluationLeavesNothingBehind() throws Exception {
         World w = world();
-        clearInvocations(engine, realtime, persister, lifecycleSpy, executor, planStore);
+        resetPublicationSpiesKeepingStubs();
+        clearInvocations(engine, realtime, persister, lifecycleSpy, planStore);
         var before = fingerprint();
         doThrow(new IllegalStateException("evaluation blew up")).when(evaluator).evaluate(any(), any(), any(com.nexus.rule.snapshot.RuleEvaluationContext.class));
         try {

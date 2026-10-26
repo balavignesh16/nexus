@@ -204,8 +204,35 @@ public class OutboxDeliveryOperations {
      * the single-in-flight index refused the claim (SQLSTATE 23505, a normal outcome and not an error).
      */
     public Optional<Claimed> claim(UUID commandId, String leaseOwner, Duration lease) {
+        return tryClaim(commandId, leaseOwner, lease).claimed();
+    }
+
+    /** Outcome of one claim attempt: the claim, or why there is none. {@code rateLimited} means the publish gate had no free permit. */
+    public record ClaimResult(Optional<Claimed> claimed, boolean rateLimited, long retryAfterMillis) {
+        static ClaimResult none() { return new ClaimResult(Optional.empty(), false, 0); }
+    }
+
+    /**
+     * The publish gate (contract R18) when one is wired: every claim passes it, so no attempt can start without a permit. Optional only for
+     * the narrow unit tests that build this class without Spring; the production dispatcher always has it.
+     */
+    private CommandPublishGate publishGate;
+
+    @Autowired(required = false)
+    void setPublishGate(CommandPublishGate publishGate) { this.publishGate = publishGate; }
+
+    /**
+     * {@link #claim} with the reason for an empty result. The permit decision and the claim are ONE transaction under the gate's advisory
+     * lock; when the gate refuses, nothing is changed: the row keeps its state, attempt count, payload, timestamp and deadline. A failure of
+     * the gate itself propagates (fail closed): no claim, hence no publication.
+     */
+    public ClaimResult tryClaim(UUID commandId, String leaseOwner, Duration lease) {
         try {
             return tx.execute(status -> {
+                if (publishGate != null) {
+                    CommandPublishGate.Decision permit = publishGate.permit();
+                    if (!permit.allowed()) return new ClaimResult(Optional.empty(), true, permit.retryAfterMillis());
+                }
                 Instant now = clock.instant();
                 List<Claimed> rows = jdbc.query("UPDATE command_outbox SET state = 'IN_FLIGHT', attempt_count = attempt_count + 1,"
                                 + " next_attempt_at = NULL, lease_owner = ?, lease_expires_at = now() + make_interval(secs => ?), updated_at = ?"
@@ -217,15 +244,15 @@ public class OutboxDeliveryOperations {
                                 new OutboxPayload(rs.getString("payload_text"), rs.getString("payload_sha256"), rs.getLong("payload_epoch_seconds")),
                                 rs.getInt("attempt_count"), rs.getInt("max_attempts"), leaseOwner, rs.getString("correlation_id")),
                         leaseOwner, lease.toMillis() / 1000.0, Timestamp.from(now), commandId);
-                if (rows.isEmpty()) return Optional.<Claimed>empty();
+                if (rows.isEmpty()) return ClaimResult.none();
                 Claimed claimed = rows.get(0);
                 // a QUEUED row has attempt_count 0 (V37), so attempt 1 is the first claim and any later claim leaves RETRY_WAIT
                 history.record(new OutboxTransitionRecord(commandId, claimed.attempt() == 1 ? OutboxState.QUEUED : OutboxState.RETRY_WAIT,
                         OutboxState.IN_FLIGHT, claimed.attempt(), claimed.attempt() == 1 ? "CLAIMED" : "RETRY_CLAIMED", claimed.correlationId(), now));
-                return Optional.of(claimed);
+                return new ClaimResult(Optional.of(claimed), false, 0);
             });
         } catch (DataIntegrityViolationException e) {
-            if (isUniqueViolation(e)) return Optional.empty();
+            if (isUniqueViolation(e)) return ClaimResult.none();
             throw e;
         }
     }
@@ -328,9 +355,14 @@ public class OutboxDeliveryOperations {
      */
     private Resolution deadLetter(UUID commandId, UUID deviceId, int attempt, String correlationId, Instant at,
                                   OutboxTerminalReason reason, String errorCode, boolean uncertain, String message) {
+        // An UNCERTAIN outcome may have put the command on the broker, so the publish gate counts it (CommandPublishGate) against the database clock.
+        // Its terminal instant is therefore the DATABASE clock as well (P4.6 correction): with the application clock a skewed host could record an
+        // instant the gate no longer counts and let a second publication start inside the same second. The history facts and the message keep
+        // the application instant as before; only terminal_at of a possibly-published attempt changes, and the other outcomes are untouched.
         jdbc.update("UPDATE command_outbox SET state = 'DEAD_LETTER', next_attempt_at = NULL, lease_owner = NULL, lease_expires_at = NULL,"
-                        + " terminal_at = ?, terminal_reason = ?, last_error_code = ?, updated_at = ? WHERE command_id = ?",
-                Timestamp.from(at), reason.name(), code64(errorCode), Timestamp.from(at), commandId);
+                        + " terminal_at = " + (uncertain ? "clock_timestamp()" : "?") + ", terminal_reason = ?, last_error_code = ?, updated_at = ? WHERE command_id = ?",
+                uncertain ? new Object[]{reason.name(), code64(errorCode), Timestamp.from(at), commandId}
+                          : new Object[]{Timestamp.from(at), reason.name(), code64(errorCode), Timestamp.from(at), commandId});
         return finishDeadLetter(commandId, deviceId, attempt, correlationId, at, reason, errorCode, uncertain, message,
                 attempt > 0 ? OutboxState.IN_FLIGHT : OutboxState.QUEUED);
     }
@@ -461,12 +493,12 @@ public class OutboxDeliveryOperations {
         return tx.execute(status -> {
             Instant at = clock.instant();
             List<Object[]> rows = jdbc.query("UPDATE command_outbox SET state = 'DEAD_LETTER', lease_owner = NULL, lease_expires_at = NULL,"
-                            + " terminal_at = ?, terminal_reason = 'UNCERTAIN_EXPIRED', last_error_code = 'LEASE_EXPIRED_UNCERTAIN', updated_at = ?"
+                            + " terminal_at = clock_timestamp(), terminal_reason = 'UNCERTAIN_EXPIRED', last_error_code = 'LEASE_EXPIRED_UNCERTAIN', updated_at = ?"
                             + " WHERE command_id IN (SELECT command_id FROM command_outbox WHERE state = 'IN_FLIGHT' AND lease_expires_at < now()"
                             + " ORDER BY lease_expires_at LIMIT ? FOR UPDATE SKIP LOCKED)"
                             + " RETURNING command_id, device_id, attempt_count, correlation_id",
                     (rs, i) -> new Object[]{rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getInt(3), rs.getString(4)},
-                    Timestamp.from(at), Timestamp.from(at), limit);
+                    Timestamp.from(at), limit);
             List<Resolution> out = new ArrayList<>();
             for (Object[] r : rows)
                 out.add(finishDeadLetter((UUID) r[0], (UUID) r[1], (Integer) r[2], (String) r[3], at, OutboxTerminalReason.UNCERTAIN_EXPIRED,

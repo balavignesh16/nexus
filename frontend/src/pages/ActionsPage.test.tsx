@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const mockGetActions = vi.fn();
@@ -15,6 +15,15 @@ vi.mock('../hooks/usePolling', () => ({
 const mockOpenInspector = vi.fn();
 vi.mock('../components/ui/InspectorProvider', () => ({
   useInspector: () => ({ openInspector: mockOpenInspector }),
+}));
+
+const mockGetLifecycle = vi.fn();
+const mockGetDeadLetters = vi.fn();
+vi.mock('../api/actionApi', () => ({
+  actionApi: {
+    getLifecycle: (...args: any[]) => mockGetLifecycle(...args),
+    getDeadLetters: (...args: any[]) => mockGetDeadLetters(...args),
+  },
 }));
 
 import ActionsPage from './ActionsPage';
@@ -48,6 +57,7 @@ function renderPage() {
 describe('ActionsPage - real action history, no fabrication', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetDeadLetters.mockResolvedValue({ items: [] });
   });
 
   // ---------- Rendering ----------
@@ -286,5 +296,136 @@ describe('ActionsPage - real action history, no fabrication', () => {
     renderPage();
 
     expect(screen.getByText('—')).toBeInTheDocument();
+  });
+});
+
+describe('ActionsPage - command lifecycle visibility (P4-102, P4-103, P4-104, decision D5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDeadLetters.mockResolvedValue({ items: [] });
+  });
+
+  it('labels a queued command by its delivery state instead of the legacy "Delivery unknown"', () => {
+    mockUsePolling.mockReturnValue({
+      data: [action({ status: 'ACCEPTED_FOR_DISPATCH', deliveryState: 'QUEUED', message: 'Durably accepted' })], isLoading: false, error: null,
+    });
+    renderPage();
+    expect(screen.getAllByText('Queued for delivery').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Delivery unknown')).not.toBeInTheDocument();
+  });
+
+  it('an accepted row without any delivery record stays honestly "Delivery unknown"', () => {
+    mockUsePolling.mockReturnValue({ data: [action({ status: 'ACCEPTED_FOR_DISPATCH' })], isLoading: false, error: null });
+    renderPage();
+    expect(screen.getAllByText('Delivery unknown').length).toBeGreaterThan(0);
+  });
+
+  it('a dead-lettered command shows its reason, and an uncertain one is not shown as a plain failure', () => {
+    mockUsePolling.mockReturnValue({
+      data: [
+        action({ executionId: 'e-a', requestId: 'r-a', status: 'FAILURE', deliveryState: 'DEAD_LETTER', deliveryReason: 'RETRY_EXHAUSTED' }),
+        action({ executionId: 'e-b', requestId: 'r-b', status: 'FAILURE', deliveryState: 'DEAD_LETTER', deliveryReason: 'UNCERTAIN_EXPIRED' }),
+      ], isLoading: false, error: null,
+    });
+    renderPage();
+    expect(screen.getAllByText(/Dead-lettered: every attempt failed/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Dead-lettered: outcome uncertain').length).toBeGreaterThan(0);
+  });
+
+  it('an unrecognised status or delivery state renders a neutral label and does not throw', () => {
+    mockUsePolling.mockReturnValue({
+      data: [action({ status: 'SOME_FUTURE_STATUS', deliveryState: 'SOME_FUTURE_STATE' }),
+             action({ executionId: 'e-2', requestId: 'r-2', status: 'ACCEPTED_FOR_DISPATCH', deliveryState: 'SOME_FUTURE_STATE' })],
+      isLoading: false, error: null,
+    });
+    expect(() => renderPage()).not.toThrow();
+    expect(screen.getAllByText('Status not recognised').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Delivery state not recognised').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/SOME_FUTURE_STATE/)).not.toBeInTheDocument();
+  });
+
+  it('a live (realtime) row shows its status and a neutral time, never "Invalid Date" or a fabricated "NO ACK YET"', () => {
+    mockUsePolling.mockReturnValue({
+      data: [{ id: 'e-live', executionId: 'e-live', actionType: 'SEND_COMMAND', status: 'FAILURE', deviceId: 'dev-live', timestamp: undefined, message: 'live' }],
+      isLoading: false, error: null,
+    });
+    renderPage();
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+    expect(screen.queryByText('NO ACK YET')).not.toBeInTheDocument();
+  });
+
+  it('opens the lifecycle of one command and shows queued, published, acknowledged and verified as SEPARATE labelled lines', async () => {
+    mockUsePolling.mockReturnValue({ data: [action({ requestId: 'req-7', status: 'SUCCESS', deliveryState: 'PUBLISHED' })], isLoading: false, error: null });
+    mockGetLifecycle.mockResolvedValue({
+      commandId: 'req-7', actionType: 'SEND_COMMAND',
+      delivery: { state: 'PUBLISHED', attemptCount: 1, maxAttempts: 3, acceptedAt: '2026-01-01T00:00:00Z', firstPublishConfirmedAt: '2026-01-01T00:00:01Z' },
+      ack: { status: 'NONE', timedOut: false },
+      latency: { acceptedToPublishedMs: 1000 },
+      explanation: ['Published to the MQTT broker. Publication does not prove that the device received, accepted or executed the command.'],
+      facts: [{ sequence: 1, fact: 'ACCEPTED', attempt: 0, source: 'ACCEPTANCE', occurredAt: '2026-01-01T00:00:00Z' }],
+      factsTruncated: false,
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByText('Lifecycle'));
+    await waitFor(() => expect(screen.getByTestId('command-lifecycle-panel')).toBeInTheDocument());
+    expect(mockGetLifecycle).toHaveBeenCalledWith('req-7');
+    expect(within(screen.getByTestId('lifecycle-queued')).getByText('Accepted for delivery')).toBeInTheDocument();
+    expect(within(screen.getByTestId('lifecycle-published')).getByText('Published to MQTT')).toBeInTheDocument();
+    expect(within(screen.getByTestId('lifecycle-acknowledged')).getByText('No acknowledgement recorded')).toBeInTheDocument();
+    expect(within(screen.getByTestId('lifecycle-verified')).getByText('Not applicable')).toBeInTheDocument();
+    expect(screen.getByTestId('lifecycle-no-physical-claim')).toHaveTextContent('do not establish that the device physically acted');
+    expect(screen.getByTestId('lifecycle-latency')).toHaveTextContent('accepted → published 1.0 s');
+    const panel = screen.getByTestId('command-lifecycle-panel').textContent!.toLowerCase();
+    expect(panel).not.toMatch(/exactly[- ]once|is on\b|is off\b/);
+  });
+
+  it('a timed-out acknowledgement is shown as an acknowledgement fact on a published command, not as a failure', async () => {
+    mockUsePolling.mockReturnValue({ data: [action({ requestId: 'req-8' })], isLoading: false, error: null });
+    mockGetLifecycle.mockResolvedValue({
+      commandId: 'req-8', actionType: 'SEND_COMMAND', delivery: { state: 'PUBLISHED', attemptCount: 1, maxAttempts: 3 },
+      ack: { status: 'NONE', timedOut: true }, explanation: [], facts: [], factsTruncated: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText('Lifecycle'));
+    await waitFor(() => expect(screen.getByTestId('lifecycle-acknowledged')).toBeInTheDocument());
+    expect(within(screen.getByTestId('lifecycle-acknowledged')).getByText('No acknowledgement before the deadline')).toBeInTheDocument();
+    expect(within(screen.getByTestId('lifecycle-published')).getByText('Published to MQTT')).toBeInTheDocument();
+  });
+
+  it('a lifecycle that cannot be loaded says so and does not throw', async () => {
+    mockUsePolling.mockReturnValue({ data: [action({ requestId: 'req-9' })], isLoading: false, error: null });
+    mockGetLifecycle.mockRejectedValue(new Error('boom'));
+    renderPage();
+    fireEvent.click(screen.getByText('Lifecycle'));
+    await waitFor(() => expect(screen.getByTestId('lifecycle-unavailable')).toBeInTheDocument());
+  });
+
+  it('the lifecycle is fetched only when it is opened, never for every row', () => {
+    mockUsePolling.mockReturnValue({ data: [action({ requestId: 'req-1' }), action({ executionId: 'e2', requestId: 'req-2' })], isLoading: false, error: null });
+    renderPage();
+    expect(mockGetLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('lists recent dead letters read-only, with no retry or requeue control', async () => {
+    mockUsePolling.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockGetDeadLetters.mockResolvedValue({
+      items: [{ commandId: 'c1', actionType: 'SEND_COMMAND', terminalReason: 'UNCERTAIN_EXPIRED', attemptCount: 2, maxAttempts: 3, terminalAt: '2026-01-01T00:00:00Z', uncertain: true, acknowledged: false }],
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('dead-letters-list')).toBeInTheDocument());
+    expect(screen.getByTestId('dead-letters-list')).toHaveTextContent('Dead-lettered: outcome uncertain');
+    expect(screen.getByTestId('dead-letters-list')).toHaveTextContent('2/3 attempts');
+    expect(within(screen.getByTestId('dead-letters-list')).queryAllByRole('button')).toHaveLength(0);
+    expect(mockGetDeadLetters).toHaveBeenCalledWith(5);
+  });
+
+  it('an unavailable dead-letter list says so and the page still renders', async () => {
+    mockUsePolling.mockReturnValue({ data: [action()], isLoading: false, error: null });
+    mockGetDeadLetters.mockRejectedValue(new Error('down'));
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('dead-letters-unavailable')).toBeInTheDocument());
+    expect(screen.getByText('SEND_COMMAND')).toBeInTheDocument();
   });
 });

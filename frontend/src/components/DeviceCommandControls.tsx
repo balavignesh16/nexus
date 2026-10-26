@@ -3,6 +3,7 @@ import { deviceApi, CapabilityType, ExecutionStatus, type DeviceCapability } fro
 import { ApiError } from '../api/apiClient';
 import { useActionAcknowledgementStream } from '../realtime/streams/useActionAcknowledgementStream';
 import { Button } from './foundation/Button';
+import { queueFullMessage } from '../utils/commandLifecycle';
 
 interface DeviceCommandControlsProps {
   deviceId: string;
@@ -13,7 +14,7 @@ interface DeviceCommandControlsProps {
 // command to MQTT" - it then waits for a device ACK. No state here is ever
 // persisted to the backend, and a timeout never claims the command or the
 // device failed (see 'ack-timeout' below).
-type DispatchState = 'idle' | 'sending' | 'sent' | 'waiting-ack' | 'acknowledged' | 'rejected' | 'ack-timeout' | 'failed';
+type DispatchState = 'idle' | 'sending' | 'sent' | 'queued' | 'waiting-ack' | 'acknowledged' | 'rejected' | 'ack-timeout' | 'failed' | 'refused';
 
 // UI-only - not backend-persisted, not a scheduler. If an ACK arrives after
 // this fires, the realtime handler below still updates the UI to the real
@@ -35,6 +36,8 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
   const hasLedWrite = capabilities.some(
     (c) => c.capabilityType === CapabilityType.LED && c.direction === 'WRITE'
   );
+  const hasUsbServoWrite = capabilities.some(c => c.capabilityType === CapabilityType.SERVO &&
+    c.direction === 'WRITE' && c.metadata?.usbBoard === 'ESP3');
 
   const [state, setState] = useState<DispatchState>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -66,11 +69,11 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
     }
   });
 
-  if (!hasLedWrite) {
+  if (!hasLedWrite && !hasUsbServoWrite) {
     return null;
   }
 
-  const sendCommand = async (value: boolean) => {
+  const sendCommand = async (value: boolean | number, capability: CapabilityType = CapabilityType.LED) => {
     setState('sending');
     setMessage(null);
     pendingCommandIdRef.current = null;
@@ -80,7 +83,7 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
     }
     try {
       const result = await deviceApi.sendDeviceCommand(deviceId, {
-        capability: CapabilityType.LED,
+        capability,
         command: 'SET_STATE',
         value,
       });
@@ -99,13 +102,26 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
             setMessage('No acknowledgement received yet');
           }
         }, ACK_TIMEOUT_MS);
+      } else if (result.status === ExecutionStatus.ACCEPTED_FOR_DISPATCH) {
+        // Outbox mode: NEXUS durably accepted the command and will publish it; it is NOT yet published and NOT failed. An ACK still
+        // arrives through the realtime handler above; the lifecycle (queued, published, acknowledged) is on the Actions page.
+        setState('queued');
+        setMessage('Command accepted and queued for delivery - not yet published');
+        pendingCommandIdRef.current = result.requestId;
       } else {
         setState('failed');
         setMessage(result.message);
       }
     } catch (err) {
-      setState('failed');
-      setMessage(err instanceof ApiError ? err.message : 'Command failed');
+      if (err instanceof ApiError && err.status === 429) {
+        // A refusal writes nothing (P4.6): say that it was not queued, and do not call it a delivery failure.
+        const scope = (err.data as { scope?: unknown } | undefined)?.scope;
+        setState('refused');
+        setMessage(queueFullMessage(scope));
+      } else {
+        setState('failed');
+        setMessage(err instanceof ApiError ? err.message : 'Command failed');
+      }
     }
   };
 
@@ -114,12 +130,13 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
   // --primary chip. No dispatch/ACK logic above this line changed.
   const messageColor =
     state === 'failed' || state === 'rejected' ? 'var(--danger)' :
+    state === 'refused' ? 'var(--warning)' :
     state === 'acknowledged' ? 'var(--success)' :
     'var(--foundation-muted-fg)';
 
   return (
     <div className="flex flex-col gap-2" data-testid="device-command-controls">
-      <div className="flex items-center gap-2">
+      {hasLedWrite && <div className="flex items-center gap-2">
         <Button
           type="button"
           variant="secondary"
@@ -138,7 +155,13 @@ export const DeviceCommandControls: React.FC<DeviceCommandControlsProps> = ({ de
         >
           Turn LED OFF
         </Button>
-      </div>
+      </div>}
+      {hasUsbServoWrite && <div className="flex flex-wrap gap-2" aria-label="USB door requested position">
+        {([['OPEN', 120], ['CLOSE', 60], ['CENTER', 90]] as const).map(([label, angle]) => <Button
+          key={label} type="button" variant="outline" size="sm" disabled={state === 'sending'}
+          onClick={() => sendCommand(angle, CapabilityType.SERVO)}>Door {label} ({angle}°)</Button>)}
+        <p className="w-full text-xs text-foundation-muted-fg">Requested servo position only. Physical movement is unverified; unloaded bench use.</p>
+      </div>}
       {message && (
         <span
           data-testid="device-command-result"

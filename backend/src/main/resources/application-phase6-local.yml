@@ -1,0 +1,18 @@
+# Explicit local opt-in, never a public deployment profile.
+server:
+  address: 127.0.0.1
+nexus:
+  assistant:
+    enabled: true
+  ai:
+    enabled: false
+    send-device-evidence: ${NEXUS_AI_SEND_DEVICE_EVIDENCE:false}
+    ollama:
+      enabled: ${NEXUS_AI_OLLAMA_ENABLED:false}
+      base-url: http://127.0.0.1:11434
+      model: ${NEXUS_AI_OLLAMA_MODEL:llama3.2:3b}
+      request-timeout-ms: 60000
+    guard:
+      max-concurrent: 1
+      max-retries: 0
+      timeout-ms: 60000

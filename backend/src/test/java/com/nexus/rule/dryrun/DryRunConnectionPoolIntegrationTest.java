@@ -34,12 +34,32 @@ class DryRunConnectionPoolIntegrationTest extends TypedTriggerSupport {
         return new DryRunRequest("CURRENT_STATE", new DryRunRequest.Scope(device), List.of(new DryRunRequest.VersionSelector(rule, null, null, null)),
             new DryRunRequest.TriggerSpec("ACCEPTED_TELEMETRY", device, null, null, null), null, null);
     }
+    /** Diagnostic only (part of the failure message): which application threads are inside which of our classes. */
+    private static String applicationThreads() {
+        StringBuilder out = new StringBuilder();
+        Thread.getAllStackTraces().forEach((thread, stack) -> {
+            StringBuilder frames = new StringBuilder();
+            for (StackTraceElement e : stack) if (e.getClassName().startsWith("com.nexus") && frames.length() < 700) frames.append(e.getClassName().substring(e.getClassName().lastIndexOf('.') + 1)).append('.').append(e.getMethodName()).append(' ');
+            if (frames.length() > 0) out.append("\n  ").append(thread.getName()).append(": ").append(frames);
+        });
+        return out.toString();
+    }
     /** A leaked connection never comes back; one held briefly by the fixture's asynchronous ingest does. */
     private void assertNoConnectionLeak() throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (pool.getHikariPoolMXBean().getActiveConnections() != 0 && System.nanoTime() < deadline) Thread.sleep(50);
-        assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections(), "every connection is returned");
+        assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections(), "every connection is returned; threads of this application that were running: " + applicationThreads());
         assertEquals(0, pool.getHikariPoolMXBean().getThreadsAwaitingConnection());
+    }
+    /**
+     * With the outbox ON (P4-111) the fixture's own command is delivered asynchronously by the dispatcher, which changes the delivery rows and holds
+     * a connection for a moment. The dry-run assertions are about what the DRY-RUN changes, so the fixture's delivery is allowed to settle first.
+     * Nothing is weakened: with the outbox OFF there is nothing to wait for, and the fingerprint and leak assertions are unchanged.
+     */
+    private void awaitDeliveryQuiet() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline
+                && sql.queryForObject("SELECT count(*) FROM command_outbox WHERE state IN ('QUEUED','IN_FLIGHT','RETRY_WAIT')", Integer.class) != 0) Thread.sleep(50);
     }
     private Map<String, String> fingerprint() {
         var out = new TreeMap<String, String>();
@@ -52,6 +72,7 @@ class DryRunConnectionPoolIntegrationTest extends TypedTriggerSupport {
         UUID device = device(), target = device();
         UUID rule = typedRule(device, "pool", 1, TELEMETRY, List.of(temperatureAbove("10")), List.of(ledCommand(target, true)));
         ingest(device, 25, now);
+        awaitDeliveryQuiet();
         var before = fingerprint();
         int callers = 8;
         var executor = Executors.newFixedThreadPool(callers);
@@ -76,6 +97,7 @@ class DryRunConnectionPoolIntegrationTest extends TypedTriggerSupport {
         UUID device = device(), target = device();
         UUID rule = typedRule(device, "pool failure", 1, TELEMETRY, List.of(temperatureAbove("10")), List.of(ledCommand(target, true)));
         ingest(device, 25, now);
+        awaitDeliveryQuiet();
         var before = fingerprint();
         var executor = Executors.newFixedThreadPool(6);
         var futures = new ArrayList<Future<String>>();
@@ -104,6 +126,7 @@ class DryRunConnectionPoolIntegrationTest extends TypedTriggerSupport {
         UUID device = device(), target = device();
         UUID rule = typedRule(device, "pool held", 1, TELEMETRY, List.of(temperatureAbove("10")), List.of(ledCommand(target, true)));
         ingest(device, 25, now);
+        awaitDeliveryQuiet();
         var before = fingerprint();
         // Hold BOTH pool connections from outside, then ask for a dry-run: it times out (a timed-out request), and recovers afterwards.
         var holders = new ArrayList<java.sql.Connection>();
@@ -124,6 +147,7 @@ class DryRunConnectionPoolIntegrationTest extends TypedTriggerSupport {
         lifecycle.legacySave(new Rule(rule, "coherent", true, 1, List.of(new RuleCondition(RuleField.DEVICE_ID, RuleOperator.EQ, device.toString()), temperatureAbove("10")),
             List.of(ledCommand(target, true)), Map.of(), 600, null, new RuleRuntime(TELEMETRY, RepeatPolicy.EDGE_TRUE, null)), null);
         ingest(device, 25, now);
+        awaitDeliveryQuiet();
         UUID matchId = sql.queryForObject("SELECT match_id FROM rule_matches WHERE rule_id=?", UUID.class, rule);
         var template = new TransactionTemplate(transactions);
         Instant cooldownAt = now.minusSeconds(30);

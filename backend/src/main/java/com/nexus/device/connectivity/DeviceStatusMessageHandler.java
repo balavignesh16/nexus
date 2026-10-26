@@ -68,7 +68,18 @@ public class DeviceStatusMessageHandler {
                     topic, safePayloadText(payload));
             return;
         }
+        apply(deviceId, status);
+    }
 
+    /**
+     * P5.2: applies a presence observation that an adapter has already decoded (the adapter intake port). It is the SAME application step
+     * as {@link #handle}, reached without the MQTT topic and plain-text parsing.
+     */
+    public void observe(UUID deviceId, DeviceConnectivityStatus status) {
+        apply(deviceId, status);
+    }
+
+    private void apply(UUID deviceId, DeviceConnectivityStatus status) {
         // Validated first, exactly like TelemetryMQTTListener's device-existence
         // gate - an unknown device is permanently invalid input, never a
         // reason to create a Device (no automatic discovery/registration).

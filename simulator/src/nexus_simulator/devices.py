@@ -61,14 +61,16 @@ class SimulatedDevice:
     direction, unit, metadata) - the same shape the backend already embeds
     in GET /devices/active, so no separate capability fetch is needed."""
 
-    def __init__(self, device_id: str, name: str, serial_number: str, capabilities: List[dict]):
+    def __init__(self, device_id: str, name: str, serial_number: str, capabilities: List[dict],
+                 command_stale_window_seconds: Optional[float] = None):
         self.device_id = device_id
         self.name = name
         self.serial_number = serial_number
         self.read_capabilities: Dict[str, ReadCapability] = {}
         self.write_capabilities: Dict[str, WriteCapability] = {}
         self._bme280_model: Optional[Bme280Model] = None
-        self.command_handler = CommandHandler(self)
+        self.command_handler = (CommandHandler(self) if command_stale_window_seconds is None
+                                else CommandHandler(self, stale_window_seconds=command_stale_window_seconds))
         self.readback_routes: List[dict] = []
         # Set by the owning SimulatorScheduler once the device's per-device
         # MQTT client is created - never constructed here (devices.py must

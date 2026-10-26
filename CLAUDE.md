@@ -1,5 +1,15 @@
 # NEXUS: instructions for Claude Code
 
+## Current canonical checkpoint — 2026-10-26
+
+Use `D:\nexus` on `main`, not a phase-specific worktree. Read `README.md` and
+`architecture/consolidation-20261026.md` first, then actual Git status and the relevant acceptance ledger.
+Phase 5/6, Ollama/operator UI, ESP simulation and USB work are now consolidated here. The old Phase 3
+planning-only assignment below is historical and is NOT the current next task. P6-241/P6-242 remain open.
+No full certification, physical actuation claim or new development phase is implied by consolidation.
+
+## Historical agent instructions (retained for provenance)
+
 ## Start with a small context
 
 1. Read [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) for the current checkpoint.

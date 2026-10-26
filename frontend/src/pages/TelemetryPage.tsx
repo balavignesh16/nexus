@@ -18,6 +18,7 @@ import { LoadingBlock } from '../components/foundation/LoadingState';
 import { DataSourceBadge } from '../components/ui/DataSourceBadge';
 
 type ChartPoint = { time: string; value: number; timestamp: number };
+type ReadingPoint = { time: string; value: unknown; timestamp: number; unit: string | null; id: string };
 
 // Real bound: these must match the backend's CapabilityType enum names
 // exactly (the literal sensorType strings telemetry records carry), never
@@ -56,25 +57,38 @@ export default function TelemetryPage() {
 
   // Unchanged real data pipeline (Step 4): same query key/fn RealtimeRepositorySync
   // already pushes live telemetry into - do not alter either side of this contract.
-  const { data: telemetryData = [], isLoading: isLoadingTelemetry } = usePolling(
-    ['telemetry-page', activeDeviceId, selectedMetric],
+  const { data: telemetryData = [], isLoading: isLoadingTelemetry, isError: telemetryError } = usePolling(
+    ['telemetry-page', activeDeviceId, 'all', 'typed-history'],
     () => activeDeviceId ? telemetry.getTelemetryHistory(activeDeviceId) : Promise.resolve([]),
-    { interval: 5000 }
+    // Refetch a bounded authoritative snapshot even with websocket connectivity: live scalar deltas
+    // do not contain every typed value/unit and only update their exact legacy metric cache key.
+    { interval: 5000, refetchInterval: 5000 }
   );
 
+  const metricOptions = useMemo(() => {
+    const keys = [...new Set<string>(telemetryData.flatMap(t=>Object.keys(t.payload??{})))];
+    return keys.length ? keys.map(key=>({value:key,label:METRIC_OPTIONS.find(m=>m.value.toLowerCase()===key.toLowerCase())?.label ?? key.replace(/^(demo_|usb_)/,'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase())})) : METRIC_OPTIONS;
+  },[telemetryData]);
+  const activeMetric = metricOptions.find(m=>m.value===selectedMetric)?.value
+    ?? metricOptions.find(m=>m.value.toLowerCase()===selectedMetric.toLowerCase())?.value
+    ?? metricOptions.find(m=>telemetryData.some(t=>typeof t.payload?.[m.value]==='number'))?.value
+    ?? metricOptions[0].value;
+  const metricLabel = metricOptions.find(m=>m.value===activeMetric)?.label ?? activeMetric;
+  const selectedReadings = useMemo<ReadingPoint[]>(()=>telemetryData
+    .filter(t=>t.payload && Object.hasOwn(t.payload,activeMetric))
+    .map((t,index)=>{const timestamp=new Date(t.timestamp).getTime();return {id:t.id??`${timestamp}-${index}`,time:new Date(timestamp).toLocaleTimeString(),timestamp,value:t.payload[activeMetric],unit:t.unit??null};})
+    .filter(t=>Number.isFinite(t.timestamp)).sort((a,b)=>a.timestamp-b.timestamp),[telemetryData,activeMetric]);
+  const selectedUnit=selectedReadings.at(-1)?.unit??null;
   const chartData = useMemo<ChartPoint[]>(() => {
-    if (!telemetryData || telemetryData.length === 0) return [];
-    const filtered = telemetryData.filter(t => t.payload && t.payload[selectedMetric] !== undefined);
-    return [...filtered]
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map(t => ({
-        time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        value: Number(t.payload[selectedMetric]) || 0,
-        timestamp: t.timestamp,
-      }));
-  }, [telemetryData, selectedMetric]);
+    return selectedReadings.filter(t=>typeof t.value==='number'&&Number.isFinite(t.value)&&t.unit===selectedUnit)
+      .map(t=>({time:t.time,value:t.value as number,timestamp:t.timestamp}));
+  }, [selectedReadings,selectedUnit]);
 
   const displayedChartData = useMemo(() => chartData.slice(-windowSize), [chartData, windowSize]);
+  const displayedReadings=selectedReadings.slice(-windowSize);
+  const activeDevice=devices.find(d=>d.id===activeDeviceId);
+  const simulated=activeDevice?.mode==='SIMULATED'||connection.realtimeStatus==='demo';
+  const source=simulated?'SIMULATED':activeDevice?.mode==='REAL'?'LIVE':'UNAVAILABLE';
 
   const stats = useMemo(() => {
     if (displayedChartData.length === 0) return null;
@@ -90,14 +104,15 @@ export default function TelemetryPage() {
   const isLive = connection.realtimeStatus === 'connected' || connection.realtimeStatus === 'demo';
 
   const exportCsv = () => {
-    const rows = displayedChartData.map((d) => [new Date(d.timestamp).toISOString(), selectedMetric, String(d.value)]);
-    downloadCsv(`telemetry-${activeDeviceId}-${selectedMetric}-${Date.now()}.csv`, ['timestamp', 'sensorType', 'value'], rows);
+    const rows = displayedReadings.map((d) => [new Date(d.timestamp).toISOString(), activeMetric, typeof d.value==='object'?JSON.stringify(d.value):String(d.value), d.unit??'']);
+    downloadCsv(`telemetry-${activeDeviceId}-${activeMetric}-${Date.now()}.csv`, ['timestamp', 'sensorType', 'value', 'unit'], rows);
   };
 
-  const recentReadingsColumns: TableColumn<ChartPoint>[] = [
+  const recentReadingsColumns: TableColumn<ReadingPoint>[] = [
     { key: 'timestamp', header: 'Timestamp', render: (d) => <span className="font-mono text-xs text-foundation-muted-fg whitespace-nowrap">{new Date(d.timestamp).toLocaleString()}</span> },
-    { key: 'sensor', header: 'Sensor', render: () => <span className="text-xs">{METRIC_OPTIONS.find(m => m.value === selectedMetric)?.label ?? selectedMetric}</span> },
-    { key: 'value', header: 'Value', align: 'right', render: (d) => <span className="font-mono text-xs font-medium text-foundation-fg">{d.value}</span> },
+    { key: 'sensor', header: 'Sensor', render: () => <span className="text-xs">{metricLabel}</span> },
+    { key: 'value', header: 'Value', align: 'right', render: (d) => <span className="font-mono text-xs font-medium text-foundation-fg">{typeof d.value==='object'?JSON.stringify(d.value):String(d.value)}</span> },
+    { key: 'unit', header: 'Unit', render: d=><span className="text-xs">{d.unit??'Unitless'}</span> },
   ];
 
   const isLoading = isLoadingDevices || (isLoadingTelemetry && chartData.length === 0);
@@ -123,11 +138,11 @@ export default function TelemetryPage() {
             subtitle="Real-time metric visualization"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <Select value={activeDeviceId || ''} onChange={(e) => setSelectedDevice(e.target.value)} className="w-44">
+            <Select aria-label="Telemetry device" value={activeDeviceId || ''} onChange={(e) => setSelectedDevice(e.target.value)} className="w-64">
               {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </Select>
-            <Select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="w-48">
-              {METRIC_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            <Select aria-label="Telemetry metric" value={activeMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="w-48">
+              {metricOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select>
             <Select value={windowSize} onChange={(e) => setWindowSize(Number(e.target.value))} className="w-32">
               {WINDOW_OPTIONS.map(size => <option key={size} value={size}>Last {size}</option>)}
@@ -146,13 +161,16 @@ export default function TelemetryPage() {
           </div>
         </div>
 
+        <div className="text-xs text-foundation-muted-fg flex flex-wrap gap-3 items-center"><DataSourceBadge classification={source} variant="foundation"/><span>Stored readings · exact capability: {activeMetric}{selectedUnit?` · ${selectedUnit}`:''} · refresh every 5s. Connection status does not prove sensor freshness.</span></div>
+        {telemetryError&&<p role="alert" className="text-red-500">Could not refresh telemetry. Previously fetched readings may be stale.</p>}
+
         {/* PRIMARY CHART */}
         <Card
           level="glass"
           padding="lg"
-          title={`${METRIC_OPTIONS.find(m => m.value === selectedMetric)?.label ?? selectedMetric} Trend`}
+          title={`${metricLabel} Trend${selectedUnit?` (${selectedUnit})`:''}`}
           subtitle={`${displayedChartData.length} of ${chartData.length} fetched point(s)`}
-          action={<DataSourceBadge classification="LIVE" variant="foundation" />}
+          action={<DataSourceBadge classification={source} variant="foundation" />}
         >
           <div className="h-[340px]">
             {displayedChartData.length > 0 ? (
@@ -186,8 +204,8 @@ export default function TelemetryPage() {
             ) : (
               <EmptyState
                 icon={<Activity size={28} />}
-                title="No telemetry data available for this metric."
-                description="Select a different device or sensor, or wait for new readings to arrive."
+                title={selectedReadings.length?'State/text telemetry — see readings below.':'No telemetry data available for this metric.'}
+                description={selectedReadings.length?'Non-numeric states are preserved as reported; no numeric chart or average is invented.':'Select a different device or sensor, or wait for new readings to arrive.'}
               />
             )}
           </div>
@@ -206,21 +224,21 @@ export default function TelemetryPage() {
           <div className="flex items-center justify-between p-4 border-b border-foundation-border">
             <div>
               <h3 className="text-sm font-semibold text-foundation-fg">Recent Readings</h3>
-              <p className="text-xs text-foundation-muted-fg">{displayedChartData.length} record(s) in the current window</p>
+              <p className="text-xs text-foundation-muted-fg">{displayedReadings.length} record(s) in the current window · at most 50 fetched records across this device's metrics</p>
             </div>
-            <Button variant="secondary" size="sm" onClick={exportCsv} disabled={displayedChartData.length === 0}>
+            <Button variant="secondary" size="sm" onClick={exportCsv} disabled={displayedReadings.length === 0}>
               <Download size={14} /> Export CSV
             </Button>
           </div>
-          {displayedChartData.length === 0 ? (
+          {displayedReadings.length === 0 ? (
             <div className="p-6">
               <EmptyState icon={<Signal size={24} />} title="No readings to display yet." />
             </div>
           ) : (
             <Table
               columns={recentReadingsColumns}
-              rows={[...displayedChartData].reverse()}
-              rowKey={(d) => String(d.timestamp)}
+              rows={[...displayedReadings].reverse()}
+              rowKey={(d) => d.id}
               className="border-0 rounded-none"
             />
           )}

@@ -101,6 +101,16 @@ export function RulesPage() {
     );
   }
 
+  if (studio) return (
+    <section className="flex flex-col h-full min-h-0 overflow-hidden" aria-label="Visual rule builder" style={{backgroundColor:'var(--foundation-bg)',color:'var(--foundation-fg)'}}>
+      <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-foundation-border shrink-0">
+        <button type="button" aria-label="Close visual studio" className="text-sm font-medium hover:underline" onClick={()=>{setStudio(null);void refetch();}}>← Back to rules</button>
+        <p className="text-xs text-foundation-muted-fg">Draft → Validate → Save · Activation is a separate lifecycle action</p>
+      </div>
+      <div className="flex-1 min-h-0"><RuleStudio initialRule={studio.rule} onSaved={()=>refetch()} /></div>
+    </section>
+  );
+
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ backgroundColor: 'var(--foundation-bg)' }}>
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
@@ -128,7 +138,7 @@ export function RulesPage() {
               {devices.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </Select>
             <Button variant="secondary" size="sm" onClick={() => setStudio({ rule: null })}>
-              <Workflow size={14} /> Visual Studio
+              <Workflow size={14} /> Visual Rule Builder
             </Button>
             <Button variant="secondary" size="sm" onClick={() => setModalOpen(true)}>
               <Plus size={14} /> Create Rule
@@ -330,16 +340,6 @@ export function RulesPage() {
             </div>
             <div className="min-h-0 flex-1"><RuleSimulator rule={simulatorRule} onClose={() => setSimulatorRule(null)} /></div>
           </div>
-        </div>
-      )}
-
-      {studio && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-label="Visual rule studio">
-          <div className="flex items-center justify-between border-b border-border px-4 py-1.5">
-            <span className="text-xs text-muted-foreground">Visual Studio saves the flat definition (all conditions, then all actions) through the backend; branching is not executable.</span>
-            <button type="button" aria-label="Close visual studio" onClick={() => { setStudio(null); refetch(); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
-          </div>
-          <div className="min-h-0 flex-1"><RuleStudio initialRule={studio.rule} onSaved={() => refetch()} /></div>
         </div>
       )}
 

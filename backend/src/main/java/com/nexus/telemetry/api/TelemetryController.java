@@ -5,6 +5,7 @@ import com.nexus.telemetry.api.dto.TelemetryRequest;
 import com.nexus.telemetry.api.dto.TelemetryResponse;
 import com.nexus.telemetry.application.TelemetryQueryService;
 import com.nexus.telemetry.application.TelemetryService;
+import com.nexus.telemetry.application.TelemetrySource;
 import com.nexus.telemetry.domain.TelemetryQuery;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,10 +27,14 @@ public class TelemetryController {
         this.telemetryQueryService = telemetryQueryService;
     }
 
+    /**
+     * 201 Created for a newly accepted sample (unchanged). A repeat of an already accepted messageId is a successful no-op:
+     * 200 OK with the additive {@code duplicate: true}; a repeat with a different payload is 409 Conflict (R17, A5).
+     */
     @PostMapping("/telemetry")
-    @ResponseStatus(HttpStatus.CREATED)
-    public TelemetryResponse processTelemetry(@jakarta.validation.Valid @RequestBody TelemetryRequest request) {
-        return telemetryService.processTelemetry(request);
+    public ResponseEntity<TelemetryResponse> processTelemetry(@jakarta.validation.Valid @RequestBody TelemetryRequest request) {
+        TelemetryResponse response = telemetryService.processTelemetry(request, TelemetrySource.HTTP);
+        return ResponseEntity.status(response.repeatsAcceptedMessage() ? HttpStatus.OK : HttpStatus.CREATED).body(response);
     }
 
     @GetMapping("/telemetry")

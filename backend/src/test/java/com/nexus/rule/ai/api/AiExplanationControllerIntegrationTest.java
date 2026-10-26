@@ -66,6 +66,7 @@ class AiExplanationControllerIntegrationTest {
         registry.add("spring.flyway.user", postgres::getUsername);
         registry.add("spring.flyway.password", postgres::getPassword);
         registry.add("nexus.ai.enabled", () -> "true");
+        registry.add("nexus.ai.send-device-evidence", () -> "true");
         registry.add("nexus.ai.rate-limit.requests-per-minute", () -> "1000");
         registry.add("nexus.ai.rate-limit.burst", () -> "1000");
         registry.add("nexus.ai.rate-limit.concurrency-limit", () -> "50");
@@ -149,7 +150,11 @@ class AiExplanationControllerIntegrationTest {
         mockMvc.perform(get("/api/v1/ai/explanations/rule-match/{matchId}", matchId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.matchId").value(matchId.toString()))
-                .andExpect(jsonPath("$.generatedBy").value("AI"));
+                .andExpect(jsonPath("$.generatedBy").value("AI"))
+                // P6-016: an AI explanation says which provider, model and (hashed) configuration wrote it
+                .andExpect(jsonPath("$.provenance.providerId").value("openai-compatible"))
+                .andExpect(jsonPath("$.provenance.modelId").value("gpt-4o-mini"))
+                .andExpect(jsonPath("$.provenance.configHash").value(org.hamcrest.Matchers.matchesPattern("[0-9a-f]{16}")));
     }
 
     @Test
@@ -162,7 +167,10 @@ class AiExplanationControllerIntegrationTest {
         mockMvc.perform(get("/api/v1/ai/explanations/rule-match/{matchId}", matchId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.matchId").value(matchId.toString()))
-                .andExpect(jsonPath("$.generatedBy").value("DETERMINISTIC_FALLBACK"));
+                .andExpect(jsonPath("$.generatedBy").value("DETERMINISTIC_FALLBACK"))
+                // the deterministic path says no model wrote it
+                .andExpect(jsonPath("$.provenance.providerId").value("none"))
+                .andExpect(jsonPath("$.provenance.modelId").value("none"));
     }
 
     @Test

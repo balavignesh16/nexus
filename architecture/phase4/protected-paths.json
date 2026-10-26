@@ -1,0 +1,13 @@
+{
+  "baselineCommit": "e2c77ec",
+  "baselineNote": "main at the start of Phase 4 slice work after P4.4. These are git object ids, so they are content hashes: a tree id changes if any file below it changes in any way. tests/test_protected_paths.py compares them with HEAD for every Phase 4 slice (ledger P4-119).",
+  "trees": {
+    "firmware": "bda5d9bc20574660d87b5cf30004ef0203176fbd",
+    "hardware-tests": "bf3c1229ea2a134547dc14545fe7a2e5b01fb86a",
+    "results": "3814b610813f1b96aeef282371a28056a31d1cfb"
+  },
+  "blobs": {
+    "CODEX_HANDOFF.md": "87c23257cfc22512c4c237d1ebe115880dd08b74",
+    "ROADMAP.md": "6a92b62b3df697c373bc46fc8dd30964616fbb10"
+  }
+}

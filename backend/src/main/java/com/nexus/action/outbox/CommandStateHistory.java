@@ -4,7 +4,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -17,6 +16,12 @@ import java.util.UUID;
  * can never pick the same number; the primary key (command_id, sequence) is the backstop. LOCK ORDER: the advisory lock
  * is always the LAST lock a transaction takes (after the outbox row and the action_history row), so it cannot take
  * part in a cycle with the lock order outbox row, then action_history row, which the dispatcher uses.
+ *
+ * TIME AUTHORITY (P4-FINAL, contract R37): the stored {@code occurred_at} is ALWAYS the database clock at insertion ({@code clock_timestamp()}),
+ * whatever instant the caller passes. Before this, acceptance, publication and ACK facts carried database instants while attempt, retry and
+ * dead-letter facts carried the application clock, so under application/database skew the facts of one command could run backwards in time
+ * and a latency computed between two of them mixed two clocks. The {@code occurredAt} parameter remains only as the caller's observation (it is
+ * validated, not stored); ordering is by the gapless sequence and, now, by one clock.
  *
  * Never put secrets, command parameters or free-form exception text in {@code detail}; reason codes are fixed codes.
  */
@@ -49,9 +54,8 @@ public class CommandStateHistory implements OutboxTransitionRecorder {
         jdbc.update("INSERT INTO command_state_history (command_id, sequence, fact_type, from_state, to_state, attempt, reason_code,"
                         + " source, correlation_id, occurred_at, detail)"
                         + " VALUES (?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM command_state_history WHERE command_id = ?),"
-                        + " ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                commandId, commandId, fact.name(), fromState, toState, attempt, reasonCode, source.name(), correlationId,
-                Timestamp.from(occurredAt), safeDetail);
+                        + " ?, ?, ?, ?, ?, ?, ?, clock_timestamp(), ?)",
+                commandId, commandId, fact.name(), fromState, toState, attempt, reasonCode, source.name(), correlationId, safeDetail);
     }
 
     /** The port of P4.1: records one outbox delivery-state change as the matching fact. */

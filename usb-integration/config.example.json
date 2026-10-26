@@ -1,0 +1,11 @@
+{
+  "mqtt": {"host": "127.0.0.1", "port": 1883},
+  "devices": [
+    {"board":"ESP1","port":"COM5","deviceId":"00000000-0000-0000-0000-000000000000","chipId":"SET_FROM_HELLO","physicalChecksConfirmed":false,
+      "readings":{"motion":{"capabilityKey":"usb_motion","type":"BOOLEAN","unit":"BOOLEAN"},"button":{"capabilityKey":"usb_button","type":"BOOLEAN","unit":"BOOLEAN"},"led_state":{"capabilityKey":"usb_led_state","type":"BOOLEAN","unit":"BOOLEAN"},"led_mode":{"capabilityKey":"usb_led_mode","type":"STRING","unit":null}}},
+    {"board":"ESP2","port":"COM8","deviceId":"00000000-0000-0000-0000-000000000000","chipId":"SET_FROM_HELLO","physicalChecksConfirmed":false,
+      "readings":{"gas_adc":{"capabilityKey":"usb_gas_adc","type":"NUMBER","unit":"ADC_COUNTS"},"gas_baseline_adc":{"capabilityKey":"usb_gas_baseline_adc","type":"NUMBER","unit":"ADC_COUNTS"},"alarm_status":{"capabilityKey":"usb_alarm_status","type":"STRING","unit":null},"alarm_demo_override":{"capabilityKey":"usb_alarm_demo_override","type":"BOOLEAN","unit":"BOOLEAN"},"buzzer_requested":{"capabilityKey":"usb_buzzer_requested","type":"BOOLEAN","unit":"BOOLEAN"}}},
+    {"board":"ESP3","port":"COM10","deviceId":"00000000-0000-0000-0000-000000000000","chipId":"SET_FROM_HELLO","physicalChecksConfirmed":false,
+      "readings":{"servo_requested_angle":{"capabilityKey":"usb_servo_requested_angle","type":"NUMBER","unit":"DEGREES"},"led_state":{"capabilityKey":"usb_led_state","type":"BOOLEAN","unit":"BOOLEAN"},"outputs_ready":{"capabilityKey":"usb_outputs_ready","type":"BOOLEAN","unit":"BOOLEAN"}}}
+  ]
+}

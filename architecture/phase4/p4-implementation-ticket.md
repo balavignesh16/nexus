@@ -132,6 +132,8 @@ Verification: duplicate, conflicting and late ACK tests; two-instance scanner ra
 
 ## Slice P4.5: telemetry inbox deduplication (V40)
 
+**P4.5 status (2026-10-17): implemented and tested on the isolated branch `feature/p45-telemetry-inbox` (worktree `D:\nexus-p45`, started from `e2c77ec`), not merged. The authoritative description is contract R35 and the P4.5 evidence section of the ledger. Ledger scenarios: 17 COVERED plus 9 added by the P4.5 review (P4-159 to P4-167). Decisions applied: A1 narrow poison-message classification, A2 SHA-256 fingerprint, A3 cascade on device deletion, A4 nullable original reference without a foreign key; HTTP identical duplicate 200 with `duplicate: true`, conflicting duplicate 409.**
+
 Authority: R17, R19, R23, R25. Ledger scenarios: 17 (including P4-072 and P4-108, which complete only when V40 exists).
 
 Deliverables: V40 `inbound_message_dedupe`; an invalid `messageId` is rejected (decision A1); optional `messageId` on `TelemetryRequest` for MQTT and HTTP; insert-first dedupe in the telemetry transaction; conflicting duplicate handling; purge in the retention job; metrics; an explicit duplicate/no-op response for HTTP submissions (decision A5: success status with an additive `duplicate: true` field and no second Twin transition). Simulator emits a UUID `messageId` and offers a redelivery hook. `firmware/**` is not modified; payloads from the committed firmware remain accepted without a messageId.
@@ -139,6 +141,8 @@ Deliverables: V40 `inbound_message_dedupe`; an invalid `messageId` is rejected (
 Verification: redelivery tests on real Mosquitto including a message processed but not acknowledged; atomicity under injected failure; concurrent duplicate test; onboarding path test; migration test proving `telemetry_history` and V1 to V36 are untouched.
 
 ## Slice P4.6: backpressure and rate limiting
+
+**P4.6 status (2026-10-17): implemented and tested on the isolated branch `feature/p46-flow-control` (worktree `D:\nexus-p46`, based on the P4.5 commit `4b73289`), not merged. The authoritative description is contract R36 and the P4.6 evidence section of the ledger. Ledger scenarios: the 6 planned ones COVERED plus 14 added by the P4.6 review (P4-168 to P4-181). No migration was needed. Interpretations and the one deviation from the contract wording (sliding-window permit count instead of an in-memory token bucket) are recorded in R36.**
 
 Authority: R18. Ledger scenarios: 6.
 
@@ -148,6 +152,8 @@ Verification: cap and race tests, rate-limit test on real Mosquitto, architectur
 
 ## Slice P4.7: observability, read API and frontend
 
+**P4.7 status (2026-10-18): implemented and tested as part of the combined milestone P4-FINAL (branch `feature/p4-final`, not merged). The authoritative description is contract R37 and the P4-FINAL evidence section of the ledger.** Deliverables built: trace projector, read-only lifecycle and dead-letter API, backend-time latency timers, platform statements, frontend lifecycle visibility. No migration.
+
 Authority: R20, R21, R24. Ledger scenarios: 14 (P4-098 and P4-099 moved to P4.2).
 
 Deliverables: pipeline trace steps per transition; Micrometer metrics with fixed tags; additive read-only lifecycle and dead-letter listing endpoints and a `deliveryState` field; explanation truthfulness for queued, dead-lettered and unknown commands; frontend lifecycle display with separate labels and tolerance for unknown states. **No mutating endpoint and no internal requeue.**
@@ -155,6 +161,8 @@ Deliverables: pipeline trace steps per transition; Micrometer metrics with fixed
 Verification: MockMvc contract tests including 404 or 405 on any mutating path; architecture test for requeue dependencies; Vitest for labels; backend-timestamp latency tests.
 
 ## Slice P4.8: integrated validation, fault injection and enablement documentation
+
+**P4.8 status (2026-10-18): implemented and tested as part of P4-FINAL, with ONE scenario open (P4-111, the Phase 3 suite with the outbox ON) and the full gate recorded in the ledger.** Deliverables built: real-process crash campaign, multi-instance and flood tests, flag-off drain, mutation campaign, `phase4_enablement_check.py`, protected-path hashes, two new gate checks.
 
 Authority: R22, R27, R29. Ledger scenarios: 20 (plus the deferred scenario P4-124 which has no slice).
 

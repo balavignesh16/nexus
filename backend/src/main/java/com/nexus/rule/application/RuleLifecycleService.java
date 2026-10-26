@@ -86,6 +86,7 @@ public class RuleLifecycleService {
     }
     @Transactional
     public RuleVersionStore.View createDraft(Rule rule) {
+        ConflictStateLock.shared(jdbc);
         jdbc.update("INSERT INTO rules(rule_id,name,enabled,priority,conditions,actions,metadata) VALUES(?,'Incomplete draft',false,0,'[]','[]','{}')",rule.ruleId());
         UUID version=insertVersion(rule,"DRAFT_CREATE");
         projection(rule.ruleId(),rule);
@@ -94,6 +95,7 @@ public class RuleLifecycleService {
     }
     @Transactional
     public RuleVersionStore.View legacySave(Rule rule,Long token) {
+        ConflictStateLock.forRule(jdbc,rule.ruleId(),rule.enabled());
         var before=store.get(rule.ruleId());
         // Tokenless clients still pin the server-observed revision before the root lock.
         Long observed=token!=null?token:before.map(RuleVersionStore.View::rowRevision).orElse(null);
@@ -118,6 +120,7 @@ public class RuleLifecycleService {
     }
     @Transactional
     public RuleVersionStore.View draft(Rule rule,long token) {
+        ConflictStateLock.shared(jdbc);
         lockContracts(List.of(rule));
         var root=lockRoot(rule.ruleId(),token);
         UUID version=insertVersion(rule,"DRAFT_EDIT");
@@ -128,6 +131,7 @@ public class RuleLifecycleService {
     }
     @Transactional
     public RuleVersionStore.View transition(UUID id,String operation,Long token) {
+        ConflictStateLock.forRule(jdbc,id,"activate".equals(operation)||"resume".equals(operation));
         if(jdbc.queryForList("SELECT lifecycle FROM rules WHERE rule_id=?",String.class,id).contains("ARCHIVED"))throw new RuleMutationException(409,"Archived rule is terminal");
         var observed=store.get(id).orElseThrow(()->new RuleMutationException(404,"Rule not found"));
         lockContracts(List.of(observed.definition()));
@@ -152,6 +156,7 @@ public class RuleLifecycleService {
     }
     @Transactional
     public void reconcile(UUID id,long observedRevision) {
+        ConflictStateLock.shared(jdbc);
         var observed=store.get(id);
         if(observed.isEmpty() || !"PENDING".equals(observed.get().reconciliation())) return;
         lockContracts(List.of(observed.get().definition()));

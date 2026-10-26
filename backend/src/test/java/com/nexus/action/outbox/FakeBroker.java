@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 /** A scriptable stand-in for the broker publisher that records every call, byte for byte, and the per-topic concurrency. */
-public final class FakeBroker implements BrokerCommandPublisher {
+public class FakeBroker implements BrokerCommandPublisher {
     public record Call(String topic, byte[] bytes) {
         public String text() { return new String(bytes, StandardCharsets.UTF_8); }
     }

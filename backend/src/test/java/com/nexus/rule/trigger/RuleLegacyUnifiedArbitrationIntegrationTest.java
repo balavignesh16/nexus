@@ -81,7 +81,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
             sql.queryForObject("SELECT match_id FROM action_history WHERE device_id=? AND action_type='SEND_COMMAND'", UUID.class, device), "and the legitimate primary match");
         assertEquals("ACCEPTED", c.get("outcome"), "acceptance is recorded as evidence only");
         assertTrue(c.get("evidence").toString().contains("\"safetyOverride\": \"UNSUPPORTED\""));
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void noIndependentLegacyDispatcherRemainsAnywhereInTheApplication() throws Exception {
@@ -105,7 +105,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
         var pinned = versionStore.version(rule, versionStore.get(rule).orElseThrow().activeVersionId());
         context.publishEvent(new RuleMatchedEvent((UUID) match.get("match_id"), now, new RuleEvaluationResult(true, pinned, null, "announced"), "c"));
         assertEquals(0, commands(device), "no listener turns a match into a command");
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void legacyRulesAreArbitratedByPriorityAndEqualPriorityConflictsDispatchNothing() {
@@ -142,7 +142,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
         var dispositions = new HashSet<>(List.of(candidate(first).get("disposition"), candidate(second).get("disposition")));
         assertEquals(Set.of("SELECTED", "COALESCED"), dispositions);
         assertEquals(1, count("SELECT count(*) FROM rule_matches WHERE rule_id IN (?,?)", first, second) / 2, "both rules keep their own match");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void legacyAndTypedBatchesAreDecidedInTheirOwnPlansWithNoGlobalPriorityClaim() {
@@ -165,7 +165,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
         assertEquals(0, plansForEvent(eventOf(rule)));
         assertEquals(0, commands(device));
         assertEquals(0, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void aRedeliveredLegacyEventReusesItsPlanAndNeverAcceptsASecondCommand() {
@@ -178,7 +178,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
         context.getBean(RuleMatcher.class).onEvent(duplicate);
         assertEquals(1, plansForEvent(event), "one batch, one decision");
         assertEquals(1, commands(device), "redelivery cannot dispatch again");
-        verify(executor, times(1)).publishPrepared(any(), any());
+        verifyPublications(1);
     }
 
     @Test void pausingBetweenTheLegacyPlanAndAcceptanceDeniesAndRecordsTheDenial() {
@@ -196,7 +196,7 @@ class RuleLegacyUnifiedArbitrationIntegrationTest extends TypedTriggerSupport {
         assertEquals("DENIED", c.get("outcome"));
         assertTrue(c.get("outcome_reason").toString().contains("RULE_NOT_ACTIVE"), c.get("outcome_reason").toString());
         assertEquals(0, count("SELECT count(*) FROM current_desired_twin_state WHERE device_id=?", device));
-        verify(executor, never()).publishPrepared(any(), any());
+        verifyNoPublication();
     }
 
     @Test void aForgedLegacyRequestCannotCarryAnotherValueOrTargetUnderAValidRequestId() {

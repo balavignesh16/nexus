@@ -23,6 +23,8 @@ import com.nexus.device.onboarding.OnboardingLifecycleService;
 import com.nexus.device.onboarding.OnboardingTelemetryRejectedException;
 import com.nexus.device.binding.BindingConstraintService;
 import com.nexus.shared.exception.ResourceNotFoundException;
+import com.nexus.telemetry.domain.TelemetryRecordId;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import java.util.List;
 import java.util.UUID;
@@ -97,18 +99,59 @@ public class TelemetryService {
     private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
     @Autowired
     void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
+    private InboundMessageDedupe dedupe;
+    @Autowired
+    void setDedupe(InboundMessageDedupe dedupe){this.dedupe=dedupe;}
+    private MeterRegistry meters;
+    @Autowired(required = false)
+    void setMeters(MeterRegistry meters){this.meters=meters;}
 
+    /** Entry point without an explicit transport: the HTTP semantics (the transport is a diagnostic label only, R17). */
     @Transactional
     public TelemetryResponse processTelemetry(TelemetryRequest request) {
+        return processTelemetry(request, TelemetrySource.HTTP);
+    }
+
+    @Transactional
+    public TelemetryResponse processTelemetry(TelemetryRequest request, TelemetrySource source) {
         Instant receivedAt=clock.instant();
         Device device = deviceRepository.findById(request.deviceId())
                 .orElseThrow(() -> new com.nexus.shared.exception.ResourceNotFoundException("Device", request.deviceId().toString()));
 
         if (onboarding == null ? device.getStatus() != DeviceStatus.ACTIVE : !onboarding.admitsTelemetry(device)) {
+            if (onboarding != null && device.getStatus() == DeviceStatus.REGISTERED)
+                throw new OnboardingTelemetryRejectedException("Onboarding has not admitted telemetry; no state was changed");
             throw new IllegalStateException("Cannot ingest telemetry for inactive device");
         }
 
-        if (capabilityResolver == null) return processLegacyTelemetry(request);
+        // R17: an identified message is ingested under the device's locks, taken BEFORE its dedupe claim and in the order DigitalTwinService.prepareUpdate
+        // uses (in-process lock, then the device row lock). The claim's foreign key takes a key-share lock on the device row; if the stronger row lock
+        // were requested only afterwards, a device deletion holding that row lock (and waiting for the key-share holder) would form a database-detected
+        // deadlock (follow-up F3, SQLSTATE 40P01). A message without an id keeps the previous path: no claim, no early lock.
+        if (request.messageId() == null || dedupe == null)
+            return ingest(request, receivedAt, device, null);
+        return digitalTwinService.underDeviceLock(request.deviceId(), () -> ingest(request, receivedAt, device, source));
+    }
+
+    private TelemetryResponse ingest(TelemetryRequest request, Instant receivedAt, Device device, TelemetrySource claimSource) {
+        // R17 insert-first: the messageId claim comes before every side effect and shares this transaction, so a later failure
+        // removes the claim and a concurrent identical submission waits for this transaction and then sees a duplicate.
+        UUID recordId = UUID.randomUUID();
+        if (claimSource != null) {
+            var outcome = dedupe.claim(request.deviceId(), request.messageId(), claimSource, TelemetryFingerprint.of(request), recordId);
+            if (outcome instanceof InboundMessageDedupe.Conflict) {
+                count("nexus.telemetry.dedupe.conflicts", claimSource);
+                log.warn("Conflicting duplicate telemetry messageId for device {} via {}: same id, different payload; the first submission wins, nothing is stored.", request.deviceId(), claimSource);
+                throw new TelemetryMessageConflictException(request.deviceId(), request.messageId());
+            }
+            if (outcome instanceof InboundMessageDedupe.Duplicate duplicate) {
+                count("nexus.telemetry.duplicates", claimSource);
+                log.info("Duplicate telemetry messageId for device {} via {}: already accepted, no new side effects.", request.deviceId(), claimSource);
+                return duplicateResponse(request, duplicate.originalRecordId());
+            }
+        }
+
+        if (capabilityResolver == null) return processLegacyTelemetry(request, recordId);
         if (request.sensorType() == null && request.capabilityKey() == null)
             throw invalidOnboardingTelemetry(device, "CAPABILITY_IDENTITY_MISSING", "sensorType or capabilityKey is required");
         String identity=request.capabilityKey()!=null?request.capabilityKey():request.sensorType();
@@ -135,7 +178,7 @@ public class TelemetryService {
         long stageStart = System.currentTimeMillis();
 
         TelemetryRecord record = new TelemetryRecord(
-                UUID.randomUUID(),
+                recordId,
                 request.deviceId(),
                 request.timestamp(),
                 request.sensorType()!=null?request.sensorType():resolved.definition().getKey(), normalized.value(), normalized.unit(),
@@ -168,17 +211,32 @@ public class TelemetryService {
         return TelemetryResponse.from(record);
     }
 
+    private void count(String name, TelemetrySource source) {
+        if (meters != null) meters.counter(name, "source", source.name()).increment();
+    }
+
+    /** A duplicate repeats an accepted sample: report the original when it is still stored, otherwise echo the request without an id. */
+    private TelemetryResponse duplicateResponse(TelemetryRequest request, UUID originalRecordId) {
+        if (originalRecordId != null) {
+            var original = telemetryRepository.findById(new TelemetryRecordId(originalRecordId, request.timestamp()));
+            if (original.isPresent()) return TelemetryResponse.from(original.get()).asDuplicate();
+        }
+        Double numeric = request.value() instanceof Number number ? number.doubleValue() : null;
+        return new TelemetryResponse(null, request.deviceId(), request.timestamp(), request.sensorType(), numeric, request.unit(),
+                request.capabilityKey(), null, request.value()).asDuplicate();
+    }
+
     private IllegalArgumentException invalidOnboardingTelemetry(Device device, String code, String message) {
         if (onboarding == null || device.getStatus() == DeviceStatus.ACTIVE)
-            return new IllegalArgumentException(message);
+            return new InvalidTelemetryException(code, message);
         onboarding.rejectInvalidTelemetry(device.getId(), code, message);
         return new OnboardingTelemetryRejectedException(message);
     }
 
-    private TelemetryResponse processLegacyTelemetry(TelemetryRequest request) {
-        if (!(request.value() instanceof Number number)) throw new IllegalArgumentException("Legacy telemetry value must be numeric");
+    private TelemetryResponse processLegacyTelemetry(TelemetryRequest request, UUID recordId) {
+        if (!(request.value() instanceof Number number)) throw new InvalidTelemetryException("LEGACY_VALUE_NOT_NUMERIC", "Legacy telemetry value must be numeric");
         String correlationId=UUID.randomUUID().toString(); long stageStart=System.currentTimeMillis();
-        var record=new TelemetryRecord(UUID.randomUUID(),request.deviceId(),request.timestamp(),request.sensorType(),number.doubleValue(),request.unit());
+        var record=new TelemetryRecord(recordId,request.deviceId(),request.timestamp(),request.sensorType(),number.doubleValue(),request.unit());
         telemetryRepository.save(record);
         afterCommit(()->{realtimePublisher.publishTelemetry(record,correlationId);
             pipelineService.recordTrace(PipelineTrace.of(correlationId,request.deviceId().toString(),PipelineStage.TELEMETRY,stageStart,"SUCCESS",request,java.util.Map.of("sensorType",request.sensorType(),"value",request.value())));

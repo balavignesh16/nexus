@@ -64,6 +64,7 @@ class SimulatorScheduler:
                     name=device_dict.get("name", ""),
                     serial_number=device_dict.get("serialNumber", ""),
                     capabilities=device_dict.get("capabilities", []),
+                    command_stale_window_seconds=self.config.command_stale_window_seconds,
                 )
 
                 if not sim_device.has_capabilities():

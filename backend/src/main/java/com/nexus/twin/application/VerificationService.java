@@ -23,6 +23,9 @@ public class VerificationService {
     private final TwinStateQualityEvaluator quality;
     private final ReadbackComparison comparison;
     private final Clock clock;
+    private io.micrometer.core.instrument.MeterRegistry meters;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    void setMeters(io.micrometer.core.instrument.MeterRegistry meters){this.meters=meters;}
     private com.nexus.rule.trigger.RuleSourceFacts ruleFacts;
     @org.springframework.beans.factory.annotation.Autowired
     void setRuleFacts(com.nexus.rule.trigger.RuleSourceFacts ruleFacts){this.ruleFacts=ruleFacts;}
@@ -75,7 +78,14 @@ public class VerificationService {
             VerificationStatus before=state.getVerificationStatus();
             state.observe(telemetry.getId(),reported.stateKey(),reported.bindingId(),reported.latestTimestamp(),
                     receivedAt,correlationId,selected,mapping.getComparatorKey(),mapping.getNumericTolerance(),match);
-            if(match)state.change(VerificationStatus.CONVERGED,clock.instant(),null);
+            if(match) {
+                state.change(VerificationStatus.CONVERGED,clock.instant(),null);
+                // Backend instants only: the command's acceptance and the backend time it was converged. The device's own reading time plays no part.
+                if(meters!=null&&before!=VerificationStatus.CONVERGED&&!clock.instant().isBefore(intent.getAcceptedForDispatchAt()))
+                    io.micrometer.core.instrument.Timer.builder("nexus.command.latency").tag("stage","convergence")
+                        .description("Backend-clock latency of a command lifecycle stage (accepted to qualified convergence)")
+                        .register(meters).record(java.time.Duration.between(intent.getAcceptedForDispatchAt(),clock.instant()));
+            }
             else if(before!=VerificationStatus.PENDING||state.getVerificationDeadlineAt()!=null
                     && !clock.instant().isBefore(state.getVerificationDeadlineAt()))
                 state.change(VerificationStatus.DIVERGED,clock.instant(),"QUALIFIED_READBACK_MISMATCH");

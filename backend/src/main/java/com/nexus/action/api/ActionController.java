@@ -24,6 +24,16 @@ public class ActionController {
     private final ActionHistoryRepository historyRepository;
     private final ActionExecutorRegistry registry;
     private final Clock clock;
+    private com.nexus.action.outbox.CommandOutboxRepository outbox;
+    private com.nexus.action.lifecycle.CommandLifecycleReader lifecycle;
+
+    /** Optional: marks the rows of commands accepted before the outbox existed as DELIVERY_UNKNOWN (P4-073); absent in unit tests. */
+    @Autowired(required = false)
+    void setLifecycle(com.nexus.action.lifecycle.CommandLifecycleReader lifecycle) { this.lifecycle = lifecycle; }
+
+    /** Optional: when present, history rows of outbox commands carry their additive delivery state (P4-103); absent in unit tests. */
+    @Autowired(required = false)
+    void setOutbox(com.nexus.action.outbox.CommandOutboxRepository outbox) { this.outbox = outbox; }
 
     public ActionController(ActionHistoryRepository historyRepository, ActionExecutorRegistry registry) {
         this(historyRepository,registry,Clock.systemUTC());
@@ -60,8 +70,21 @@ public class ActionController {
         } else {
             records = historyRepository.findAllByOrderByTimestampDesc(PageRequest.of(0, limit)).getContent();
         }
+        // One bounded lookup for the whole page (never one query per row): the delivery state of the rows that have an outbox row.
+        java.util.Map<UUID, com.nexus.action.outbox.CommandOutboxEntity> delivery = new java.util.HashMap<>();
+        if (outbox != null && !records.isEmpty())
+            outbox.findAllById(records.stream().map(ActionHistoryRecord::getRequestId).toList()).forEach(o -> delivery.put(o.getCommandId(), o));
+        java.util.Set<UUID> unknown = lifecycle == null ? java.util.Set.of()
+                : lifecycle.deliveryUnknownAmong(records.stream().map(ActionHistoryRecord::getRequestId).filter(id -> !delivery.containsKey(id)).toList());
         List<ActionHistoryResponse> responses = records.stream()
-                .map(row -> ActionHistoryResponse.from(row,clock))
+                .map(row -> {
+                    var response = ActionHistoryResponse.from(row,clock);
+                    var o = delivery.get(row.getRequestId());
+                    if (o != null) return response.withDelivery(o.getState().name(), o.getTerminalReason() == null ? null : o.getTerminalReason().name());
+                    // No outbox row: a command the reconciler classified (accepted before the outbox existed) reports DELIVERY_UNKNOWN additively; its
+                    // existing status field keeps its prior meaning.
+                    return unknown.contains(row.getRequestId()) ? response.withDelivery("DELIVERY_UNKNOWN", "LEGACY_DELIVERY_UNRECORDED") : response;
+                })
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);
     }

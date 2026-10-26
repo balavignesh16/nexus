@@ -63,6 +63,9 @@ class VerificationIntegrationTest {
     @Autowired TwinStateTransitionRepository transitions;
     @Autowired DigitalTwinRepository reported;
     @Autowired VerificationService reconciliation;
+    @Autowired io.micrometer.core.instrument.MeterRegistry meters;
+    @Autowired com.nexus.action.lifecycle.CommandLifecycleReader lifecycleReader;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate lifecycleSql;
     @Autowired DesiredTwinStateRepository desired;
     @Autowired ActionHistoryRepository actions;
     @Autowired DeviceCommandAckMessageHandler ackHandler;
@@ -160,8 +163,11 @@ class VerificationIntegrationTest {
         assertEquals(VerificationStatus.PENDING,verification.findById(id).orElseThrow().getVerificationStatus());
         assertEquals("MISMATCH",verification.findById(id).orElseThrow().getComparisonResult());
         assertEquals("QUALIFIED_READBACK_MISMATCH",verification.findById(id).orElseThrow().getDiscrepancyReason());
+        long convergenceTimers=meters.find("nexus.command.latency").tag("stage","convergence").timers().stream().mapToLong(io.micrometer.core.instrument.Timer::count).sum();
         telemetry.processTelemetry(new TelemetryRequest(device,now.minusSeconds(1),"LED_READBACK",true,"BOOLEAN",read.getKey(),second));
         var state=verification.findById(id).orElseThrow();
+        assertEquals(convergenceTimers+1,meters.find("nexus.command.latency").tag("stage","convergence").timers().stream().mapToLong(io.micrometer.core.instrument.Timer::count).sum(),
+                "qualified convergence records exactly one backend-clock latency (P4-057)");
         assertEquals(VerificationStatus.CONVERGED,state.getVerificationStatus());
         assertEquals(CommandStatus.ACKNOWLEDGED,CommandStatus.from(actions.findById(second).orElseThrow(),
                 java.time.Clock.systemUTC()));
@@ -171,6 +177,14 @@ class VerificationIntegrationTest {
         assertEquals("MATCH",state.getComparisonResult());
         assertEquals(1,transitionsFor(device,TwinTransitionType.CONVERGENCE_CHANGED).stream()
                 .filter(t->"CONVERGED".equals(t.getNewVerificationStatus())&&second.equals(t.getVerificationCommandId())).count());
+        // P4-058: the convergence latency of the read-only lifecycle API is the BACKEND instant of the verification minus the BACKEND publication
+        // instant; the readback's own (device) event time, a second earlier here, takes no part in it.
+        var lifecycleView=lifecycleReader.find(second).orElseThrow();
+        assertEquals("CONVERGED",lifecycleView.convergence().status());
+        Long expectedConvergenceMs=lifecycleSql.queryForObject("SELECT floor(extract(epoch FROM (v.verification_updated_at - a.published_at)) * 1000)::bigint"
+                +" FROM current_twin_verification_state v JOIN action_history a ON a.request_id = v.desired_command_id WHERE v.desired_command_id = ?",Long.class,second);
+        assertEquals(expectedConvergenceMs,lifecycleView.latency().publishedToConvergenceMs());
+        assertTrue(lifecycleView.explanation().stream().anyMatch(t->t.contains("qualified readback matched the desired state")));
         assertTrue(transitions.findAll().stream().anyMatch(t->t.getTransitionType()==TwinTransitionType.CONVERGENCE_CHANGED
                 && "CONVERGED".equals(t.getNewVerificationStatus())&&second.equals(t.getVerificationCommandId())));
         telemetry.processTelemetry(new TelemetryRequest(device,now.plusSeconds(1),"LED_READBACK",false,"BOOLEAN",read.getKey(),second));

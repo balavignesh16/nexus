@@ -77,6 +77,22 @@ public class DigitalTwinService {
         afterCommit(() -> publishAfterCommit(mutation));
     }
 
+    /**
+     * Runs {@code work} holding this device's in-process lock and, inside the caller's transaction, the device row lock, acquired in the SAME order
+     * {@link #prepareUpdate} uses (in-process lock first, then {@code SELECT ... FOR NO KEY UPDATE}). The in-process lock is released when {@code work}
+     * returns; the row lock stays until the transaction ends. P4.5/P4.6 (F3): identified telemetry takes both BEFORE its dedupe claim, whose foreign key
+     * takes a key-share lock on the device row. Asking for the stronger row lock only after the claim formed a cycle with a device deletion (which holds
+     * the row lock and waits for the key-share holder). Taking the row lock first without the in-process lock would instead let an identified and an
+     * unidentified sample of one device deadlock through the monitor, a cycle the database cannot see, so both are taken here in the established
+     * order. {@link #prepareUpdate} re-enters both: the monitor is reentrant and the row lock is already held. Must be called inside a transaction.
+     */
+    public <T> T underDeviceLock(UUID deviceId, java.util.function.Supplier<T> work) {
+        synchronized(deviceLocks.computeIfAbsent(deviceId,ignored->new Object())) {
+            if (devices!=null) devices.findByIdForUpdate(deviceId).orElseThrow(()->new com.nexus.shared.exception.ResourceNotFoundException("Device",deviceId.toString()));
+            return work.get();
+        }
+    }
+
     public Mutation prepareUpdate(NormalizedTelemetry request,String correlationId,Instant receivedAt) {
         long stageStart=System.currentTimeMillis();
         String stateKey=stateKey(request);

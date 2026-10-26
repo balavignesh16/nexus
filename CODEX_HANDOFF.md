@@ -1,5 +1,11 @@
 # NEXUS — Handoff Notes (Claude Code session → continuing in Codex)
 
+## Consolidated checkout — 2026-10-26
+
+The current repository is `D:\nexus` / `main`, now including Phase 5/6 and the latest interface, Ollama,
+demo and USB integration. Start with `README.md` and `architecture/consolidation-20261026.md`.
+The dated checkpoints below are retained history, not the current next-phase instruction or certification.
+
 ## Current-state pointer (2026-10-13)
 
 This file preserves historical session notes. For a fresh Claude/other-agent

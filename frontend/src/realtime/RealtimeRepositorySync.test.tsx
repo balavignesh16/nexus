@@ -414,3 +414,57 @@ describe('RealtimeRepositorySync - PIPELINE topic (realtime trace normalization)
     expect(trace.status).toBe('FAILURE');
   });
 });
+
+describe('RealtimeRepositorySync - ACTIONS topic (live rows have the history shape)', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  function renderSync() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeRepositorySync />
+      </QueryClientProvider>
+    );
+  }
+
+  function actionMessage(payload: Record<string, unknown>, deviceId: string | null = null) {
+    return {
+      eventId: 'evt-act-1', eventType: 'ActionExecuted', deviceId, correlationId: 'corr-act-1', sequenceNumber: 1,
+      serverTimestamp: 1700000000000, source: 'BACKEND', version: 1, payload,
+    };
+  }
+
+  it('prepends a live action that keeps its status, its execution id and an ISO timestamp (no "Unknown" status, no "Invalid Date")', () => {
+    queryClient.setQueryData(['global-actions-history'], [{ executionId: 'old', requestId: 'r-old', actionType: 'SEND_COMMAND', status: 'SUCCESS', timestamp: '2026-01-01T00:00:00.000Z' }]);
+    renderSync();
+
+    (RealtimeManager as any).__emit(TOPICS.ACTIONS, actionMessage({
+      executionId: 'exec-live', actionType: 'SEND_COMMAND', status: 'FAILURE', executedAt: 1700000000000, message: 'boom',
+    }, 'dev-1'));
+
+    const rows = queryClient.getQueryData<any[]>(['global-actions-history'])!;
+    expect(rows).toHaveLength(2);
+    expect(rows[0].executionId).toBe('exec-live');
+    expect(rows[0].status).toBe('FAILURE');
+    expect(rows[0].deviceId).toBe('dev-1');
+    expect(rows[0].timestamp).toBe(new Date(1700000000000).toISOString());
+    expect(rows[0].ackStatus).toBeUndefined();
+    expect(rows[1].executionId).toBe('old');
+  });
+
+  it('a live action without a usable time gets a null timestamp rather than an invalid date', () => {
+    renderSync();
+    (RealtimeManager as any).__emit(TOPICS.ACTIONS, actionMessage({ executionId: 'e', actionType: 'SEND_COMMAND', status: 'SUCCESS' }));
+    const rows = queryClient.getQueryData<any[]>(['global-actions-history'])!;
+    expect(rows[0].timestamp).toBeNull();
+  });
+
+  it('ignores an empty payload', () => {
+    renderSync();
+    expect(() => (RealtimeManager as any).__emit(TOPICS.ACTIONS, { ...actionMessage({}), payload: undefined })).not.toThrow();
+    expect(queryClient.getQueryData(['global-actions-history'])).toBeUndefined();
+  });
+});
