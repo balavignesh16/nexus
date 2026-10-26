@@ -11,7 +11,7 @@ the status checkboxes and decision log as work progresses.
 | 0 | Clean baseline and reliable development workflow | Complete |
 | 1 | Generic device and capability framework | Complete |
 | 2 | Complete Digital Twin engine | In progress |
-| 3 | Production-grade Rule Engine | Not started |
+| 3 | Production-grade Rule Engine | In progress |
 | 4 | Reliable event and action pipeline | Not started |
 | 5 | Device adapter and SDK layer | Not started |
 | 6 | Safe AI intelligence | Not started |
@@ -20,6 +20,21 @@ the status checkboxes and decision log as work progresses.
 | 9 | Validation and release engineering | Not started |
 
 Allowed status values: `Not started`, `In progress`, `Blocked`, and `Complete`.
+
+## Current agent checkpoint (2026-10-13)
+
+The current foundation is committed on `main` at
+`d936a3046358f195176e84fb3d08592f584393f9` (V25). P2.1-P2.4 core and the
+combined P3.4 + P3.1 foundation have passed their scoped reviews and validation.
+This does not close every Phase 2 operational/exit obligation or all Phase 3 work.
+The Phase 3 ledger retains exactly 72 IDs: **20 COVERED / 52 PLANNED**.
+
+For a fresh agent, start with [CLAUDE.md](CLAUDE.md),
+[PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) and [NEXT_TASK.md](NEXT_TASK.md).
+The next dependency-safe slice is frozen evaluation context, **planning first**,
+before P3.2 typed triggers. Follow the implementation ticket's slice order, not
+the numeric order of the broad P3 headings. Historical notes below remain dated
+checkpoints; old uncommitted/status/count statements are not the current state.
 
 ## Current baseline
 
@@ -39,9 +54,11 @@ NEXUS currently provides:
 
 Phase 1 added configuration-driven generic capabilities and typed values.
 Legacy capability types and the current ESP simulator profiles remain
-code-defined compatibility paths. Twin intent, durable state history, and
-capability quality are implemented; convergence and generic readback mapping
-remain the next Twin gaps.
+code-defined compatibility paths. Twin intent, durable state history,
+capability quality, explicit generic readback mappings and qualified convergence
+are implemented in the committed P2.1-P2.4 core. V25 adds immutable Rule versions,
+lifecycle/ownership, central validation and persistence-gated execution.
+Frozen evaluation contexts and full Rule arbitration remain future work.
 
 ---
 
@@ -213,8 +230,8 @@ Example actuator state:
 ```
 
 A difference between desired and reported state is exposed without hiding the
-observation. P2.4 will classify convergence; P2.1 does not infer it from ACKs
-or simple value equality.
+observation. Committed P2.4 now classifies qualified convergence; P2.1 intent,
+software ACK and simple value equality alone never establish it.
 
 ### 2.2 State history
 
@@ -231,7 +248,7 @@ Persist Twin transitions so the framework can answer:
 - Was the source telemetry, a rule, a manual command, or recovery?
 - What was the previous state?
 
-This history will enable real Twin diff mode.
+This history supports the implemented database-backed Twin diff mode.
 
 ### 2.3 Quality and freshness
 
@@ -249,7 +266,7 @@ Support configurable per-capability quality:
 
 Rejected input is tracked as ingestion health, not automatically as invalid
 current Twin state. The existing age-only `quality` response field stays
-compatible; P2.3 proposes additive `stateQuality`.
+compatible; P2.3 exposes additive `stateQuality`.
 
 Freshness thresholds must be capability-specific. A motion signal and a firmware
 version should not use the same expiration policy.
@@ -308,7 +325,19 @@ forensic final review complete.
 Evolve the current matcher into a configurable and deterministic reasoning
 system.
 
+Implementation checkpoint: the combined P3.4 + P3.1 foundation is committed and
+final-targeted-review APPROVED, including R1/U1 dimensional-unit safety, U2
+canonical selection and U3 persisted-winner proof. This is not complete Phase 3.
+See `architecture/phase3/p3-implementation-ticket.md` for dependency slices and
+`architecture/phase3/p3-acceptance-ledger.md` for exact evidence/open obligations.
+The next slice is frozen evaluation context. Full C13 arbitration/ActionPlan
+authority, typed triggers, temporal runtime and backend dry-run remain open.
+
 ### 3.1 Strong rule validation
+
+Supported foundation validation is implemented. Temporal configuration/runtime
+is not implemented; unsupported future configuration is rejected, not treated
+as proof that the temporal requirements below are complete.
 
 Validate before activation that:
 
@@ -344,6 +373,10 @@ Support conditions such as:
 - Expected telemetry not received within an interval.
 
 ### 3.4 Rule lifecycle and versioning
+
+V25 foundation is implemented: immutable executable history, separate version
+workflow and logical lifecycle, active/working ownership, row revision and
+execution epoch. Validation workflow must not be conflated with active ownership.
 
 Support the states:
 
@@ -673,10 +706,21 @@ Record roadmap approvals and meaningful scope decisions here.
 | 2026-10-03 | Commit the completed Phase 1 work in scoped stages. | Approved by user; no tag, push, or Phase 2 implementation. |
 | 2026-10-03 | Review Twin 2.0 P2.0 contract against source. | Corrected direction, transaction, quality, history, and convergence semantics; P2.1 remains subject to user approval. |
 | 2026-10-05 | Perform final P2.1 implementation review. | Approved after one frontend status-contract correction and stronger rollback, uniqueness, and concurrency evidence; no P2.2 work. |
+| 2026-10-13 | Final targeted review and controlled commit of P3.4 + P3.1 foundation. | APPROVED; committed as `d936a3046358f195176e84fb3d08592f584393f9`, V25 only; no tag/push or later phase. |
+| 2026-10-13 | Prepare a compact agent-transfer package. | Documentation only; next Claude assignment is read-only Slice 2 planning, not implementation authorization. |
 
 ## Progress notes
 
 Use this section for concise updates after each implementation session.
+
+- 2026-10-13 current checkpoint: P2.1-P2.4 core and P3.4 + P3.1 foundation are
+  committed. Saved final gates: 937 backend, 452 frontend, 56 simulator passes
+  and 3 live-stack skips; fast/full PASS. R1 correction and U1/U2/U3 preservation
+  passed targeted review. Only the ticket's excess EOF newline was removed for
+  the final authorized commit; no code changed after those validation gates.
+  Frozen context is next; Scenario 66/C13 retirement/full arbitration stay open.
+  Agent-transfer docs are subsequent uncommitted documentation changes unless
+  the user separately authorizes their commit. Historical notes follow.
 
 - 2026-09-22: Roadmap document created. No roadmap phase implementation started.
 - 2026-10-02: P1.6 MQTT onboarding backend and P1.7 framework UI implemented

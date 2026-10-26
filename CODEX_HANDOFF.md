@@ -1,5 +1,26 @@
 # NEXUS — Handoff Notes (Claude Code session → continuing in Codex)
 
+## Current-state pointer (2026-10-13)
+
+This file preserves historical session notes. For a fresh Claude/other-agent
+session, read [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) and
+[NEXT_TASK.md](NEXT_TASK.md) first; [CLAUDE.md](CLAUDE.md) provides short operating
+instructions. Do not load all historical notes unless the current task needs them.
+
+The P3.4 + P3.1 foundation is committed on `main` at
+`d936a3046358f195176e84fb3d08592f584393f9`, after final targeted APPROVED review,
+with V25 as the only new migration. Saved final validation is 937 backend,
+452 frontend and 56 simulator passes plus 3 live-stack skips; fast/full PASS.
+P2.1-P2.4 core is already committed. Phase 3 remains incomplete (20 COVERED /
+52 PLANNED out of 72 scenarios); frozen context is next, planning first.
+
+Old statements such as "nothing committed", "P2.4 out of scope", "no Phase 3
+work" and earlier test counts describe their dated checkpoints, not today's
+implementation. The original frontend-timeout cause remains unknown; no physical
+convergence/arbitration/dry-run claim is inferred from software regression passes.
+This transfer package changes documentation only and is not another runtime commit.
+The historical content below is retained without rewriting its provenance.
+
 ## P1.1/P1.2 capability-definition foundation (2026-09-22)
 
 The current enum-backed runtime contract is frozen in
